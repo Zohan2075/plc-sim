@@ -1,0 +1,14 @@
+{
+  "name": "plc-sim",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter @plc-sim/ui dev",
+    "lint": "pnpm -r lint"
+  }
+}
