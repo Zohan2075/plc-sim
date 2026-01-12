@@ -2,3 +2,4 @@ packages:
   - "ui"
   - "plc-engine"
   - "ladder-types"
+  - "server"

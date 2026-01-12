@@ -9,6 +9,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "dev": "pnpm --filter @plc-sim/ui dev",
+    "start": "pnpm --filter @plc-sim/server start",
     "lint": "pnpm -r lint"
   }
 }
