@@ -1,76 +1,140 @@
-import { useMemo, useState } from "react";
-import { PlcEngine } from "@plc-sim/plc-engine";
+import { useEffect, useState } from "react";
 import type { Program } from "@plc-sim/ladder-types";
+import { PlcEngine } from "@plc-sim/plc-engine";
 
-import { LadderDisplay } from "../ladder-display/LadderDisplay";
-import { ControlPanel } from "../control-panel/ControlPanel";
-import { StatusDisplay } from "../status-display/StatusDisplay";
+import { DiagramBuilder } from "./DiagramBuilder";
+import {
+  captureInputValues,
+  type ProjectBundle
+} from "./projectData";
 
-const sampleProgram: Program = {
-  rungs: [
-    {
-      id: "r1",
-      instructions: [
-        { id: "i1", type: "XIC", tag: "I:0/0" },
-        { id: "i2", type: "OTE", tag: "O:0/0" }
-      ]
-    },
-    {
-      id: "r2",
-      instructions: [
-        { id: "i3", type: "XIC", tag: "O:0/0" },
-        { id: "i4", type: "OTE", tag: "B3:0/0" }
-      ]
+function buildBlankProject(): ProjectBundle {
+  return {
+    version: 1,
+    name: "Untitled simulator",
+    description: "Blank graphical simulator workspace.",
+    program: { rungs: [] },
+    tags: [
+      { name: "I:0/0", kind: "input", label: "Input" },
+      { name: "O:0/0", kind: "output", label: "Output" },
+      { name: "B3:0/0", kind: "internal", label: "Internal bit" }
+    ],
+    settings: { scanIntervalMs: 150 },
+    inputValues: { "I:0/0": false }
+  };
+}
+
+function buildEngine(project: ProjectBundle): PlcEngine {
+  const engine = new PlcEngine();
+
+  engine.loadProgram(project.program);
+
+  for (const tag of project.tags) {
+    if (tag.kind === "input") {
+      engine.setInput(tag.name, project.inputValues[tag.name] ?? tag.initialValue ?? false);
     }
-  ]
-};
+  }
+
+  engine.scanWithTrace();
+
+  return engine;
+}
 
 export function App() {
-  const engine = useMemo(() => new PlcEngine(), []);
+  const [builderProgram, setBuilderProgram] = useState<Program | null>(null);
+  const [project, setProject] = useState<ProjectBundle | null>(null);
+  const [engine, setEngine] = useState(() => new PlcEngine());
   const [running, setRunning] = useState(false);
   const [tick, setTick] = useState(0);
+  const [statusMessage, setStatusMessage] = useState("Preparing blank simulator...");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useMemo(() => {
-    engine.loadProgram(sampleProgram);
-  }, [engine]);
+  function applyProject(nextProject: ProjectBundle) {
+    setRunning(false);
+    setBuilderProgram(null);
+    setProject(nextProject);
+    setEngine(buildEngine(nextProject));
+    setTick(1);
+    setErrorMessage(null);
+  }
 
-  useMemo(() => {
-    if (!running) return;
+  useEffect(() => {
+    applyProject(buildBlankProject());
+    setStatusMessage("Blank simulator ready. Add devices only when you need them.");
+  }, []);
+
+  useEffect(() => {
+    if (!running || !project) {
+      return;
+    }
 
     const handle = window.setInterval(() => {
       engine.scanWithTrace();
       setTick((t) => t + 1);
-    }, 150);
+    }, project.settings.scanIntervalMs);
 
     return () => window.clearInterval(handle);
-  }, [engine, running]);
+  }, [engine, project, running]);
 
-  const trace = engine.getLastTrace();
+  function handleBuilderProgramChange(nextProgram: Program) {
+    setBuilderProgram(nextProgram);
+
+    if (!project) {
+      return;
+    }
+
+    const nextProject = {
+      ...project,
+      inputValues: captureInputValues(project.tags, (tagName) => engine.getTag(tagName)),
+      program: nextProgram
+    };
+
+    setRunning(false);
+    setEngine(buildEngine(nextProject));
+    setTick((currentTick) => (currentTick === 0 ? 1 : currentTick + 1));
+    setStatusMessage("Diagram updated. Press Run to simulate the current wiring.");
+    setErrorMessage(null);
+  }
+
+  const activeProject = project ? { ...project, program: builderProgram ?? project.program } : null;
+  const simulatorLabel = errorMessage ? "Blocked" : running ? "Running" : activeProject ? "Ready" : "Loading";
+  const simulatorMessage = errorMessage
+    ?? (activeProject
+      ? running
+        ? `Simulation is running every ${activeProject.settings.scanIntervalMs} ms.`
+        : "Press Run to simulate the current diagram."
+      : statusMessage);
+
+  function handleRunToggle() {
+    if (!activeProject) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setRunning((currentRunning) => {
+      const nextRunning = !currentRunning;
+      setStatusMessage(nextRunning ? "Simulation running." : "Simulation stopped.");
+      return nextRunning;
+    });
+  }
 
   return (
-    <div style={{ fontFamily: "system-ui", padding: 16, display: "grid", gap: 12 }}>
-      <h1 style={{ margin: 0, fontSize: 18 }}>PLC Sim (ANSI Ladder)</h1>
-      <ControlPanel
-        running={running}
-        onStart={() => setRunning(true)}
-        onStop={() => setRunning(false)}
-        onSingleScan={() => {
-          engine.scanWithTrace();
-          setTick((t) => t + 1);
-        }}
-      />
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-        <LadderDisplay program={sampleProgram} trace={trace} />
-        <StatusDisplay
+    <div className="app-shell app-shell--playground">
+      <main className="dashboard dashboard--playground">
+        <DiagramBuilder
+          onProgramChange={handleBuilderProgramChange}
+          program={project?.program}
+          runDisabled={!activeProject}
+          running={running}
+          scanIntervalMs={activeProject?.settings.scanIntervalMs ?? 150}
+          simulatorLabel={simulatorLabel}
+          simulatorMessage={simulatorMessage}
+          simulatorTone={errorMessage ? "error" : "info"}
+          tags={activeProject?.tags ?? []}
           tick={tick}
-          tags={["I:0/0", "O:0/0", "B3:0/0"]}
-          getTag={(tag) => engine.getTag(tag)}
-          setInput={(tag, value) => {
-            engine.setInput(tag, value);
-            setTick((t) => t + 1);
-          }}
+          onRunToggle={handleRunToggle}
         />
-      </div>
+      </main>
     </div>
   );
 }

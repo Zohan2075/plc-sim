@@ -1,0 +1,21 @@
+[
+  {
+    "name": "I:0/0",
+    "kind": "input",
+    "label": "Start PB",
+    "description": "Momentary input for the output deferral example.",
+    "initialValue": false
+  },
+  {
+    "name": "O:0/0",
+    "kind": "output",
+    "label": "Pilot Light",
+    "description": "Turns on after rung 1 commits at end-of-scan."
+  },
+  {
+    "name": "B3:0/0",
+    "kind": "internal",
+    "label": "Mirror Bit",
+    "description": "Demonstrates that rung 2 sees the prior scan state."
+  }
+]

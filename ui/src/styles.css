@@ -1,3 +1,118 @@
-html, body { height: 100%; }
-body { margin: 0; background: #fafafa; }
-button { padding: 6px 10px; }
+:root {
+	color-scheme: light;
+	--bg-canvas: #f0e8db;
+	--bg-canvas-deep: #e3d4c0;
+	--bg-surface: rgba(255, 250, 244, 0.82);
+	--bg-surface-strong: #fffdfa;
+	--bg-surface-muted: rgba(245, 237, 226, 0.9);
+	--border-strong: #c6aa86;
+	--border-muted: #e2d2bd;
+	--border-soft: #efe4d6;
+	--text-strong: #201814;
+	--text-muted: #6c594a;
+	--text-soft: #927d6a;
+	--brand: #b85b2c;
+	--brand-deep: #8d431d;
+	--accent: #274b69;
+	--accent-deep: #1c3449;
+	--success: #187a51;
+	--success-bg: #ebfbf2;
+	--danger: #b4432a;
+	--danger-bg: #fff0eb;
+	--warning: #8c5b10;
+	--warning-bg: #fff6e6;
+	--shadow-lg: 0 18px 40px rgba(71, 43, 23, 0.12);
+	--shadow-md: 0 10px 24px rgba(71, 43, 23, 0.08);
+	--radius-xl: 28px;
+	--radius-lg: 22px;
+	--radius-md: 18px;
+	--radius-sm: 14px;
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 20px;
+	--space-6: 24px;
+	--space-7: 32px;
+	--space-8: 40px;
+	--font-ui: "Segoe UI Variable", Aptos, "Segoe UI", sans-serif;
+	--font-display: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+	min-height: 100%;
+}
+
+html {
+	font-size: 16px;
+}
+
+body {
+	margin: 0;
+	font-family: var(--font-ui);
+	color: var(--text-strong);
+	background:
+		radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 36%),
+		linear-gradient(135deg, var(--bg-canvas) 0%, var(--bg-canvas-deep) 100%);
+}
+
+body::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	background-image:
+		linear-gradient(rgba(255, 255, 255, 0.22) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+	background-size: 32px 32px;
+	opacity: 0.28;
+	pointer-events: none;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+	font: inherit;
+}
+
+button {
+	border: 0;
+	background: none;
+}
+
+button,
+select,
+input {
+	border-radius: 999px;
+}
+
+button:disabled,
+select:disabled,
+input:disabled {
+	cursor: not-allowed;
+	opacity: 0.56;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+	outline: 3px solid rgba(39, 75, 105, 0.3);
+	outline-offset: 3px;
+}
+
+p,
+h1,
+h2,
+h3,
+h4,
+ol,
+ul {
+	margin-top: 0;
+}

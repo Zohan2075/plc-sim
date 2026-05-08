@@ -1,0 +1,25 @@
+{
+  "rungs": [
+    {
+      "id": "latch",
+      "instructions": [
+        { "id": "i1", "type": "XIC", "tag": "I:0/0" },
+        { "id": "i2", "type": "OTL", "tag": "B3:0/1" }
+      ]
+    },
+    {
+      "id": "unlatch",
+      "instructions": [
+        { "id": "i3", "type": "XIC", "tag": "I:0/1" },
+        { "id": "i4", "type": "OTU", "tag": "B3:0/1" }
+      ]
+    },
+    {
+      "id": "output",
+      "instructions": [
+        { "id": "i5", "type": "XIC", "tag": "B3:0/1" },
+        { "id": "i6", "type": "OTE", "tag": "O:0/1" }
+      ]
+    }
+  ]
+}

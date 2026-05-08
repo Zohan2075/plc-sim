@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "defaultProjectId": "output-deferral-demo",
+  "projects": [
+    {
+      "id": "output-deferral-demo",
+      "name": "Output Deferral Demo",
+      "description": "Shows that OTE writes commit at the end of the scan instead of mid-rung.",
+      "programPath": "/program-data/output-deferral-demo.program.json",
+      "tagDataPath": "/tag-data/output-deferral-demo.tags.json",
+      "settingsPath": "/settings/output-deferral-demo.settings.json"
+    },
+    {
+      "id": "latch-cycle-demo",
+      "name": "Latch Cycle Demo",
+      "description": "Exercises OTL and OTU behavior with a latched memory bit driving an output.",
+      "programPath": "/program-data/latch-cycle-demo.program.json",
+      "tagDataPath": "/tag-data/latch-cycle-demo.tags.json",
+      "settingsPath": "/settings/latch-cycle-demo.settings.json"
+    }
+  ]
+}

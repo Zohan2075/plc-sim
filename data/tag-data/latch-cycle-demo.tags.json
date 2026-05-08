@@ -1,0 +1,28 @@
+[
+  {
+    "name": "I:0/0",
+    "kind": "input",
+    "label": "Latch PB",
+    "description": "Sets the latched internal bit.",
+    "initialValue": false
+  },
+  {
+    "name": "I:0/1",
+    "kind": "input",
+    "label": "Unlatch PB",
+    "description": "Resets the latched internal bit.",
+    "initialValue": false
+  },
+  {
+    "name": "B3:0/1",
+    "kind": "internal",
+    "label": "Latched Bit",
+    "description": "Internal memory retained until OTU clears it."
+  },
+  {
+    "name": "O:0/1",
+    "kind": "output",
+    "label": "Latched Pilot",
+    "description": "Follows the latched internal bit."
+  }
+]

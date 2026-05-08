@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "id": "latch-cycle-demo",
+  "name": "Latch Cycle Demo",
+  "description": "Portable project bundle for import/export testing.",
+  "program": {
+    "rungs": [
+      {
+        "id": "latch",
+        "instructions": [
+          { "id": "i1", "type": "XIC", "tag": "I:0/0" },
+          { "id": "i2", "type": "OTL", "tag": "B3:0/1" }
+        ]
+      },
+      {
+        "id": "unlatch",
+        "instructions": [
+          { "id": "i3", "type": "XIC", "tag": "I:0/1" },
+          { "id": "i4", "type": "OTU", "tag": "B3:0/1" }
+        ]
+      },
+      {
+        "id": "output",
+        "instructions": [
+          { "id": "i5", "type": "XIC", "tag": "B3:0/1" },
+          { "id": "i6", "type": "OTE", "tag": "O:0/1" }
+        ]
+      }
+    ]
+  },
+  "tags": [
+    {
+      "name": "I:0/0",
+      "kind": "input",
+      "label": "Latch PB",
+      "description": "Sets the latched internal bit.",
+      "initialValue": false
+    },
+    {
+      "name": "I:0/1",
+      "kind": "input",
+      "label": "Unlatch PB",
+      "description": "Resets the latched internal bit.",
+      "initialValue": false
+    },
+    {
+      "name": "B3:0/1",
+      "kind": "internal",
+      "label": "Latched Bit",
+      "description": "Internal memory retained until OTU clears it."
+    },
+    {
+      "name": "O:0/1",
+      "kind": "output",
+      "label": "Latched Pilot",
+      "description": "Follows the latched internal bit."
+    }
+  ],
+  "settings": {
+    "scanIntervalMs": 150
+  },
+  "inputValues": {
+    "I:0/0": false,
+    "I:0/1": false
+  }
+}

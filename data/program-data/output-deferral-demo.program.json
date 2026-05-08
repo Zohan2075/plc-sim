@@ -1,0 +1,18 @@
+{
+  "rungs": [
+    {
+      "id": "r1",
+      "instructions": [
+        { "id": "i1", "type": "XIC", "tag": "I:0/0" },
+        { "id": "i2", "type": "OTE", "tag": "O:0/0" }
+      ]
+    },
+    {
+      "id": "r2",
+      "instructions": [
+        { "id": "i3", "type": "XIC", "tag": "O:0/0" },
+        { "id": "i4", "type": "OTE", "tag": "B3:0/0" }
+      ]
+    }
+  ]
+}
