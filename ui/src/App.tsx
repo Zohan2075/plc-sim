@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import type { Program } from "@plc-sim/ladder-types";
 import { PlcEngine } from "@plc-sim/plc-engine";
 
-import { DiagramBuilder } from "./DiagramBuilder";
+import { DiagramBuilder, type CircuitSnapshot } from "./DiagramBuilder";
 import {
   captureInputValues,
-  type ProjectBundle
+  type ProjectBundle,
+  type TagDefinition
 } from "./projectData";
 
 function buildBlankProject(): ProjectBundle {
@@ -49,9 +50,9 @@ export function App() {
   const [statusMessage, setStatusMessage] = useState("Preparing blank simulator...");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  function applyProject(nextProject: ProjectBundle) {
+  function applyProject(nextProject: ProjectBundle, nextBuilderProgram: Program | null = null) {
     setRunning(false);
-    setBuilderProgram(null);
+    setBuilderProgram(nextBuilderProgram);
     setProject(nextProject);
     setEngine(buildEngine(nextProject));
     setTick(1);
@@ -76,17 +77,20 @@ export function App() {
     return () => window.clearInterval(handle);
   }, [engine, project, running]);
 
-  function handleBuilderProgramChange(nextProgram: Program) {
+  function handleBuilderProgramChange(nextProgram: Program, nextTags?: TagDefinition[]) {
     setBuilderProgram(nextProgram);
 
     if (!project) {
       return;
     }
 
+    const resolvedTags = nextTags && nextTags.length > 0 ? nextTags : project.tags;
+
     const nextProject = {
       ...project,
-      inputValues: captureInputValues(project.tags, (tagName) => engine.getTag(tagName)),
+      inputValues: captureInputValues(resolvedTags, (tagName) => engine.getTag(tagName)),
       program: nextProgram
+      ,tags: resolvedTags
     };
 
     setRunning(false);
@@ -94,6 +98,23 @@ export function App() {
     setTick((currentTick) => (currentTick === 0 ? 1 : currentTick + 1));
     setStatusMessage("Diagram updated. Press Run to simulate the current wiring.");
     setErrorMessage(null);
+  }
+
+  function handleCircuitLoad(snapshot: CircuitSnapshot) {
+    const defaultProject = buildBlankProject();
+    const nextTags = snapshot.tags.length > 0 ? snapshot.tags : defaultProject.tags;
+    const nextProject: ProjectBundle = {
+      version: project?.version ?? defaultProject.version,
+      name: snapshot.name,
+      description: project?.description ?? "Loaded graphical circuit snapshot.",
+      program: snapshot.program,
+      tags: nextTags,
+      settings: { scanIntervalMs: snapshot.settings.scanIntervalMs },
+      inputValues: captureInputValues(nextTags, (tagName) => engine.getTag(tagName))
+    };
+
+    applyProject(nextProject, snapshot.program);
+    setStatusMessage(`Loaded ${snapshot.name}.`);
   }
 
   const activeProject = project ? { ...project, program: builderProgram ?? project.program } : null;
@@ -122,6 +143,7 @@ export function App() {
     <div className="app-shell app-shell--playground">
       <main className="dashboard dashboard--playground">
         <DiagramBuilder
+          onCircuitLoad={handleCircuitLoad}
           onProgramChange={handleBuilderProgramChange}
           program={project?.program}
           runDisabled={!activeProject}

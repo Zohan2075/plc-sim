@@ -1,4 +1,5 @@
 import {
+  type ChangeEvent as ReactChangeEvent,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -9,8 +10,9 @@ import {
 import type { InstructionType, Program } from "@plc-sim/ladder-types";
 import type { TagDefinition } from "./projectData";
 
-type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "POWER_SOURCE" | "LAMP" | "MOTOR";
-type BuilderMode = "move" | "pan" | "wire";
+type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
+type SourceCurrentType = "ac" | "dc";
+type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | SourceComponentType | "LAMP" | "MOTOR";
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
 type WireEndpointKey = "start" | "end";
@@ -67,6 +69,28 @@ interface BuilderScene {
   wires: BuilderWire[];
 }
 
+interface BuilderPlaneSettings {
+  gridSpacing: number;
+  height: number;
+  width: number;
+}
+
+export interface CircuitSnapshot {
+  components: BuilderComponent[];
+  name: string;
+  program: Program;
+  savedAt: string;
+  settings: {
+    gridSpacing: number;
+    height: number;
+    scanIntervalMs: number;
+    width: number;
+  };
+  tags: TagDefinition[];
+  version: number;
+  wires: BuilderWire[];
+}
+
 interface WireEndpointResolution {
   component: BuilderComponent | null;
   point: Point;
@@ -99,6 +123,8 @@ interface ElectricalState {
   componentVoltageById: Map<string, number>;
   energizedComponentIds: Set<string>;
   energizedNodeIds: Set<string>;
+  idleWireCurrentById: Map<string, SourceCurrentType>;
+  energizedWireCurrentById: Map<string, SourceCurrentType>;
   energizedWireIds: Set<string>;
 }
 
@@ -132,7 +158,8 @@ interface ElectricalNodeGraph {
 }
 
 interface DiagramBuilderProps {
-  onProgramChange?: (program: Program) => void;
+  onCircuitLoad?: (snapshot: CircuitSnapshot) => void;
+  onProgramChange?: (program: Program, tags: TagDefinition[]) => void;
   onRunToggle?: () => void;
   program?: Program | undefined;
   runDisabled?: boolean;
@@ -147,25 +174,60 @@ interface DiagramBuilderProps {
 
 const COMPONENT_WIDTH = 160;
 const COMPONENT_HEIGHT = 136;
-const CANVAS_WIDTH = 1720;
-const CANVAS_HEIGHT = 940;
+const COMPONENT_GLYPH_HEIGHT = 102;
+const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
+const SYMBOL_VIEWPORT_HEIGHT = 84;
+const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2;
+const SYMBOL_VIEWBOX_WIDTH = 128;
+const DEFAULT_PLANE_WIDTH = 1720;
+const DEFAULT_PLANE_HEIGHT = 940;
+const DEFAULT_GRID_SPACING = 24;
+const MIN_PLANE_WIDTH = 960;
+const MAX_PLANE_WIDTH = 4200;
+const MIN_PLANE_HEIGHT = 600;
+const MAX_PLANE_HEIGHT = 2400;
+const MIN_GRID_SPACING = 8;
+const MAX_GRID_SPACING = 96;
 const SNAP_DISTANCE = 18;
 const DEFAULT_WIRE_COLOR = "#c2410c";
 const DEFAULT_WIRE_THICKNESS = 4;
 const DEFAULT_SOURCE_VOLTAGE = 120;
+const DEFAULT_DC_SOURCE_VOLTAGE = 24;
+const BREAKER_CLICK_DELAY_MS = 220;
+const GENERATED_INSTRUCTION_TAG_PREFIX = "__builder_label__:";
+const CIRCUIT_SNAPSHOT_VERSION = 1;
 const ROTATION_CENTER_X = COMPONENT_WIDTH / 2;
-const ROTATION_CENTER_Y = 36;
+const ROTATION_CENTER_Y = COMPONENT_GLYPH_HEIGHT / 2;
+const DEFAULT_PLANE_SETTINGS: BuilderPlaneSettings = {
+  gridSpacing: DEFAULT_GRID_SPACING,
+  height: DEFAULT_PLANE_HEIGHT,
+  width: DEFAULT_PLANE_WIDTH
+};
+const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
+  "POWER_SOURCE",
+  "DC_SOURCE",
+  "BREAKER_1P",
+  "BREAKER_2P",
+  "LAMP",
+  "MOTOR",
+  "XIC",
+  "XIO",
+  "OTE",
+  "OTL",
+  "OTU"
+]);
+const circuitSnapshotTagKinds = new Set<TagDefinition["kind"]>(["input", "output", "internal"]);
 
 const instructionPalette: Array<{
   description: string;
   label: string;
   type: BuilderComponentType;
 }> = [
-  { type: "POWER_SOURCE", label: "Source", description: "L1/L2 control feed" },
+  { type: "POWER_SOURCE", label: "AC source", description: "Alternating source L1/L2" },
+  { type: "DC_SOURCE", label: "DC source", description: "Direct source + / -" },
   { type: "BREAKER_1P", label: "1P breaker", description: "Single-pole breaker" },
   { type: "BREAKER_2P", label: "2P breaker", description: "Two-pole breaker" },
   { type: "LAMP", label: "Lamp", description: "Indicator lamp load" },
-  { type: "MOTOR", label: "Motor", description: "Motor load" },
   { type: "XIC", label: "XIC", description: "Normally open contact" },
   { type: "XIO", label: "XIO", description: "Normally closed contact" },
   { type: "OTE", label: "OTE", description: "Output energize coil" },
@@ -187,6 +249,22 @@ function isCoilType(type: BuilderComponentType): type is "OTE" | "OTL" | "OTU" {
   return type === "OTE" || type === "OTL" || type === "OTU";
 }
 
+function isSourceType(type: BuilderComponentType): type is SourceComponentType {
+  return type === "POWER_SOURCE" || type === "DC_SOURCE";
+}
+
+function getSourceCurrentType(type: BuilderComponentType): SourceCurrentType | null {
+  if (type === "DC_SOURCE") {
+    return "dc";
+  }
+
+  if (type === "POWER_SOURCE") {
+    return "ac";
+  }
+
+  return null;
+}
+
 function isPassThroughType(type: BuilderComponentType): boolean {
   return type === "BREAKER_1P" || type === "BREAKER_2P" || type === "XIC" || type === "XIO";
 }
@@ -202,6 +280,7 @@ function isVisualLoadType(type: BuilderComponentType): boolean {
 function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "contact" | "coil" | "load" {
   switch (type) {
     case "POWER_SOURCE":
+    case "DC_SOURCE":
       return "power";
     case "BREAKER_1P":
     case "BREAKER_2P":
@@ -219,12 +298,46 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
   }
 }
 
+function getDefaultSourceVoltage(type: BuilderComponentType): number {
+  return type === "DC_SOURCE" ? DEFAULT_DC_SOURCE_VOLTAGE : DEFAULT_SOURCE_VOLTAGE;
+}
+
 function clampWireThickness(value: number): number {
   return clamp(Math.round(value), 2, 12);
 }
 
+function clampPlaneWidth(value: number): number {
+  return clamp(Math.round(value), MIN_PLANE_WIDTH, MAX_PLANE_WIDTH);
+}
+
+function clampPlaneHeight(value: number): number {
+  return clamp(Math.round(value), MIN_PLANE_HEIGHT, MAX_PLANE_HEIGHT);
+}
+
+function clampGridSpacing(value: number): number {
+  return clamp(Math.round(value), MIN_GRID_SPACING, MAX_GRID_SPACING);
+}
+
+function sanitizePlaneSettings(settings: Partial<BuilderPlaneSettings> | undefined): BuilderPlaneSettings {
+  return {
+    gridSpacing: clampGridSpacing(settings?.gridSpacing ?? DEFAULT_PLANE_SETTINGS.gridSpacing),
+    height: clampPlaneHeight(settings?.height ?? DEFAULT_PLANE_SETTINGS.height),
+    width: clampPlaneWidth(settings?.width ?? DEFAULT_PLANE_SETTINGS.width)
+  };
+}
+
 function getSourceVoltage(component: BuilderComponent): number {
-  return clamp(Math.round(component.sourceVoltage ?? DEFAULT_SOURCE_VOLTAGE), 1, 600);
+  return clamp(Math.round(component.sourceVoltage ?? getDefaultSourceVoltage(component.type)), 1, 600);
+}
+
+function formatSourceVoltage(component: BuilderComponent): string {
+  const sourceCurrentType = getSourceCurrentType(component.type);
+
+  if (!sourceCurrentType) {
+    return `${getSourceVoltage(component)}V`;
+  }
+
+  return `${getSourceVoltage(component)}V${sourceCurrentType.toUpperCase()}`;
 }
 
 function isBreakerClosed(component: BuilderComponent): boolean {
@@ -242,6 +355,12 @@ function getConductiveTerminalPairs(component: BuilderComponent): Array<[string,
     case "XIC":
     case "XIO":
       return [["in", "out"]];
+    case "LAMP":
+    case "MOTOR":
+    case "OTE":
+    case "OTL":
+    case "OTU":
+      return [["in", "out"]];
     default:
       return [];
   }
@@ -251,6 +370,8 @@ function getInstructionSymbol(type: BuilderComponentType): string {
   switch (type) {
     case "POWER_SOURCE":
       return "L1 ~ L2";
+    case "DC_SOURCE":
+      return "- DC +";
     case "BREAKER_1P":
       return "--/ CB1 --";
     case "BREAKER_2P":
@@ -275,7 +396,9 @@ function getInstructionSymbol(type: BuilderComponentType): string {
 function getComponentName(type: BuilderComponentType): string {
   switch (type) {
     case "POWER_SOURCE":
-      return "Power source";
+    return "AC source";
+    case "DC_SOURCE":
+    return "DC source";
     case "BREAKER_1P":
       return "Breaker 1P";
     case "BREAKER_2P":
@@ -287,6 +410,58 @@ function getComponentName(type: BuilderComponentType): string {
     default:
       return type;
   }
+}
+
+function normalizeInstructionLabel(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function isGeneratedInstructionTag(tag: string): boolean {
+  return tag.startsWith(GENERATED_INSTRUCTION_TAG_PREFIX);
+}
+
+function readGeneratedInstructionLabel(tag: string): string | null {
+  if (!isGeneratedInstructionTag(tag)) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(tag.slice(GENERATED_INSTRUCTION_TAG_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
+
+function createGeneratedInstructionTag(label: string): string {
+  const normalizedLabel = normalizeInstructionLabel(label);
+  const canonicalLabel = normalizedLabel === "" ? "UNNAMED" : normalizedLabel.toUpperCase();
+
+  return `${GENERATED_INSTRUCTION_TAG_PREFIX}${encodeURIComponent(canonicalLabel)}`;
+}
+
+function mergeInstructionBindingTags(tags: TagDefinition[], components: BuilderComponent[]): TagDefinition[] {
+  const preservedTags = tags.filter((tag) => !isGeneratedInstructionTag(tag.name));
+  const generatedTags = new Map<string, TagDefinition>();
+
+  for (const component of components) {
+    if (!componentNeedsTag(component.type) || !component.tag || !isGeneratedInstructionTag(component.tag)) {
+      continue;
+    }
+
+    const label = normalizeInstructionLabel(component.label)
+      || readGeneratedInstructionLabel(component.tag)
+      || getComponentName(component.type);
+
+    if (!generatedTags.has(component.tag)) {
+      generatedTags.set(component.tag, {
+        kind: "internal",
+        label,
+        name: component.tag
+      });
+    }
+  }
+
+  return [...preservedTags, ...generatedTags.values()];
 }
 
 function getDefaultComponentLabel(
@@ -301,6 +476,12 @@ function getDefaultComponentLabel(
       return tag.label;
     }
 
+    const generatedLabel = readGeneratedInstructionLabel(tagName);
+
+    if (generatedLabel) {
+      return generatedLabel;
+    }
+
     if (componentNeedsTag(type)) {
       return tagName;
     }
@@ -309,6 +490,8 @@ function getDefaultComponentLabel(
   switch (type) {
     case "POWER_SOURCE":
       return "L1-L2";
+		case "DC_SOURCE":
+		return "24VDC";
     case "BREAKER_1P":
       return "CB-1";
     case "BREAKER_2P":
@@ -322,44 +505,87 @@ function getDefaultComponentLabel(
   }
 }
 
+function projectSymbolPoint(x: number, y: number, viewBoxHeight: number): Point {
+  const scale = Math.min(
+    SYMBOL_VIEWPORT_WIDTH / SYMBOL_VIEWBOX_WIDTH,
+    SYMBOL_VIEWPORT_HEIGHT / viewBoxHeight
+  );
+  const offsetX = (SYMBOL_VIEWPORT_WIDTH - SYMBOL_VIEWBOX_WIDTH * scale) / 2;
+  const offsetY = SYMBOL_VIEWPORT_TOP + (SYMBOL_VIEWPORT_HEIGHT - viewBoxHeight * scale) / 2;
+
+  return roundPoint({
+    x: offsetX + x * scale,
+    y: offsetY + y * scale
+  });
+}
+
 function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[] {
   switch (type) {
     case "POWER_SOURCE":
+		case "DC_SOURCE": {
+      const leftTerminal = projectSymbolPoint(6, 32, 60);
+      const rightTerminal = projectSymbolPoint(122, 32, 60);
+
       return [
-        { id: "left", role: "source", x: 12, y: 40 },
-        { id: "right", role: "source", x: 148, y: 40 }
+        { id: "left", role: "source", x: leftTerminal.x, y: leftTerminal.y },
+        { id: "right", role: "source", x: rightTerminal.x, y: rightTerminal.y }
       ];
+    }
     case "BREAKER_1P":
+      {
+        const inputTerminal = projectSymbolPoint(6, 28, 64);
+        const outputTerminal = projectSymbolPoint(122, 28, 64);
+
       return [
-        { id: "in", pairId: "main", role: "input", x: 12, y: 40 },
-        { id: "out", pairId: "main", role: "output", x: 148, y: 40 }
+        { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
       ];
+      }
     case "BREAKER_2P":
+      {
+        const inputTopTerminal = projectSymbolPoint(6, 22, 74);
+        const outputTopTerminal = projectSymbolPoint(122, 22, 74);
+        const inputBottomTerminal = projectSymbolPoint(6, 52, 74);
+        const outputBottomTerminal = projectSymbolPoint(122, 52, 74);
+
       return [
-        { id: "in-top", pairId: "top", role: "input", x: 12, y: 28 },
-        { id: "out-top", pairId: "top", role: "output", x: 148, y: 28 },
-        { id: "in-bottom", pairId: "bottom", role: "input", x: 12, y: 56 },
-        { id: "out-bottom", pairId: "bottom", role: "output", x: 148, y: 56 }
+        { id: "in-top", pairId: "top", role: "input", x: inputTopTerminal.x, y: inputTopTerminal.y },
+        { id: "out-top", pairId: "top", role: "output", x: outputTopTerminal.x, y: outputTopTerminal.y },
+        { id: "in-bottom", pairId: "bottom", role: "input", x: inputBottomTerminal.x, y: inputBottomTerminal.y },
+        { id: "out-bottom", pairId: "bottom", role: "output", x: outputBottomTerminal.x, y: outputBottomTerminal.y }
       ];
+      }
     case "LAMP":
-    case "MOTOR":
+    case "MOTOR": {
+      const inputTerminal = projectSymbolPoint(6, 32, 64);
+      const outputTerminal = projectSymbolPoint(122, 32, 64);
+
       return [
-        { id: "in", pairId: "main", role: "input", x: 12, y: 40 },
-        { id: "out", pairId: "main", role: "end", x: 148, y: 40 }
+        { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", pairId: "main", role: "end", x: outputTerminal.x, y: outputTerminal.y }
       ];
+    }
     case "XIC":
-    case "XIO":
+    case "XIO": {
+      const inputTerminal = projectSymbolPoint(6, 30, 60);
+      const outputTerminal = projectSymbolPoint(122, 30, 60);
+
       return [
-        { id: "in", pairId: "main", role: "input", x: 12, y: 40 },
-        { id: "out", pairId: "main", role: "output", x: 148, y: 40 }
+        { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
       ];
+    }
     case "OTE":
     case "OTL":
-    case "OTU":
+    case "OTU": {
+      const inputTerminal = projectSymbolPoint(6, 30, 60);
+      const outputTerminal = projectSymbolPoint(122, 30, 60);
+
       return [
-        { id: "in", pairId: "main", role: "input", x: 12, y: 40 },
-        { id: "out", pairId: "main", role: "end", x: 148, y: 40 }
+        { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", pairId: "main", role: "end", x: outputTerminal.x, y: outputTerminal.y }
       ];
+    }
   }
 }
 
@@ -380,6 +606,7 @@ function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "OTL":
     case "OTU":
       return "in";
+    case "DC_SOURCE":
     case "POWER_SOURCE":
       return "left";
   }
@@ -387,6 +614,7 @@ function getDefaultEntryTerminalId(type: BuilderComponentType): string {
 
 function getDefaultExitTerminalId(type: BuilderComponentType): string {
   switch (type) {
+    case "DC_SOURCE":
     case "POWER_SOURCE":
       return "right";
     case "BREAKER_2P":
@@ -422,6 +650,16 @@ function renderSymbolGraphic(
           <path d="M50 32 Q55 18 60 32 Q65 46 70 32 Q75 18 78 32" className="diagram-symbol__line" />
         </svg>
       );
+    case "DC_SOURCE":
+      return (
+        <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
+          <line x1="6" y1="32" x2="42" y2="32" className="diagram-symbol__line" />
+          <line x1="86" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
+          <circle cx="64" cy="32" r="20" className="diagram-symbol__shape" />
+          <text x="55" y="37" textAnchor="middle" className="diagram-symbol__text">-</text>
+          <text x="73" y="37" textAnchor="middle" className="diagram-symbol__text">+</text>
+        </svg>
+      );
     case "BREAKER_1P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
@@ -443,30 +681,37 @@ function renderSymbolGraphic(
     case "BREAKER_2P":
       return (
         <svg viewBox="0 0 128 74" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="22" x2="36" y2="22" className="diagram-symbol__line" />
-          <line x1="92" y1="22" x2="122" y2="22" className="diagram-symbol__line" />
-          <circle cx="36" cy="22" r="4" className="diagram-symbol__fill" />
-          <circle cx="92" cy="22" r="4" className="diagram-symbol__fill" />
+          <line x1="6" y1="22" x2="34" y2="22" className="diagram-symbol__line" />
+          <line x1="96" y1="22" x2="122" y2="22" className="diagram-symbol__line" />
+          <circle cx="34" cy="22" r="4" className="diagram-symbol__fill" />
+          <circle cx="96" cy="22" r="4" className="diagram-symbol__fill" />
+          <line x1="6" y1="52" x2="34" y2="52" className="diagram-symbol__line" />
+          <line x1="96" y1="52" x2="122" y2="52" className="diagram-symbol__line" />
+          <circle cx="34" cy="52" r="4" className="diagram-symbol__fill" />
+          <circle cx="96" cy="52" r="4" className="diagram-symbol__fill" />
           <line
-            x1="40"
-            y1={options.breakerClosed ? "22" : "20"}
-            x2="88"
-            y2={options.breakerClosed ? "22" : "6"}
+            x1="38"
+            y1="22"
+            x2={options.breakerClosed ? "92" : "78"}
+            y2={options.breakerClosed ? "22" : "12"}
             className="diagram-symbol__line"
           />
-          <line x1="6" y1="52" x2="36" y2="52" className="diagram-symbol__line" />
-          <line x1="92" y1="52" x2="122" y2="52" className="diagram-symbol__line" />
-          <circle cx="36" cy="52" r="4" className="diagram-symbol__fill" />
-          <circle cx="92" cy="52" r="4" className="diagram-symbol__fill" />
           <line
-            x1="40"
-            y1={options.breakerClosed ? "52" : "50"}
-            x2="88"
-            y2={options.breakerClosed ? "52" : "36"}
+            x1="38"
+            y1="52"
+            x2={options.breakerClosed ? "92" : "78"}
+            y2={options.breakerClosed ? "52" : "42"}
             className="diagram-symbol__line"
           />
-          <rect x="46" y="24" width="36" height="28" rx="5" className="diagram-symbol__shape" />
-          <text x="64" y="41" textAnchor="middle" className="diagram-symbol__text">2P</text>
+          <line
+            x1={options.breakerClosed ? "66" : "78"}
+            y1={options.breakerClosed ? "22" : "12"}
+            x2={options.breakerClosed ? "66" : "78"}
+            y2={options.breakerClosed ? "52" : "42"}
+            className="diagram-symbol__line"
+          />
+          <line x1="56" y1="18" x2="72" y2="18" className="diagram-symbol__line" />
+          <line x1="56" y1="56" x2="72" y2="56" className="diagram-symbol__line" />
         </svg>
       );
     case "LAMP":
@@ -475,8 +720,7 @@ function renderSymbolGraphic(
           <line x1="6" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
           <line x1="90" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
           <circle cx="64" cy="32" r="22" className="diagram-symbol__shape" />
-          <path d="M50 18 L78 46 M78 18 L50 46" className="diagram-symbol__line" />
-          <path d="M54 50 C58 56 70 56 74 50" className="diagram-symbol__line" />
+          <path d="M48 16 L80 48 M80 16 L48 48" className="diagram-symbol__line" />
         </svg>
       );
     case "MOTOR":
@@ -485,11 +729,14 @@ function renderSymbolGraphic(
           <line x1="6" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
           <line x1="90" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
           <circle cx="64" cy="32" r="22" className="diagram-symbol__shape" />
-          <text x="64" y="37" textAnchor="middle" className="diagram-symbol__text">M</text>
+          <circle cx="64" cy="32" r="13" className="diagram-symbol__shape" />
           <g className="diagram-symbol__motor-rotor">
-            <path d="M64 12 A20 20 0 0 1 85 33" className="diagram-symbol__line" />
-            <path d="M78 25 L85 33 L75 33" className="diagram-symbol__line" />
+            <circle cx="64" cy="32" r="3.5" className="diagram-symbol__fill" />
+            <path d="M64 18 C71 20 76 25 77 31" className="diagram-symbol__line" />
+            <path d="M77 34 C73 42 66 46 58 45" className="diagram-symbol__line" />
+            <path d="M55 42 C50 36 50 28 55 22" className="diagram-symbol__line" />
           </g>
+          <text x="64" y="58" textAnchor="middle" className="diagram-symbol__text">M</text>
         </svg>
       );
     case "XIC":
@@ -569,6 +816,76 @@ function getPortId(componentId: string, terminalId: string): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function clampPointToPlane(point: Point, planeSettings: BuilderPlaneSettings, padding = 0): Point {
+  return {
+    x: clamp(point.x, padding, planeSettings.width - padding),
+    y: clamp(point.y, padding, planeSettings.height - padding)
+  };
+}
+
+function snapPointToGrid(point: Point, planeSettings: BuilderPlaneSettings): Point {
+  const gridSpacing = planeSettings.gridSpacing;
+
+  return clampPointToPlane(
+    {
+      x: Math.round(point.x / gridSpacing) * gridSpacing,
+      y: Math.round(point.y / gridSpacing) * gridSpacing
+    },
+    planeSettings
+  );
+}
+
+function clampComponentToPlane(component: BuilderComponent, planeSettings: BuilderPlaneSettings): BuilderComponent {
+  return {
+    ...component,
+    x: clamp(component.x, 16, planeSettings.width - COMPONENT_WIDTH - 16),
+    y: clamp(component.y, 16, planeSettings.height - COMPONENT_HEIGHT - 16)
+  };
+}
+
+function clampWireToPlane(wire: BuilderWire, planeSettings: BuilderPlaneSettings): BuilderWire {
+  return {
+    ...wire,
+    points: normalizeWirePoints(wire.points.map((point) => clampPointToPlane(point, planeSettings)))
+  };
+}
+
+function clampSceneToPlane(scene: BuilderScene, planeSettings: BuilderPlaneSettings): BuilderScene {
+  return {
+    components: scene.components.map((component) => clampComponentToPlane(component, planeSettings)),
+    wires: scene.wires.map((wire) => clampWireToPlane(wire, planeSettings))
+  };
+}
+
+function createOrthogonalPath(currentPoints: Point[], targetPoint: Point, planeSettings: BuilderPlaneSettings): Point[] {
+  if (currentPoints.length === 0) {
+    return [targetPoint];
+  }
+
+  const previousPoint = currentPoints[currentPoints.length - 1];
+
+  if (!previousPoint) {
+    return [targetPoint];
+  }
+
+  if (pointsAreClose(previousPoint, targetPoint)) {
+    return currentPoints;
+  }
+
+  if (previousPoint.x === targetPoint.x || previousPoint.y === targetPoint.y) {
+    return [...currentPoints, targetPoint];
+  }
+
+  const beforePreviousPoint = currentPoints[currentPoints.length - 2] ?? null;
+  const prefersVerticalFirst = beforePreviousPoint !== null && beforePreviousPoint.x === previousPoint.x;
+  const elbow = prefersVerticalFirst
+    ? { x: previousPoint.x, y: targetPoint.y }
+    : { x: targetPoint.x, y: previousPoint.y };
+  const snappedElbow = clampPointToPlane(elbow, planeSettings);
+
+  return normalizeWirePoints([...currentPoints, snappedElbow, targetPoint]);
 }
 
 function normalizeQuarterTurns(value: number): number {
@@ -675,6 +992,278 @@ function getElectricalPortNodeId(portId: string): string {
   return `port:${portId}`;
 }
 
+function slugifyFileName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "plc-sim-circuit";
+}
+
+function formatSnapshotTimestamp(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+
+  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+}
+
+function createCircuitSnapshot(
+  components: BuilderComponent[],
+  wires: BuilderWire[],
+  program: Program,
+  tags: TagDefinition[],
+  scanIntervalMs: number,
+  planeSettings: BuilderPlaneSettings
+): CircuitSnapshot {
+  const savedAt = new Date().toISOString();
+  const nextPlaneSettings = sanitizePlaneSettings(planeSettings);
+
+  return {
+    components: components.map((component) => ({ ...component })),
+    name: "PLC Sim circuit",
+    program,
+    savedAt,
+    settings: {
+      gridSpacing: nextPlaneSettings.gridSpacing,
+      height: nextPlaneSettings.height,
+      scanIntervalMs,
+      width: nextPlaneSettings.width
+    },
+    tags: tags.map((tag) => ({ ...tag })),
+    version: CIRCUIT_SNAPSHOT_VERSION,
+    wires: wires.map((wire) => ({ ...wire, points: wire.points.map((point) => ({ ...point })) }))
+  };
+}
+
+function downloadCircuitSnapshot(snapshot: CircuitSnapshot): void {
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = `${slugifyFileName(snapshot.name)}-${formatSnapshotTimestamp(new Date(snapshot.savedAt))}.circuit.json`;
+  anchor.click();
+
+  window.URL.revokeObjectURL(url);
+}
+
+function cloneScene(scene: BuilderScene): BuilderScene {
+  return {
+    components: scene.components.map((component) => ({ ...component })),
+    wires: scene.wires.map((wire) => ({
+      ...wire,
+      points: wire.points.map((point) => ({ ...point }))
+    }))
+  };
+}
+
+function getNextIdValueFromScene(scene: BuilderScene): number {
+  let maxId = -1;
+
+  for (const id of [...scene.components.map((component) => component.id), ...scene.wires.map((wire) => wire.id)]) {
+    const match = id.match(/(\d+)$/);
+
+    if (!match) {
+      continue;
+    }
+
+    maxId = Math.max(maxId, Number(match[1]));
+  }
+
+  return maxId + 1;
+}
+
+function expectCircuitSnapshotObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function expectCircuitSnapshotArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array.`);
+  }
+
+  return value;
+}
+
+function expectCircuitSnapshotString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function expectCircuitSnapshotNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function expectCircuitSnapshotBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`${label} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function expectCircuitSnapshotOptionalString(value: unknown, label: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return expectCircuitSnapshotString(value, label);
+}
+
+function expectCircuitSnapshotOptionalBoolean(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return expectCircuitSnapshotBoolean(value, label);
+}
+
+function expectCircuitSnapshotOptionalNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return expectCircuitSnapshotNumber(value, label);
+}
+
+function parseCircuitSnapshotPoint(value: unknown, label: string): Point {
+  const point = expectCircuitSnapshotObject(value, label);
+
+  return {
+    x: expectCircuitSnapshotNumber(point.x, `${label} x`),
+    y: expectCircuitSnapshotNumber(point.y, `${label} y`)
+  };
+}
+
+function parseCircuitSnapshotWire(value: unknown, index: number): BuilderWire {
+  const wire = expectCircuitSnapshotObject(value, `Circuit wire ${index}`);
+
+  return {
+    color: expectCircuitSnapshotString(wire.color, `Circuit wire ${index} color`),
+    id: expectCircuitSnapshotString(wire.id, `Circuit wire ${index} id`),
+    points: expectCircuitSnapshotArray(wire.points, `Circuit wire ${index} points`).map((point, pointIndex) =>
+      parseCircuitSnapshotPoint(point, `Circuit wire ${index} point ${pointIndex}`)
+    ),
+    thickness: expectCircuitSnapshotNumber(wire.thickness, `Circuit wire ${index} thickness`)
+  };
+}
+
+function parseCircuitSnapshotComponent(value: unknown, index: number): BuilderComponent {
+  const component = expectCircuitSnapshotObject(value, `Circuit component ${index}`);
+  const type = expectCircuitSnapshotString(component.type, `Circuit component ${index} type`);
+
+  if (!circuitSnapshotComponentTypes.has(type as BuilderComponentType)) {
+    throw new Error(`Circuit component ${index} type "${type}" is not supported.`);
+  }
+
+  const tagValue = component.tag;
+  const isClosed = expectCircuitSnapshotOptionalBoolean(component.isClosed, `Circuit component ${index} isClosed`);
+  const sourceVoltage = component.sourceVoltage !== undefined
+    ? expectCircuitSnapshotNumber(component.sourceVoltage, `Circuit component ${index} sourceVoltage`)
+    : undefined;
+
+  return {
+    id: expectCircuitSnapshotString(component.id, `Circuit component ${index} id`),
+    label: expectCircuitSnapshotString(component.label, `Circuit component ${index} label`),
+    rotation: expectCircuitSnapshotNumber(component.rotation, `Circuit component ${index} rotation`),
+    tag: tagValue === null ? null : expectCircuitSnapshotString(tagValue, `Circuit component ${index} tag`),
+    type: type as BuilderComponentType,
+    usesCustomLabel: expectCircuitSnapshotBoolean(component.usesCustomLabel, `Circuit component ${index} usesCustomLabel`),
+    x: expectCircuitSnapshotNumber(component.x, `Circuit component ${index} x`),
+    y: expectCircuitSnapshotNumber(component.y, `Circuit component ${index} y`),
+    ...(isClosed !== undefined ? { isClosed } : {}),
+    ...(sourceVoltage !== undefined ? { sourceVoltage } : {})
+  };
+}
+
+function parseCircuitSnapshotTags(value: unknown): TagDefinition[] {
+  return expectCircuitSnapshotArray(value, "Circuit tags").map((tag, index) => {
+    const parsedTag = expectCircuitSnapshotObject(tag, `Circuit tag ${index}`);
+    const kind = expectCircuitSnapshotString(parsedTag.kind, `Circuit tag ${index} kind`);
+    const label = expectCircuitSnapshotOptionalString(parsedTag.label, `Circuit tag ${index} label`);
+    const description = expectCircuitSnapshotOptionalString(parsedTag.description, `Circuit tag ${index} description`);
+    const initialValue = expectCircuitSnapshotOptionalBoolean(parsedTag.initialValue, `Circuit tag ${index} initialValue`);
+
+    if (!circuitSnapshotTagKinds.has(kind as TagDefinition["kind"])) {
+      throw new Error(`Circuit tag ${index} kind "${kind}" is not supported.`);
+    }
+
+    return {
+      name: expectCircuitSnapshotString(parsedTag.name, `Circuit tag ${index} name`),
+      kind: kind as TagDefinition["kind"],
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(initialValue !== undefined ? { initialValue } : {})
+    };
+  });
+}
+
+function parseCircuitSnapshotProgram(value: unknown): Program {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { rungs: [] };
+  }
+
+  return Array.isArray((value as { rungs?: unknown }).rungs) ? (value as Program) : { rungs: [] };
+}
+
+function parseCircuitSnapshot(value: unknown): CircuitSnapshot {
+  const snapshot = expectCircuitSnapshotObject(value, "Circuit snapshot");
+  const settings = expectCircuitSnapshotObject(snapshot.settings, "Circuit snapshot settings");
+  const scanIntervalMs = expectCircuitSnapshotNumber(settings.scanIntervalMs, "Circuit snapshot settings scanIntervalMs");
+  const width = expectCircuitSnapshotOptionalNumber(settings.width, "Circuit snapshot settings width");
+  const height = expectCircuitSnapshotOptionalNumber(settings.height, "Circuit snapshot settings height");
+  const gridSpacing = expectCircuitSnapshotOptionalNumber(settings.gridSpacing, "Circuit snapshot settings gridSpacing");
+
+  if (!Number.isInteger(scanIntervalMs) || scanIntervalMs < 25) {
+    throw new Error("Circuit snapshot scanIntervalMs must be an integer >= 25.");
+  }
+
+  const planeSettings = sanitizePlaneSettings({
+    ...(gridSpacing !== undefined ? { gridSpacing } : {}),
+    ...(height !== undefined ? { height } : {}),
+    ...(width !== undefined ? { width } : {})
+  });
+
+  return {
+    components: expectCircuitSnapshotArray(snapshot.components, "Circuit snapshot components").map((component, index) =>
+      parseCircuitSnapshotComponent(component, index)
+    ),
+    name: expectCircuitSnapshotString(snapshot.name, "Circuit snapshot name"),
+    program: parseCircuitSnapshotProgram(snapshot.program),
+    savedAt: expectCircuitSnapshotString(snapshot.savedAt, "Circuit snapshot savedAt"),
+    settings: {
+      gridSpacing: planeSettings.gridSpacing,
+      height: planeSettings.height,
+      scanIntervalMs,
+      width: planeSettings.width
+    },
+    tags: parseCircuitSnapshotTags(snapshot.tags),
+    version: expectCircuitSnapshotNumber(snapshot.version, "Circuit snapshot version"),
+    wires: expectCircuitSnapshotArray(snapshot.wires, "Circuit snapshot wires").map((wire, index) =>
+      parseCircuitSnapshotWire(wire, index)
+    )
+  };
+}
+
+async function readCircuitSnapshotFile(file: File): Promise<CircuitSnapshot> {
+  return parseCircuitSnapshot(JSON.parse(await file.text()));
+}
+
 function formatTerminalLabel(terminalId: string): string {
   return terminalId
     .split("-")
@@ -778,6 +1367,49 @@ function getComponentTerminals(component: BuilderComponent): BuilderTerminal[] {
   });
 }
 
+function moveAttachedWireEndpoints(
+  wires: BuilderWire[],
+  previousComponent: BuilderComponent,
+  nextComponent: BuilderComponent
+): BuilderWire[] {
+  const movedTerminalPoints = new Map(
+    getTerminalDefinitions(previousComponent.type).map((terminal) => [
+      getPointKey(getTerminalPoint(previousComponent, terminal.id)),
+      getTerminalPoint(nextComponent, terminal.id)
+    ])
+  );
+
+  return wires.map((wire) => {
+    if (wire.points.length === 0) {
+      return wire;
+    }
+
+    let didMove = false;
+    const nextPoints = wire.points.map((point) => {
+      const nextTerminalPoint = movedTerminalPoints.get(getPointKey(point));
+
+      if (!nextTerminalPoint || pointsAreClose(point, nextTerminalPoint)) {
+        return point;
+      }
+
+      didMove = true;
+      return nextTerminalPoint;
+    });
+
+    return didMove ? { ...wire, points: normalizeWirePoints(nextPoints) } : wire;
+  });
+}
+
+function getAttachedWireIds(component: BuilderComponent, wires: BuilderWire[]): Set<string> {
+  const terminalPointKeys = new Set(getComponentTerminals(component).map((terminal) => getPointKey(terminal)));
+
+  return new Set(
+    wires
+      .filter((wire) => wire.points.some((point) => terminalPointKeys.has(getPointKey(point))))
+      .map((wire) => wire.id)
+  );
+}
+
 function sortComponentsByPosition(left: BuilderComponent, right: BuilderComponent): number {
   if (left.y !== right.y) {
     return left.y - right.y;
@@ -865,7 +1497,7 @@ function inspectWire(wire: BuilderWire, components: BuilderComponent[]): WireIns
   };
 }
 
-function getDetachedWirePoint(points: Point[], endpoint: WireEndpointKey): Point | null {
+function getDetachedWirePoint(points: Point[], endpoint: WireEndpointKey, planeSettings: BuilderPlaneSettings): Point | null {
   const endpointIndex = endpoint === "start" ? 0 : points.length - 1;
   const neighborIndex = endpoint === "start" ? 1 : points.length - 2;
   const endpointPoint = points[endpointIndex];
@@ -886,10 +1518,14 @@ function getDetachedWirePoint(points: Point[], endpoint: WireEndpointKey): Point
   const distance = Math.hypot(dx, dy) || 1;
   const offset = SNAP_DISTANCE + 18;
 
-  return {
-    x: clamp(endpointPoint.x + (dx / distance) * offset, 12, CANVAS_WIDTH - 12),
-    y: clamp(endpointPoint.y + (dy / distance) * offset, 12, CANVAS_HEIGHT - 12)
-  };
+  return clampPointToPlane(
+    {
+      x: endpointPoint.x + (dx / distance) * offset,
+      y: endpointPoint.y + (dy / distance) * offset
+    },
+    planeSettings,
+    12
+  );
 }
 
 function snapPointToPort(point: Point, components: BuilderComponent[]): Point {
@@ -923,13 +1559,17 @@ function projectPointOntoSegment(point: Point, start: Point, end: Point): { dist
 function findNearestWireSegmentAnchor(
   point: Point,
   wires: BuilderWire[],
-  excludeWireId?: string
+  excludeWireId?: ReadonlySet<string> | string
 ): WireSegmentAnchor | null {
   let nearestAnchor: WireSegmentAnchor | null = null;
   let nearestDistance = SNAP_DISTANCE + 1;
 
   for (const wire of wires) {
-    if (wire.id === excludeWireId) {
+    const isExcluded = typeof excludeWireId === "string"
+      ? wire.id === excludeWireId
+      : excludeWireId?.has(wire.id) ?? false;
+
+    if (isExcluded) {
       continue;
     }
 
@@ -959,10 +1599,81 @@ function findNearestWireSegmentAnchor(
   return nearestAnchor;
 }
 
+function snapComponentToNearbyWire(
+  component: BuilderComponent,
+  wires: BuilderWire[],
+  excludeWireIds: ReadonlySet<string>,
+  planeSettings: BuilderPlaneSettings
+): BuilderComponent {
+  let snapOffset: Point | null = null;
+  let nearestDistance = SNAP_DISTANCE + 1;
+
+  for (const terminal of getComponentTerminals(component)) {
+    const terminalPoint = { x: terminal.x, y: terminal.y };
+    const anchor = findNearestWireSegmentAnchor(terminalPoint, wires, excludeWireIds);
+
+    if (!anchor) {
+      continue;
+    }
+
+    const distance = distanceBetween(terminalPoint, anchor.point);
+
+    if (distance >= nearestDistance) {
+      continue;
+    }
+
+    nearestDistance = distance;
+    snapOffset = {
+      x: anchor.point.x - terminalPoint.x,
+      y: anchor.point.y - terminalPoint.y
+    };
+  }
+
+  if (!snapOffset || (snapOffset.x === 0 && snapOffset.y === 0)) {
+    return component;
+  }
+
+  return {
+    ...component,
+    x: clamp(component.x + snapOffset.x, 16, planeSettings.width - COMPONENT_WIDTH - 16),
+    y: clamp(component.y + snapOffset.y, 16, planeSettings.height - COMPONENT_HEIGHT - 16)
+  };
+}
+
+function collectComponentTerminalWireAnchors(
+  component: BuilderComponent,
+  wires: BuilderWire[],
+  excludeWireIds: ReadonlySet<string>
+): WireSegmentAnchor[] {
+  const anchors: WireSegmentAnchor[] = [];
+  const seenAnchorKeys = new Set<string>();
+
+  for (const terminal of getComponentTerminals(component)) {
+    const terminalPoint = { x: terminal.x, y: terminal.y };
+    const anchor = findNearestWireSegmentAnchor(terminalPoint, wires, excludeWireIds);
+
+    if (!anchor || !pointsAreClose(terminalPoint, anchor.point)) {
+      continue;
+    }
+
+    const anchorKey = `${anchor.wireId}:${anchor.insertIndex}:${getPointKey(terminalPoint)}`;
+
+    if (seenAnchorKeys.has(anchorKey)) {
+      continue;
+    }
+
+    seenAnchorKeys.add(anchorKey);
+    anchors.push({ ...anchor, point: terminalPoint });
+  }
+
+  return anchors;
+}
+
 function resolveSnapTarget(
   point: Point,
   components: BuilderComponent[],
   wires: BuilderWire[],
+  planeSettings: BuilderPlaneSettings,
   excludeWireId?: string
 ): SnapTarget {
   const nearestPort = findNearestPort(point, components);
@@ -984,7 +1695,7 @@ function resolveSnapTarget(
   }
 
   return {
-    point: roundPoint(point),
+    point: snapPointToGrid(point, planeSettings),
     wireAnchor: null
   };
 }
@@ -1016,10 +1727,54 @@ function applyWireAnchor(currentWires: BuilderWire[], anchor: WireSegmentAnchor)
   );
 }
 
+function applyWireAnchors(currentWires: BuilderWire[], anchors: WireSegmentAnchor[]): BuilderWire[] {
+  if (anchors.length === 0) {
+    return currentWires;
+  }
+
+  const anchorsByWireId = new Map<string, WireSegmentAnchor[]>();
+
+  for (const anchor of anchors) {
+    const wireAnchors = anchorsByWireId.get(anchor.wireId);
+
+    if (wireAnchors) {
+      wireAnchors.push(anchor);
+    } else {
+      anchorsByWireId.set(anchor.wireId, [anchor]);
+    }
+  }
+
+  let didChange = false;
+
+  const nextWires = currentWires.map((wire) => {
+    const wireAnchors = anchorsByWireId.get(wire.id);
+
+    if (!wireAnchors || wireAnchors.length === 0) {
+      return wire;
+    }
+
+    let nextPoints = wire.points;
+
+    for (const wireAnchor of [...wireAnchors].sort((left, right) => right.insertIndex - left.insertIndex)) {
+      nextPoints = insertPointIntoWire(nextPoints, wireAnchor.insertIndex, wireAnchor.point);
+    }
+
+    if (nextPoints === wire.points) {
+      return wire;
+    }
+
+    didChange = true;
+    return { ...wire, points: nextPoints };
+  });
+
+  return didChange ? nextWires : currentWires;
+}
+
 function anchorWireEndpoints(
   points: Point[],
   components: BuilderComponent[],
   wires: BuilderWire[],
+  planeSettings: BuilderPlaneSettings,
   excludeWireId?: string
 ): { anchors: WireSegmentAnchor[]; points: Point[] } {
   const endpointIndices = [0, points.length - 1];
@@ -1033,7 +1788,7 @@ function anchorWireEndpoints(
       continue;
     }
 
-    const snapTarget = resolveSnapTarget(endpoint, components, wires, excludeWireId);
+    const snapTarget = resolveSnapTarget(endpoint, components, wires, planeSettings, excludeWireId);
     nextPoints[endpointIndex] = snapTarget.point;
 
     if (snapTarget.wireAnchor) {
@@ -1055,19 +1810,22 @@ function createCanvasComponent(
   y: number,
   tagOverride?: string | null
 ): BuilderComponent {
-  const resolvedTag = componentNeedsTag(type) ? tagOverride ?? getDefaultTag(type, availableTags) : null;
+  const resolvedLabel = getDefaultComponentLabel(type, availableTags, tagOverride ?? null);
+  const resolvedTag = componentNeedsTag(type)
+    ? tagOverride ?? createGeneratedInstructionTag(resolvedLabel)
+    : null;
 
   return {
     id: createId(nextId, "builder-component"),
-    isClosed: isBreakerType(type) ? false : undefined,
     label: getDefaultComponentLabel(type, availableTags, resolvedTag),
     rotation: 0,
-    sourceVoltage: type === "POWER_SOURCE" ? DEFAULT_SOURCE_VOLTAGE : undefined,
     tag: resolvedTag,
     type,
     usesCustomLabel: false,
     x,
-    y
+    y,
+    ...(isBreakerType(type) ? { isClosed: false } : {}),
+    ...(isSourceType(type) ? { sourceVoltage: getDefaultSourceVoltage(type) } : {})
   };
 }
 
@@ -1191,6 +1949,29 @@ function cloneConnections(connections: Map<string, Set<string>>): Map<string, Se
   );
 }
 
+function collectReachableNodes(connections: Map<string, Set<string>>, startNodeId: string): Set<string> {
+  const visited = new Set<string>();
+  const queue = [startNodeId];
+
+  while (queue.length > 0) {
+    const currentNodeId = queue.shift();
+
+    if (!currentNodeId || visited.has(currentNodeId)) {
+      continue;
+    }
+
+    visited.add(currentNodeId);
+
+    for (const nextNodeId of connections.get(currentNodeId) ?? []) {
+      if (!visited.has(nextNodeId)) {
+        queue.push(nextNodeId);
+      }
+    }
+  }
+
+  return visited;
+}
+
 function buildResolvedPortGraph(components: BuilderComponent[], wires: BuilderWire[]): ResolvedPortGraph {
   const ports = components.flatMap((component) => getComponentTerminals(component));
   const portsById = new Map(ports.map((port) => [port.portId, port]));
@@ -1282,7 +2063,7 @@ function collectRungPaths(
   for (const connectedPort of connectedPorts) {
     const component = componentsById.get(connectedPort.componentId);
 
-    if (!component || visitedComponents.has(component.id) || component.type === "POWER_SOURCE") {
+    if (!component || visitedComponents.has(component.id) || isSourceType(component.type)) {
       continue;
     }
 
@@ -1334,7 +2115,7 @@ function deriveProgram(components: BuilderComponent[], wires: BuilderWire[]): De
   const sourcePorts = ports
     .filter((port) => {
       const component = componentsById.get(port.componentId);
-      return component?.type === "POWER_SOURCE" && port.role === "source";
+      return component !== undefined && isSourceType(component.type) && port.role === "source";
     })
     .sort(sortPortsByPosition);
   const rungInstructionLists: Array<Array<{ tag: string; type: InstructionType }>> = [];
@@ -1378,6 +2159,8 @@ function computeElectricalState(
     componentVoltageById: new Map(),
     energizedComponentIds: new Set(),
     energizedNodeIds: new Set(),
+    idleWireCurrentById: new Map(),
+    energizedWireCurrentById: new Map(),
     energizedWireIds: new Set()
   };
 
@@ -1401,60 +2184,75 @@ function computeElectricalState(
   const energizedNodeIds = new Set<string>();
   const energizedComponentIds = new Set<string>();
   const componentVoltageById = new Map<string, number>();
+  const idleWireCurrentById = new Map<string, SourceCurrentType>();
+  const energizedWireCurrentById = new Map<string, SourceCurrentType>();
 
   for (const component of components) {
-    if (component.type !== "POWER_SOURCE") {
+    if (!isSourceType(component.type)) {
       continue;
     }
 
     const sourceVoltage = getSourceVoltage(component);
-    const hotPortId = getElectricalPortNodeId(getPortId(component.id, "right"));
-    const visited = new Set<string>();
-    const queue = electricalConnections.has(hotPortId) ? [hotPortId] : [];
+    const leftPortId = getElectricalPortNodeId(getPortId(component.id, "left"));
+    const rightPortId = getElectricalPortNodeId(getPortId(component.id, "right"));
+    const leftReachable = collectReachableNodes(electricalConnections, leftPortId);
+    const rightReachable = collectReachableNodes(electricalConnections, rightPortId);
+    const sourceReachableNodes = new Set<string>([...leftReachable, ...rightReachable]);
+    const liveLoopNodes = new Set<string>([...leftReachable].filter((nodeId) => rightReachable.has(nodeId)));
+    const sourceCurrentType = getSourceCurrentType(component.type) ?? "ac";
 
     componentVoltageById.set(component.id, sourceVoltage);
     energizedComponentIds.add(component.id);
 
-    while (queue.length > 0) {
-      const currentPortId = queue.shift();
+    for (const nodeId of liveLoopNodes) {
+      energizedNodeIds.add(nodeId);
 
-      if (!currentPortId || visited.has(currentPortId)) {
+      const currentPort = nodeId.startsWith("port:")
+        ? portsById.get(nodeId.slice(5))
+        : undefined;
+
+      if (!currentPort) {
         continue;
       }
 
-      visited.add(currentPortId);
-      energizedNodeIds.add(currentPortId);
+      const previousVoltage = componentVoltageById.get(currentPort.componentId) ?? 0;
+      componentVoltageById.set(currentPort.componentId, Math.max(previousVoltage, sourceVoltage));
+      energizedComponentIds.add(currentPort.componentId);
+    }
 
-      const currentPort = currentPortId.startsWith("port:")
-        ? portsById.get(currentPortId.slice(5))
-        : undefined;
+    for (const [wireId, nodeIds] of wireNodeIdsByWire.entries()) {
+      const touchesSource = nodeIds.some((nodeId) => sourceReachableNodes.has(nodeId));
 
-      if (currentPort) {
-        const previousVoltage = componentVoltageById.get(currentPort.componentId) ?? 0;
-        componentVoltageById.set(currentPort.componentId, Math.max(previousVoltage, sourceVoltage));
-        energizedComponentIds.add(currentPort.componentId);
+      if (!touchesSource) {
+        continue;
       }
 
-      for (const neighborPortId of electricalConnections.get(currentPortId) ?? []) {
-        if (!visited.has(neighborPortId)) {
-          queue.push(neighborPortId);
+      if (nodeIds.some((nodeId) => liveLoopNodes.has(nodeId))) {
+        if (!energizedWireCurrentById.has(wireId)) {
+          energizedWireCurrentById.set(wireId, sourceCurrentType);
         }
+
+        continue;
+      }
+
+      if (!idleWireCurrentById.has(wireId)) {
+        idleWireCurrentById.set(wireId, sourceCurrentType);
       }
     }
   }
 
-  const energizedWireIds = new Set<string>();
-
-  for (const [wireId, nodeIds] of wireNodeIdsByWire.entries()) {
-    if (nodeIds.some((nodeId) => energizedNodeIds.has(nodeId))) {
-      energizedWireIds.add(wireId);
-    }
+  for (const wireId of energizedWireCurrentById.keys()) {
+    idleWireCurrentById.delete(wireId);
   }
+
+  const energizedWireIds = new Set(energizedWireCurrentById.keys());
 
   return {
     componentVoltageById,
     energizedComponentIds,
     energizedNodeIds,
+    idleWireCurrentById,
+    energizedWireCurrentById,
     energizedWireIds
   };
 }
@@ -1474,8 +2272,8 @@ function getComponentLabelRowStyle(rotation: number): CSSProperties {
 }
 
 function getComponentStatusBadge(component: BuilderComponent, running: boolean, energized: boolean): string | null {
-  if (component.type === "POWER_SOURCE") {
-    return `${getSourceVoltage(component)}V`;
+  if (isSourceType(component.type)) {
+    return formatSourceVoltage(component);
   }
 
   if (isBreakerType(component.type)) {
@@ -1499,6 +2297,7 @@ function getComponentStatusBadge(component: BuilderComponent, running: boolean, 
 
 export function DiagramBuilder(props: DiagramBuilderProps) {
   const {
+    onCircuitLoad,
     onProgramChange,
     onRunToggle,
     program,
@@ -1513,9 +2312,18 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   } = props;
   const availableTags = tags.length > 0 ? tags : fallbackTags;
   const nextId = useRef(0);
+
   const canvasRef = useRef<HTMLDivElement>(null);
+  const circuitFileInputRef = useRef<HTMLInputElement>(null);
   const stageScrollRef = useRef<HTMLDivElement>(null);
   const componentsRef = useRef<BuilderComponent[]>([]);
+  const wiresRef = useRef<BuilderWire[]>([]);
+  const pendingLoadedSceneRef = useRef<{
+    planeSettings: BuilderPlaneSettings;
+    scene: BuilderScene;
+    signature: string;
+  } | null>(null);
+  const planeSettingsRef = useRef<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
   const componentDragMovedRef = useRef(false);
   const dragState = useRef<{
     componentId: string;
@@ -1529,9 +2337,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     startY: number;
   } | null>(null);
   const wirePointDragState = useRef<WirePointDragState | null>(null);
+  const pendingBreakerClickRef = useRef<{
+    componentId: string;
+    timeoutId: number;
+  } | null>(null);
   const lastProgramSignature = useRef(JSON.stringify({ rungs: [] }));
   const [components, setComponents] = useState<BuilderComponent[]>([]);
   const [wires, setWires] = useState<BuilderWire[]>([]);
+  const [planeSettings, setPlaneSettings] = useState<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
   const [draftWirePoints, setDraftWirePoints] = useState<Point[]>([]);
   const [wireColor, setWireColor] = useState(DEFAULT_WIRE_COLOR);
   const [wireThickness, setWireThickness] = useState(DEFAULT_WIRE_THICKNESS);
@@ -1539,15 +2352,34 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     endpoint: WireEndpointKey;
     wireId: string;
   } | null>(null);
-  const [mode, setMode] = useState<BuilderMode>("move");
+  const [isWireAuthoringEnabled, setIsWireAuthoringEnabled] = useState(true);
+  const [isPanModeEnabled, setIsPanModeEnabled] = useState(false);
   const [selection, setSelection] = useState<BuilderSelection>(null);
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const [circuitSnapshotStatus, setCircuitSnapshotStatus] = useState<string | null>(null);
+  const builderTags = mergeInstructionBindingTags(availableTags, components);
+  const builderTagsSignature = JSON.stringify(builderTags);
 
   useEffect(() => {
     componentsRef.current = components;
   }, [components]);
+
+  useEffect(() => {
+    wiresRef.current = wires;
+  }, [wires]);
+
+  useEffect(() => {
+    planeSettingsRef.current = planeSettings;
+  }, [planeSettings]);
+
+  useEffect(() => () => {
+    if (pendingBreakerClickRef.current) {
+      window.clearTimeout(pendingBreakerClickRef.current.timeoutId);
+      pendingBreakerClickRef.current = null;
+    }
+  }, []);
 
   function getCanvasPointFromClient(clientX: number, clientY: number): Point | null {
     const canvas = canvasRef.current;
@@ -1559,25 +2391,113 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const bounds = canvas.getBoundingClientRect();
 
     return {
-      x: clamp(clientX - bounds.left, 0, CANVAS_WIDTH),
-      y: clamp(clientY - bounds.top, 0, CANVAS_HEIGHT)
+      x: clamp(clientX - bounds.left, 0, planeSettingsRef.current.width),
+      y: clamp(clientY - bounds.top, 0, planeSettingsRef.current.height)
     };
+  }
+
+  function clearWireInteraction() {
+    setDraftWirePoints([]);
+    setCursorPoint(null);
+    setWireReconnectTarget(null);
+  }
+
+  function queueCurrentSceneForProgramSync(programSignature: string) {
+    pendingLoadedSceneRef.current = {
+      planeSettings: planeSettingsRef.current,
+      scene: cloneScene({ components: componentsRef.current, wires: wiresRef.current }),
+      signature: programSignature
+    };
+  }
+
+  function buildNextDraftPoints(currentPoints: Point[], point: Point): Point[] {
+    const snappedPoint = resolveSnapTarget(
+      point,
+      componentsRef.current,
+      wiresRef.current,
+      planeSettingsRef.current
+    ).point;
+
+    return createOrthogonalPath(currentPoints, snappedPoint, planeSettingsRef.current);
+  }
+
+  function commitWireFromPoints(nextPointsInput: Point[]) {
+    const nextPoints = normalizeWirePoints(nextPointsInput.map(roundPoint));
+
+    if (nextPoints.length < 2) {
+      return;
+    }
+
+    const wireId = createId(nextId, "builder-wire");
+
+    setWires((currentWires) => {
+      const { anchors, points } = anchorWireEndpoints(
+        nextPoints,
+        componentsRef.current,
+        currentWires,
+        planeSettingsRef.current
+      );
+      const nextWires = applyWireAnchors(currentWires, anchors);
+
+      return [
+        ...nextWires,
+        { color: wireColor, id: wireId, points, thickness: wireThickness }
+      ];
+    });
+    setSelection({ kind: "wire", id: wireId });
+    setDraftWirePoints([]);
+    setCursorPoint(null);
+    setHasCustomLayout(true);
+  }
+
+  function applySceneState(
+    nextScene: BuilderScene,
+    nextProgramSignature: string,
+    customLayout: boolean,
+    nextPlaneSettings: BuilderPlaneSettings = planeSettingsRef.current
+  ) {
+    const resolvedPlaneSettings = sanitizePlaneSettings(nextPlaneSettings);
+    const resolvedScene = clampSceneToPlane(cloneScene(nextScene), resolvedPlaneSettings);
+
+    nextId.current = getNextIdValueFromScene(resolvedScene);
+    planeSettingsRef.current = resolvedPlaneSettings;
+    componentsRef.current = resolvedScene.components;
+    wiresRef.current = resolvedScene.wires;
+    setPlaneSettings(resolvedPlaneSettings);
+    setComponents(resolvedScene.components);
+    setWires(resolvedScene.wires);
+    clearWireInteraction();
+    setSelection(null);
+    setIsWireAuthoringEnabled(true);
+    setIsPanModeEnabled(false);
+    panState.current = null;
+    dragState.current = null;
+    wirePointDragState.current = null;
+    componentDragMovedRef.current = false;
+    setIsPanning(false);
+    setHasCustomLayout(customLayout);
+    lastProgramSignature.current = nextProgramSignature;
   }
 
   useEffect(() => {
     nextId.current = 0;
-    const nextScene = buildSceneFromProgram(nextId, availableTags, program);
+    const pendingLoadedScene = pendingLoadedSceneRef.current;
+    const nextProgramSignature = JSON.stringify(program ?? { rungs: [] });
+    const shouldUsePendingScene = pendingLoadedScene !== null && pendingLoadedScene.signature === nextProgramSignature;
+    const nextPlaneSettings = shouldUsePendingScene
+      ? pendingLoadedScene.planeSettings
+      : planeSettingsRef.current;
+    const nextAvailableTags = mergeInstructionBindingTags(availableTags, componentsRef.current);
+    const nextScene = shouldUsePendingScene
+      ? cloneScene(pendingLoadedScene.scene)
+      : buildSceneFromProgram(nextId, nextAvailableTags, program);
     const nextDerivedState = deriveProgram(nextScene.components, nextScene.wires);
 
-    setComponents(nextScene.components);
-    setWires(nextScene.wires);
-    setDraftWirePoints([]);
-    setSelection(null);
-    setMode("move");
-    setCursorPoint(null);
-    setWireReconnectTarget(null);
-    setHasCustomLayout(false);
-    lastProgramSignature.current = JSON.stringify(nextDerivedState.program);
+    if (shouldUsePendingScene) {
+      pendingLoadedSceneRef.current = null;
+    }
+
+    applySceneState(nextScene, JSON.stringify(nextDerivedState.program), shouldUsePendingScene, nextPlaneSettings);
   }, [availableTags, program]);
 
   useEffect(() => {
@@ -1611,8 +2531,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             }
 
             const nextPoint = isWireEndpointIndex(pointIndex, wire.points.length)
-              ? snapPointToPort(point, componentsRef.current)
-              : point;
+              ? resolveSnapTarget(
+                point,
+                componentsRef.current,
+                currentWires,
+                planeSettingsRef.current,
+                wire.id
+              ).point
+              : snapPointToGrid(point, planeSettingsRef.current);
 
             if (pointsAreClose(currentPoint, nextPoint)) {
               return wire;
@@ -1646,24 +2572,45 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
       let didMove = false;
 
-      setComponents((currentComponents) =>
-        currentComponents.map((component) => {
-          if (component.id !== dragState.current?.componentId) {
-            return component;
-          }
+      const movedComponent = componentsRef.current.find((component) => component.id === dragState.current?.componentId);
 
-          const nextX = clamp(point.x - dragState.current.offsetX, 16, CANVAS_WIDTH - COMPONENT_WIDTH - 16);
-          const nextY = clamp(point.y - dragState.current.offsetY, 16, CANVAS_HEIGHT - COMPONENT_HEIGHT - 16);
+      if (!movedComponent) {
+        return;
+      }
 
-          if (nextX === component.x && nextY === component.y) {
-            return component;
-          }
-
-          didMove = true;
-          componentDragMovedRef.current = true;
-          return { ...component, x: nextX, y: nextY };
-        })
+      const nextX = clamp(
+        point.x - dragState.current.offsetX,
+        16,
+        planeSettingsRef.current.width - COMPONENT_WIDTH - 16
       );
+      const nextY = clamp(
+        point.y - dragState.current.offsetY,
+        16,
+        planeSettingsRef.current.height - COMPONENT_HEIGHT - 16
+      );
+
+      if (nextX === movedComponent.x && nextY === movedComponent.y) {
+        return;
+      }
+
+      const attachedWireIds = getAttachedWireIds(movedComponent, wiresRef.current);
+      const nextComponent = snapComponentToNearbyWire(
+        { ...movedComponent, x: nextX, y: nextY },
+        wiresRef.current,
+        attachedWireIds,
+        planeSettingsRef.current
+      );
+      const nextComponents = componentsRef.current.map((component) =>
+        component.id === nextComponent.id ? nextComponent : component
+      );
+      const nextWires = moveAttachedWireEndpoints(wiresRef.current, movedComponent, nextComponent);
+
+      componentsRef.current = nextComponents;
+      wiresRef.current = nextWires;
+      setComponents(nextComponents);
+      setWires(nextWires);
+      didMove = true;
+      componentDragMovedRef.current = true;
 
       if (didMove) {
         setHasCustomLayout(true);
@@ -1671,6 +2618,26 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     function handleMouseUp() {
+      const releasedDragState = dragState.current;
+
+      if (releasedDragState) {
+        const releasedComponent = componentsRef.current.find((component) => component.id === releasedDragState.componentId);
+
+        if (releasedComponent) {
+          const attachedWireIds = getAttachedWireIds(releasedComponent, wiresRef.current);
+          const nextWires = applyWireAnchors(
+            wiresRef.current,
+            collectComponentTerminalWireAnchors(releasedComponent, wiresRef.current, attachedWireIds)
+          );
+
+          if (nextWires !== wiresRef.current) {
+            wiresRef.current = nextWires;
+            setWires(nextWires);
+            setHasCustomLayout(true);
+          }
+        }
+      }
+
       panState.current = null;
       setIsPanning(false);
       dragState.current = null;
@@ -1697,6 +2664,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     : null;
   const selectedWireInspection = selectedWire ? inspectWire(selectedWire, components) : null;
   const selectedWireStatus = selectedWireInspection ? getWireStatusMeta(selectedWireInspection.status) : null;
+  const hasActiveWireDraft = draftWirePoints.length > 0;
+  const wireTerminalsEnabled = isWireAuthoringEnabled || wireReconnectTarget !== null;
+  const isWirePointerPreviewVisible = wireTerminalsEnabled && (hasActiveWireDraft || wireReconnectTarget !== null);
+  const canvasStyle: CSSProperties = {
+    backgroundSize: `${planeSettings.gridSpacing}px ${planeSettings.gridSpacing}px, ${planeSettings.gridSpacing}px ${planeSettings.gridSpacing}px, auto`,
+    height: planeSettings.height,
+    width: planeSettings.width
+  };
   const previewPoints = draftWirePoints.length > 0 && cursorPoint !== null
     ? [...draftWirePoints, cursorPoint]
     : draftWirePoints;
@@ -1713,16 +2688,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    queueCurrentSceneForProgramSync(derivedProgramSignature);
     lastProgramSignature.current = derivedProgramSignature;
-    onProgramChange(derivedState.program);
-  }, [derivedProgramSignature, derivedState.program, hasCustomLayout, onProgramChange]);
+    onProgramChange(derivedState.program, builderTags);
+  }, [builderTags, builderTagsSignature, derivedProgramSignature, derivedState.program, hasCustomLayout, onProgramChange]);
 
   function createComponent(type: BuilderComponentType): BuilderComponent {
     const componentIndex = components.length;
 
     return createCanvasComponent(
       nextId,
-      availableTags,
+      builderTags,
       type,
       88 + (componentIndex % 5) * 188,
       112 + Math.floor(componentIndex / 5) * 152
@@ -1730,35 +2706,55 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function appendDraftPoint(point: Point) {
-    const snappedPoint = resolveSnapTarget(point, components, wires).point;
-
-    setDraftWirePoints((currentPoints) => {
-      const previousPoint = currentPoints[currentPoints.length - 1];
-
-      if (previousPoint && pointsAreClose(previousPoint, snappedPoint)) {
-        return currentPoints;
-      }
-
-      return [...currentPoints, snappedPoint];
-    });
+    setDraftWirePoints((currentPoints) => buildNextDraftPoints(currentPoints, point));
   }
 
-  function activateMoveMode() {
-    setMode("move");
-    setDraftWirePoints([]);
-    setCursorPoint(null);
-    panState.current = null;
-    setIsPanning(false);
-    setWireReconnectTarget(null);
+  function toggleWireAuthoring() {
+    if (isWireAuthoringEnabled) {
+      clearWireInteraction();
+    }
+
+    setIsWireAuthoringEnabled((currentValue) => !currentValue);
   }
 
-  function activatePanMode() {
-    setMode("pan");
-    setDraftWirePoints([]);
-    setCursorPoint(null);
+  function togglePanMode() {
+    if (isPanModeEnabled) {
+      panState.current = null;
+      setIsPanning(false);
+    }
+
     dragState.current = null;
     wirePointDragState.current = null;
-    setWireReconnectTarget(null);
+    setIsPanModeEnabled((currentValue) => !currentValue);
+  }
+
+  function updatePlaneDimensions(nextPartialSettings: Partial<BuilderPlaneSettings>) {
+    const nextPlaneSettings = sanitizePlaneSettings({
+      ...planeSettingsRef.current,
+      ...nextPartialSettings
+    });
+
+    if (
+      nextPlaneSettings.width === planeSettingsRef.current.width
+      && nextPlaneSettings.height === planeSettingsRef.current.height
+      && nextPlaneSettings.gridSpacing === planeSettingsRef.current.gridSpacing
+    ) {
+      return;
+    }
+
+    const nextScene = clampSceneToPlane(
+      { components: componentsRef.current, wires: wiresRef.current },
+      nextPlaneSettings
+    );
+
+    planeSettingsRef.current = nextPlaneSettings;
+    componentsRef.current = nextScene.components;
+    wiresRef.current = nextScene.wires;
+    setPlaneSettings(nextPlaneSettings);
+    setComponents(nextScene.components);
+    setWires(nextScene.wires);
+    clearWireInteraction();
+    setHasCustomLayout(true);
   }
 
   function updateWirePoints(wireId: string, updatePoints: (points: Point[]) => Point[]) {
@@ -1830,7 +2826,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         return points;
       }
 
-      const bendPoint = getWireSegmentMidpoint(leftPoint, rightPoint);
+      const bendPoint = leftPoint.x === rightPoint.x || leftPoint.y === rightPoint.y
+        ? snapPointToGrid(getWireSegmentMidpoint(leftPoint, rightPoint), planeSettingsRef.current)
+        : getWireSegmentMidpoint(leftPoint, rightPoint);
 
       return [
         ...points.slice(0, longestSegmentIndex + 1),
@@ -1860,12 +2858,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     setWires((currentWires) => {
-      const snapTarget = resolveSnapTarget(point, componentsRef.current, currentWires, wireReconnectTarget.wireId);
-      let nextWires = currentWires;
-
-      if (snapTarget.wireAnchor) {
-        nextWires = applyWireAnchor(nextWires, snapTarget.wireAnchor);
-      }
+      const snapTarget = resolveSnapTarget(
+        point,
+        componentsRef.current,
+        currentWires,
+        planeSettingsRef.current,
+        wireReconnectTarget.wireId
+      );
+      const nextWires = snapTarget.wireAnchor ? applyWireAnchors(currentWires, [snapTarget.wireAnchor]) : currentWires;
 
       return nextWires.map((wire) => {
         if (wire.id !== wireReconnectTarget.wireId || wire.points.length === 0) {
@@ -1885,7 +2885,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   function disconnectWireEndpoint(wireId: string, endpoint: WireEndpointKey) {
     updateWirePoints(wireId, (points) => {
-      const detachedPoint = getDetachedWirePoint(points, endpoint);
+      const detachedPoint = getDetachedWirePoint(points, endpoint, planeSettingsRef.current);
 
       if (!detachedPoint) {
         return points;
@@ -1953,10 +2953,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleCanvasClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (mode === "pan") {
-      return;
-    }
-
     if (wireReconnectTarget) {
       const point = getCanvasPointFromClient(event.clientX, event.clientY);
 
@@ -1968,7 +2964,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
-    if (mode !== "wire") {
+    if (!isWireAuthoringEnabled || draftWirePoints.length === 0) {
       setSelection(null);
       return;
     }
@@ -1983,42 +2979,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleCanvasMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
-    if (mode !== "wire") {
+    if (!isWirePointerPreviewVisible) {
+      if (cursorPoint !== null) {
+        setCursorPoint(null);
+      }
       return;
     }
 
     const point = getCanvasPointFromClient(event.clientX, event.clientY);
 
     if (point) {
-      setCursorPoint(resolveSnapTarget(point, components, wires).point);
+      setCursorPoint(resolveSnapTarget(point, components, wires, planeSettings).point);
     }
   }
 
   function handleFinishWire() {
-    const nextPoints = normalizeWirePoints(draftWirePoints.map(roundPoint));
-
-    if (nextPoints.length < 2) {
-      return;
-    }
-
-    const wireId = createId(nextId, "builder-wire");
-
-    setWires((currentWires) => {
-      const { anchors, points } = anchorWireEndpoints(nextPoints, componentsRef.current, currentWires);
-      let nextWires = currentWires;
-
-      for (const anchor of anchors) {
-        nextWires = applyWireAnchor(nextWires, anchor);
-      }
-
-      return [
-        ...nextWires,
-        { color: wireColor, id: wireId, points, thickness: wireThickness }
-      ];
-    });
-    setSelection({ kind: "wire", id: wireId });
-    setDraftWirePoints([]);
-    setHasCustomLayout(true);
+    commitWireFromPoints(draftWirePoints);
   }
 
   function handleDeleteSelection() {
@@ -2038,22 +3014,85 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleResetCanvas() {
+    pendingLoadedSceneRef.current = null;
     nextId.current = 0;
-    const nextScene = buildSceneFromProgram(nextId, availableTags, program);
+    const nextScene = buildSceneFromProgram(nextId, builderTags, program);
 
     setComponents(nextScene.components);
     setWires(nextScene.wires);
-    setDraftWirePoints([]);
+    clearWireInteraction();
     setSelection(null);
-    setMode("move");
-    setCursorPoint(null);
+    setIsWireAuthoringEnabled(true);
+    setIsPanModeEnabled(false);
     setIsPanning(false);
-    setWireReconnectTarget(null);
+    panState.current = null;
+    dragState.current = null;
+    wirePointDragState.current = null;
     setHasCustomLayout(true);
   }
 
+  function handleSaveCircuit() {
+    const snapshot = createCircuitSnapshot(
+      components,
+      wires,
+      derivedState.program,
+      builderTags,
+      scanIntervalMs,
+      planeSettingsRef.current
+    );
+
+    downloadCircuitSnapshot(snapshot);
+    setCircuitSnapshotStatus(`Saved ${snapshot.name}.`);
+  }
+
+  function handleLoadCircuitClick() {
+    circuitFileInputRef.current?.click();
+  }
+
+  async function handleLoadCircuitChange(event: ReactChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const snapshot = await readCircuitSnapshotFile(file);
+      const nextPlaneSettings = sanitizePlaneSettings({
+        gridSpacing: snapshot.settings.gridSpacing,
+        height: snapshot.settings.height,
+        width: snapshot.settings.width
+      });
+      const nextScene = clampSceneToPlane(cloneScene({ components: snapshot.components, wires: snapshot.wires }), nextPlaneSettings);
+      const nextDerivedState = deriveProgram(nextScene.components, nextScene.wires);
+      const nextProgramSignature = JSON.stringify(nextDerivedState.program);
+      const nextSnapshot = { ...snapshot, program: nextDerivedState.program };
+
+      pendingLoadedSceneRef.current = {
+        planeSettings: nextPlaneSettings,
+        scene: cloneScene(nextScene),
+        signature: nextProgramSignature
+      };
+
+      applySceneState(nextScene, nextProgramSignature, true, nextPlaneSettings);
+      setCircuitSnapshotStatus(`Loaded ${snapshot.name}.`);
+
+      if (onCircuitLoad) {
+        onCircuitLoad(nextSnapshot);
+      } else if (onProgramChange) {
+        onProgramChange(nextDerivedState.program, mergeInstructionBindingTags(snapshot.tags, nextScene.components));
+      }
+    } catch (error) {
+      setCircuitSnapshotStatus(
+        error instanceof Error ? error.message : "Failed to load the selected circuit file."
+      );
+    }
+  }
+
   function handleStageScrollMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
-    if (mode !== "pan" || !stageScrollRef.current) {
+    if (!isPanModeEnabled || !stageScrollRef.current) {
       return;
     }
 
@@ -2068,7 +3107,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleComponentHandleMouseDown(event: ReactMouseEvent<HTMLDivElement>, componentId: string) {
-    if (mode !== "move") {
+    if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
       return;
     }
 
@@ -2109,15 +3148,43 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           return component;
         }
 
-        const trimmedLabel = component.label.trim();
+        const trimmedLabel = normalizeInstructionLabel(component.label);
 
         if (trimmedLabel !== "") {
-          return trimmedLabel === component.label ? component : { ...component, label: trimmedLabel };
+          if (!componentNeedsTag(component.type)) {
+            return trimmedLabel === component.label ? component : { ...component, label: trimmedLabel };
+          }
+
+          const shouldUseGeneratedTag = component.usesCustomLabel || isGeneratedInstructionTag(component.tag ?? "");
+          const nextTag = shouldUseGeneratedTag
+            ? createGeneratedInstructionTag(trimmedLabel)
+            : component.tag ?? createGeneratedInstructionTag(trimmedLabel);
+
+          if (trimmedLabel === component.label && nextTag === component.tag) {
+            return component;
+          }
+
+          return {
+            ...component,
+            label: trimmedLabel,
+            tag: nextTag
+          };
+        }
+
+        const defaultLabel = getDefaultComponentLabel(component.type, builderTags, component.tag);
+
+        if (!componentNeedsTag(component.type)) {
+          return {
+            ...component,
+            label: defaultLabel,
+            usesCustomLabel: false
+          };
         }
 
         return {
           ...component,
-          label: getDefaultComponentLabel(component.type, availableTags, component.tag),
+          label: defaultLabel,
+          tag: component.tag ?? createGeneratedInstructionTag(defaultLabel),
           usesCustomLabel: false
         };
       })
@@ -2135,6 +3202,31 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
+  function cancelPendingBreakerClick(componentId?: string) {
+    if (!pendingBreakerClickRef.current) {
+      return;
+    }
+
+    if (componentId && pendingBreakerClickRef.current.componentId !== componentId) {
+      return;
+    }
+
+    window.clearTimeout(pendingBreakerClickRef.current.timeoutId);
+    pendingBreakerClickRef.current = null;
+  }
+
+  function scheduleBreakerToggle(componentId: string) {
+    cancelPendingBreakerClick();
+
+    pendingBreakerClickRef.current = {
+      componentId,
+      timeoutId: window.setTimeout(() => {
+        pendingBreakerClickRef.current = null;
+        toggleBreaker(componentId);
+      }, BREAKER_CLICK_DELAY_MS)
+    };
+  }
+
   function toggleBreaker(componentId: string) {
     setComponents((currentComponents) =>
       currentComponents.map((component) =>
@@ -2148,13 +3240,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleSelectedSourceVoltageChange(nextVoltage: number) {
-    if (!selectedComponent || selectedComponent.type !== "POWER_SOURCE") {
+    if (!selectedComponent || !isSourceType(selectedComponent.type)) {
       return;
     }
 
     const resolvedVoltage = Number.isFinite(nextVoltage)
       ? clamp(Math.round(nextVoltage), 1, 600)
-      : DEFAULT_SOURCE_VOLTAGE;
+      : getDefaultSourceVoltage(selectedComponent.type);
 
     setComponents((currentComponents) =>
       currentComponents.map((component) =>
@@ -2162,29 +3254,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           ? { ...component, sourceVoltage: resolvedVoltage }
           : component
       )
-    );
-    setHasCustomLayout(true);
-  }
-
-  function handleSelectedComponentTagChange(nextTag: string) {
-    if (!selectedComponent || !componentNeedsTag(selectedComponent.type)) {
-      return;
-    }
-
-    setComponents((currentComponents) =>
-      currentComponents.map((component) => {
-        if (component.id !== selectedComponent.id) {
-          return component;
-        }
-
-        return {
-          ...component,
-          label: component.usesCustomLabel
-            ? component.label
-            : getDefaultComponentLabel(component.type, availableTags, nextTag),
-          tag: nextTag
-        };
-      })
     );
     setHasCustomLayout(true);
   }
@@ -2210,34 +3279,24 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
       <div className="builder-freeplay">
         <aside className="builder-sidebar">
-          <section className="builder-card">
+          <section className="builder-card builder-card--tools">
             <div className="builder-card__title">Tools</div>
 
-            <div className="builder-mode-switch" role="group" aria-label="Playground mode">
+            <div className="builder-mode-switch" role="group" aria-label="Playground interaction">
+              <span className="status-pill status-pill--neutral">Move ready</span>
               <button
                 type="button"
-                className={`button ${mode === "move" ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
-                onClick={activateMoveMode}
+                className={`button ${isPanModeEnabled ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
+                onClick={togglePanMode}
               >
-                Move
+                {isPanModeEnabled ? "Pan on" : "Pan off"}
               </button>
               <button
                 type="button"
-                className={`button ${mode === "pan" ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
-                onClick={activatePanMode}
+                className={`button ${isWireAuthoringEnabled ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
+                onClick={toggleWireAuthoring}
               >
-                Pan
-              </button>
-              <button
-                type="button"
-                className={`button ${mode === "wire" ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
-                onClick={() => {
-                  panState.current = null;
-                  setIsPanning(false);
-                  setMode("wire");
-                }}
-              >
-                Draw wire
+                {isWireAuthoringEnabled ? "Wire on" : "Wire off"}
               </button>
             </div>
 
@@ -2273,6 +3332,49 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
               </label>
             </div>
 
+            <div className="builder-wire-settings">
+              <p className="builder-wire-settings__label">Plane settings</p>
+
+              <label className="builder-slider-field">
+                <span className="field__label">Width</span>
+                <input
+                  type="number"
+                  min={MIN_PLANE_WIDTH}
+                  max={MAX_PLANE_WIDTH}
+                  step="40"
+                  className="builder-number-input"
+                  value={planeSettings.width}
+                  onChange={(event) => updatePlaneDimensions({ width: Number(event.target.value) })}
+                />
+              </label>
+
+              <label className="builder-slider-field">
+                <span className="field__label">Height</span>
+                <input
+                  type="number"
+                  min={MIN_PLANE_HEIGHT}
+                  max={MAX_PLANE_HEIGHT}
+                  step="40"
+                  className="builder-number-input"
+                  value={planeSettings.height}
+                  onChange={(event) => updatePlaneDimensions({ height: Number(event.target.value) })}
+                />
+              </label>
+
+              <label className="builder-slider-field">
+                <span className="field__label">Grid spacing</span>
+                <input
+                  type="number"
+                  min={MIN_GRID_SPACING}
+                  max={MAX_GRID_SPACING}
+                  step="2"
+                  className="builder-number-input"
+                  value={planeSettings.gridSpacing}
+                  onChange={(event) => updatePlaneDimensions({ gridSpacing: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+
             <div className="builder-action-row">
               <button
                 type="button"
@@ -2285,11 +3387,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
               <button
                 type="button"
                 className="button button--ghost"
-                onClick={() => {
-                  setDraftWirePoints([]);
-                  setCursorPoint(null);
-                  setWireReconnectTarget(null);
-                }}
+                onClick={clearWireInteraction}
                 disabled={draftWirePoints.length === 0 && wireReconnectTarget === null}
               >
                 Cancel
@@ -2305,12 +3403,27 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
               <button type="button" className="button button--ghost" onClick={handleResetCanvas}>
                 Reset
               </button>
+              <button type="button" className="button button--secondary" onClick={handleLoadCircuitClick}>
+                Load circuit
+              </button>
+              <button type="button" className="button button--secondary" onClick={handleSaveCircuit}>
+                Save circuit
+              </button>
             </div>
 
+            <input
+              ref={circuitFileInputRef}
+              type="file"
+              accept=".circuit.json,.json,application/json"
+              hidden
+              onChange={handleLoadCircuitChange}
+            />
+
             <p className="builder-card__copy">{syncLabel}</p>
+            {circuitSnapshotStatus ? <p className="builder-card__copy">{circuitSnapshotStatus}</p> : null}
           </section>
 
-          <section className="builder-card">
+          <section className="builder-card builder-card--components">
             <div className="builder-card__title">Components</div>
 
             <div className="builder-palette-list">
@@ -2339,7 +3452,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             </div>
           </section>
 
-          <section className={`builder-card ${selection ? "builder-card--active" : ""}`.trim()}>
+          <section className={`builder-card builder-card--properties ${selection ? "builder-card--active" : ""}`.trim()}>
             <div className="builder-card__title">Properties</div>
 
             {selectedComponent ? (
@@ -2347,16 +3460,18 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 <div className="builder-props-grid">
                   <span className="builder-props-label">Symbol</span>
                   <strong className="builder-props-value">{getComponentName(selectedComponent.type)}</strong>
-                  <span className="builder-props-label">Plane name</span>
+                  <span className="builder-props-label">{componentNeedsTag(selectedComponent.type) ? "Logic label" : "Plane name"}</span>
                   <strong className="builder-props-value">{selectedComponent.label || "(unnamed)"}</strong>
                   <span className="builder-props-label">Terminals</span>
                   <strong className="builder-props-value">{getTerminalCount(selectedComponent.type)}</strong>
                   <span className="builder-props-label">Rotation</span>
                   <strong className="builder-props-value">{normalizeQuarterTurns(selectedComponent.rotation) * 90}deg</strong>
-                  {selectedComponent.type === "POWER_SOURCE" ? (
+                  {isSourceType(selectedComponent.type) ? (
                     <>
+                      <span className="builder-props-label">Current</span>
+                      <strong className="builder-props-value">{getSourceCurrentType(selectedComponent.type)?.toUpperCase()}</strong>
                       <span className="builder-props-label">Voltage</span>
-                      <strong className="builder-props-value">{getSourceVoltage(selectedComponent)}V</strong>
+                      <strong className="builder-props-value">{formatSourceVoltage(selectedComponent)}</strong>
                     </>
                   ) : null}
                   {isBreakerType(selectedComponent.type) ? (
@@ -2389,7 +3504,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   </button>
                 </div>
 
-                {selectedComponent.type === "POWER_SOURCE" ? (
+                {isSourceType(selectedComponent.type) ? (
                   <label className="builder-slider-field">
                     <span className="field__label">Source voltage</span>
                     <input
@@ -2415,27 +3530,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 ) : null}
 
                 {componentNeedsTag(selectedComponent.type) ? (
-                  <label className="builder-color-field">
-                    <span className="field__label">Logic tag</span>
-                    <select
-                      className="freeplay-component__tag"
-                      value={selectedComponent.tag ?? getDefaultTag(selectedComponent.type, availableTags)}
-                      onChange={(event) => handleSelectedComponentTagChange(event.target.value)}
-                    >
-                      {availableTags.map((availableTag) => (
-                        <option key={availableTag.name} value={availableTag.name}>
-                          {availableTag.label ?? availableTag.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : selectedComponent.type === "POWER_SOURCE" ? (
                   <p className="builder-card__copy">
-                    Set the source output voltage here. Press Run to see that voltage energize the connected path.
+                    Rename the symbol under the drawing. Matching OTE, OTL, OTU, XIC, and XIO labels now share
+                    the same internal logic state automatically.
+                  </p>
+                ) : isSourceType(selectedComponent.type) ? (
+                  <p className="builder-card__copy">
+                    {getSourceCurrentType(selectedComponent.type) === "ac"
+                      ? "Set the AC source voltage here. Closed loops energize from both source sides."
+                      : "Set the DC source voltage here. Closed loops energize with the DC feed."}
                   </p>
                 ) : isBreakerType(selectedComponent.type) ? (
                   <p className="builder-card__copy">
-                    Click the breaker on the sheet to toggle continuity. Breakers start open by default.
+                    Single-click the breaker on the sheet to toggle continuity. Double-click it to rotate.
                   </p>
                 ) : isVisualLoadType(selectedComponent.type) ? (
                   <p className="builder-card__copy">
@@ -2449,7 +3556,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   <p className="builder-card__copy">Passive symbol. No runtime tag is needed.</p>
                 )}
 
-                <p className="builder-card__copy">Double-click the symbol to rotate it. Rename it directly under the symbol on the sheet.</p>
+                <p className="builder-card__copy">
+                  Double-click a symbol to rotate it. Breakers toggle on single-click and rotate on double-click.
+                </p>
               </>
             ) : selectedWire ? (
               <>
@@ -2561,9 +3670,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 <span className={`status-pill ${running ? "status-pill--on" : "status-pill--neutral"}`}>
                   {running ? "Running" : "Ready"}
                 </span>
-                <span className="status-pill status-pill--neutral">
-                  {mode === "wire" ? "Wire mode" : mode === "pan" ? "Pan mode" : "Move mode"}
+                <span className={`status-pill ${isWireAuthoringEnabled ? "status-pill--on" : "status-pill--neutral"}`}>
+                  {isWireAuthoringEnabled ? "Wire on" : "Wire off"}
                 </span>
+                <span className={`status-pill ${isPanModeEnabled ? "status-pill--on" : "status-pill--neutral"}`}>
+                  {isPanModeEnabled ? "Pan on" : "Pan off"}
+                </span>
+                <span className="status-pill status-pill--neutral">Move ready</span>
                 <span className="status-pill status-pill--neutral">Tick {tick}</span>
                 <span className="status-pill status-pill--neutral">{scanIntervalMs} ms</span>
                 <span className="status-pill status-pill--neutral">{derivedState.resolvedWires} connected wires</span>
@@ -2578,8 +3691,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
               <p className="builder-stage__hint">
                 {wireReconnectTarget
                   ? `Click a terminal or a free point to reconnect the ${wireReconnectTarget.endpoint} end.`
-                  : mode === "pan"
-                  ? "Drag anywhere on the sheet to move around the plane."
+                  : hasActiveWireDraft
+                  ? "Touch a terminal to finish this wire, or click a free point to keep routing it."
+                  : isPanModeEnabled && isWireAuthoringEnabled
+                  ? "Drag empty space to pan. Touch a terminal to start a wire."
+                  : isPanModeEnabled
+                  ? "Drag empty space to move around the plane. Components still move directly."
+                  : isWireAuthoringEnabled
+                  ? "Touch a terminal to start a wire. Drag symbols directly to move them."
                   : selectedComponent
                   ? `${selectedComponent.label || getComponentName(selectedComponent.type)} selected`
                   : selectedWire
@@ -2599,21 +3718,25 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
           <div
             ref={stageScrollRef}
-            className={`builder-stage__scroll ${mode === "pan" ? "builder-stage__scroll--pan" : ""} ${isPanning ? "builder-stage__scroll--panning" : ""}`.trim()}
+            className={`builder-stage__scroll ${isPanModeEnabled ? "builder-stage__scroll--pan" : ""} ${isPanning ? "builder-stage__scroll--panning" : ""}`.trim()}
             onMouseDown={handleStageScrollMouseDown}
           >
             <div
               ref={canvasRef}
-              className={`freeplay-canvas ${mode === "wire" ? "freeplay-canvas--wire" : ""} ${mode === "pan" ? "freeplay-canvas--pan" : ""} ${isPanning ? "freeplay-canvas--panning" : ""}`.trim()}
+              className={`freeplay-canvas ${isWirePointerPreviewVisible ? "freeplay-canvas--wire" : ""} ${isPanModeEnabled ? "freeplay-canvas--pan" : ""} ${isPanning ? "freeplay-canvas--panning" : ""}`.trim()}
+              style={canvasStyle}
               onClick={handleCanvasClick}
               onMouseLeave={() => setCursorPoint(null)}
               onMouseMove={handleCanvasMouseMove}
             >
-              <svg className="freeplay-svg" viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`} aria-hidden="true">
+              <svg className="freeplay-svg" viewBox={`0 0 ${planeSettings.width} ${planeSettings.height}`} aria-hidden="true">
                 {wires.map((wire) => {
                   const pointString = wire.points.map((point) => `${point.x},${point.y}`).join(" ");
                   const isSelected = selection?.kind === "wire" && selection.id === wire.id;
                   const isEnergized = running && electricalState.energizedWireIds.has(wire.id);
+                  const idleCurrentType = electricalState.idleWireCurrentById.get(wire.id) ?? null;
+                  const isIdle = running && !isEnergized && idleCurrentType !== null;
+                  const energizedCurrentType = electricalState.energizedWireCurrentById.get(wire.id) ?? "ac";
                   const strokeWidth = isSelected ? wire.thickness + 2 : wire.thickness;
                   const hitStrokeWidth = Math.max(18, wire.thickness + 10);
 
@@ -2627,9 +3750,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       />
                       {isEnergized ? (
                         <polyline
-                          className="freeplay-wire freeplay-wire--energized"
+                          className={`freeplay-wire freeplay-wire--energized freeplay-wire--energized-${energizedCurrentType}`.trim()}
                           points={pointString}
                           style={{ strokeWidth: wire.thickness + 1.5 }}
+                        />
+                      ) : isIdle ? (
+                        <polyline
+                          className={`freeplay-wire freeplay-wire--idle freeplay-wire--idle-${idleCurrentType}`.trim()}
+                          points={pointString}
+                          style={{ strokeWidth: wire.thickness + 1.1 }}
                         />
                       ) : null}
                       <polyline
@@ -2714,7 +3843,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       <button
                         key={terminal.portId}
                         type="button"
-                        className={`freeplay-port ${mode === "wire" ? "freeplay-port--active" : ""}`.trim()}
+                        className={`freeplay-port ${wireTerminalsEnabled ? "freeplay-port--active" : ""}`.trim()}
                         aria-label={`Connect to ${component.label} terminal ${terminal.terminalId}`}
                         style={{ left: terminal.x - component.x, top: terminal.y - component.y }}
                         onClick={(event) => {
@@ -2727,9 +3856,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                           setSelection({ kind: "component", id: component.id });
 
-                          if (mode === "wire") {
-                            appendDraftPoint({ x: terminal.x, y: terminal.y });
+                          if (!isWireAuthoringEnabled) {
+                            return;
                           }
+
+                          if (draftWirePoints.length === 0) {
+                            appendDraftPoint({ x: terminal.x, y: terminal.y });
+                            return;
+                          }
+
+                          commitWireFromPoints(buildNextDraftPoints(draftWirePoints, { x: terminal.x, y: terminal.y }));
                         }}
                       />
                     ))}
@@ -2746,16 +3882,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                         setSelection({ kind: "component", id: component.id });
 
-                        if (mode === "move" && isBreakerType(component.type)) {
-                          toggleBreaker(component.id);
+                        if (draftWirePoints.length === 0 && wireReconnectTarget === null && isBreakerType(component.type)) {
+                          scheduleBreakerToggle(component.id);
                         }
                       }}
                       onDoubleClick={(event) => {
+                        event.stopPropagation();
+
                         if (isBreakerType(component.type)) {
-                          return;
+                          cancelPendingBreakerClick(component.id);
                         }
 
-                        event.stopPropagation();
                         rotateComponent(component.id, 1);
                       }}
                       onMouseDown={(event) => handleComponentHandleMouseDown(event, component.id)}
@@ -2765,8 +3902,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         style={{ transform: `rotate(${normalizeQuarterTurns(component.rotation) * 90}deg)` }}
                       >
                         {renderSymbolGraphic(component.type, {
-                          breakerClosed: isBreakerType(component.type) ? isBreakerClosed(component) : undefined,
-                          energized
+                          energized,
+                          ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {})
                         })}
                       </div>
                     </div>

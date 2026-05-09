@@ -383,6 +383,7 @@
 .diagram-symbol__motor-rotor {
 	transform-origin: 64px 32px;
 	transform-box: fill-box;
+	will-change: transform;
 }
 
 .diagram-block__symbol-fallback {
@@ -965,16 +966,13 @@
 
 .builder-freeplay {
 	display: grid;
-	grid-template-columns: minmax(340px, 380px) minmax(0, 1fr);
+	grid-template-columns: minmax(300px, 340px) minmax(0, 1fr) minmax(300px, 340px);
 	gap: var(--space-6);
 	align-items: start;
 }
 
 .builder-sidebar {
-	display: grid;
-	gap: var(--space-4);
-	position: sticky;
-	top: var(--space-4);
+	display: contents;
 }
 
 .builder-card {
@@ -992,6 +990,25 @@
 .builder-card--active {
 	border-color: rgba(30, 64, 175, 0.22);
 	box-shadow: 0 20px 42px rgba(30, 64, 175, 0.12);
+}
+
+.builder-card--tools,
+.builder-card--components {
+	grid-column: 1;
+}
+
+.builder-card--tools,
+.builder-card--properties {
+	position: sticky;
+	top: var(--space-4);
+	align-self: start;
+}
+
+.builder-card--properties {
+	grid-column: 3;
+	grid-row: 1 / span 2;
+	max-height: calc(100vh - var(--space-8));
+	overflow-y: auto;
 }
 
 .builder-card__title {
@@ -1098,6 +1115,20 @@
 .builder-palette-list {
 	display: grid;
 	gap: 0.75rem;
+	max-height: min(46vh, 520px);
+	overflow-y: auto;
+	padding-right: 0.3rem;
+}
+
+.builder-palette-list::-webkit-scrollbar,
+.builder-card--properties::-webkit-scrollbar {
+	width: 10px;
+}
+
+.builder-palette-list::-webkit-scrollbar-thumb,
+.builder-card--properties::-webkit-scrollbar-thumb {
+	border-radius: 999px;
+	background: rgba(148, 163, 184, 0.42);
 }
 
 .builder-palette-tile {
@@ -1343,6 +1374,8 @@
 	display: grid;
 	gap: var(--space-3);
 	min-width: 0;
+	grid-column: 2;
+	grid-row: 1 / span 2;
 }
 
 .builder-stage__toolbar {
@@ -1464,7 +1497,30 @@
 	stroke: #f59e0b;
 	filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.36));
 	stroke-dasharray: 12 7;
-	animation: freeplay-wire-flow 1.15s linear infinite;
+}
+
+.freeplay-wire--energized-ac {
+	animation: freeplay-wire-flow-ac 0.95s ease-in-out infinite;
+}
+
+.freeplay-wire--energized-dc {
+	animation: freeplay-wire-flow-dc 1.15s linear infinite;
+}
+
+.freeplay-wire--idle {
+	stroke-dasharray: 7 9;
+	opacity: 0.72;
+	filter: drop-shadow(0 0 7px rgba(96, 165, 250, 0.18));
+}
+
+.freeplay-wire--idle-ac {
+	stroke: #60a5fa;
+	animation: freeplay-wire-flow-ac 1.25s ease-in-out infinite;
+}
+
+.freeplay-wire--idle-dc {
+	stroke: #fb923c;
+	animation: freeplay-wire-flow-dc 1.45s linear infinite;
 }
 
 .freeplay-wire__hit {
@@ -1569,7 +1625,7 @@
 }
 
 .freeplay-component--motor-on .diagram-symbol__motor-rotor {
-	animation: diagram-motor-spin 0.9s linear infinite;
+	animation: diagram-motor-spin 1.45s linear infinite;
 }
 
 .freeplay-component__badge {
@@ -1633,28 +1689,50 @@
 
 .freeplay-port {
 	position: absolute;
-	width: 14px;
-	height: 14px;
+	width: 12px;
+	height: 12px;
 	border-radius: 999px;
-	border: 2px solid #0f172a;
-	background: #fff;
+	border: 1.75px solid #0f172a;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(232, 238, 245, 0.94));
 	transform: translate(-50%, -50%);
 	padding: 0;
 	z-index: 2;
-	box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.8);
+	box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 2px 6px rgba(15, 23, 42, 0.16);
+	opacity: 0.92;
+	cursor: default;
+	transition:
+		transform 140ms ease,
+		box-shadow 140ms ease,
+		border-color 140ms ease,
+		background 140ms ease,
+		opacity 140ms ease;
 }
 
 .freeplay-port--active {
 	border-color: var(--accent);
-	background: rgba(39, 75, 105, 0.16);
-	box-shadow: 0 0 0 4px rgba(39, 75, 105, 0.12);
+	background: linear-gradient(180deg, rgba(235, 245, 255, 0.98), rgba(191, 219, 254, 0.94));
+	box-shadow: 0 0 0 4px rgba(39, 75, 105, 0.12), 0 3px 10px rgba(29, 78, 216, 0.16);
+	opacity: 1;
+	cursor: crosshair;
 }
 
-.freeplay-port:hover {
+.freeplay-port--active:hover {
 	transform: translate(-50%, -50%) scale(1.14);
 }
 
-@keyframes freeplay-wire-flow {
+@keyframes freeplay-wire-flow-ac {
+	0% {
+		stroke-dashoffset: -18;
+	}
+	50% {
+		stroke-dashoffset: 18;
+	}
+	100% {
+		stroke-dashoffset: -18;
+	}
+}
+
+@keyframes freeplay-wire-flow-dc {
 	from {
 		stroke-dashoffset: 0;
 	}
