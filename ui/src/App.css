@@ -368,6 +368,21 @@
 	fill: currentColor;
 }
 
+.diagram-symbol__coil-core {
+	fill: rgba(20, 184, 166, 0.18);
+	opacity: 0;
+	transform-origin: 64px 30px;
+	transform-box: fill-box;
+	transition: opacity 140ms ease, transform 140ms ease, fill 140ms ease;
+}
+
+.diagram-symbol__contact-arm,
+.diagram-symbol__contact-slash {
+	transform-origin: 64px 30px;
+	transform-box: fill-box;
+	transition: transform 140ms ease, stroke 140ms ease, opacity 140ms ease;
+}
+
 .diagram-symbol__text {
 	fill: currentColor;
 	font-size: 11.5px;
@@ -378,6 +393,35 @@
 
 .diagram-symbol--energized .diagram-symbol__shape {
 	fill: rgba(254, 243, 199, 0.54);
+}
+
+.diagram-symbol--coil-active {
+	color: #0f766e;
+}
+
+.diagram-symbol--coil-active .diagram-symbol__shape {
+	fill: rgba(222, 247, 241, 0.9);
+	stroke: currentColor;
+}
+
+.diagram-symbol--coil-active .diagram-symbol__coil-core {
+	opacity: 1;
+	fill: rgba(45, 212, 191, 0.24);
+	transform: scale(1.05);
+}
+
+.diagram-symbol--contact-closed {
+	color: #0f766e;
+}
+
+.diagram-symbol--contact-closed .diagram-symbol__contact-arm {
+	stroke-width: 3.5;
+}
+
+.diagram-symbol--contact-actuated .diagram-symbol__contact-arm,
+.diagram-symbol--contact-actuated .diagram-symbol__contact-slash {
+	stroke: #ea580c;
+	transform: scale(1.04);
 }
 
 .diagram-symbol__motor-rotor {
@@ -1578,6 +1622,7 @@
 }
 
 .freeplay-component__glyph {
+	position: relative;
 	width: 100%;
 	min-height: 102px;
 	display: grid;
@@ -1610,11 +1655,51 @@
 	filter: drop-shadow(0 14px 24px rgba(245, 158, 11, 0.22));
 }
 
+.freeplay-component--coil-on .freeplay-component__symbol-rotator {
+	filter: drop-shadow(0 14px 24px rgba(13, 148, 136, 0.22));
+}
+
+.freeplay-component--contact-active .freeplay-component__symbol-rotator {
+	filter: drop-shadow(0 12px 18px rgba(249, 115, 22, 0.18));
+}
+
+.freeplay-component--pushbutton-down .freeplay-component__symbol-rotator {
+	filter: drop-shadow(0 12px 20px rgba(14, 116, 144, 0.2));
+}
+
+.freeplay-component__press-target {
+	position: absolute;
+	left: 50%;
+	top: 36px;
+	width: 58px;
+	height: 38px;
+	transform: translate(-50%, -50%);
+	border: none;
+	background: transparent;
+	padding: 0;
+	margin: 0;
+	z-index: 2;
+	cursor: pointer;
+}
+
+.freeplay-component__press-target:focus-visible {
+	outline: 2px solid rgba(14, 116, 144, 0.42);
+	outline-offset: 2px;
+	border-radius: 12px;
+}
+
 .freeplay-component--lamp-on .diagram-symbol__shape {
 	fill: rgba(250, 204, 21, 0.4);
 	stroke: #ca8a04;
 }
 
+.freeplay-component--coil-on .diagram-symbol__line,
+.freeplay-component--coil-on .diagram-symbol__text,
+.freeplay-component--coil-on .diagram-symbol__shape,
+.freeplay-component--contact-closed .diagram-symbol__line,
+.freeplay-component--contact-closed .diagram-symbol__text,
+.freeplay-component--contact-active .diagram-symbol__line,
+.freeplay-component--contact-active .diagram-symbol__text,
 .freeplay-component--lamp-on .diagram-symbol__line,
 .freeplay-component--lamp-on .diagram-symbol__text,
 .freeplay-component--motor-on .diagram-symbol__line,

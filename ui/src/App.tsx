@@ -89,8 +89,8 @@ export function App() {
     const nextProject = {
       ...project,
       inputValues: captureInputValues(resolvedTags, (tagName) => engine.getTag(tagName)),
-      program: nextProgram
-      ,tags: resolvedTags
+      program: nextProgram,
+      tags: resolvedTags
     };
 
     setRunning(false);
@@ -118,6 +118,12 @@ export function App() {
   }
 
   const activeProject = project ? { ...project, program: builderProgram ?? project.program } : null;
+  const activeTagValues = activeProject
+    ? activeProject.tags.reduce<Record<string, boolean>>((tagMap, tag) => {
+      tagMap[tag.name] = engine.getTag(tag.name);
+      return tagMap;
+    }, {})
+    : {};
   const simulatorLabel = errorMessage ? "Blocked" : running ? "Running" : activeProject ? "Ready" : "Loading";
   const simulatorMessage = errorMessage
     ?? (activeProject
@@ -153,6 +159,7 @@ export function App() {
           simulatorMessage={simulatorMessage}
           simulatorTone={errorMessage ? "error" : "info"}
           tags={activeProject?.tags ?? []}
+          tagValues={activeTagValues}
           tick={tick}
           onRunToggle={handleRunToggle}
         />
