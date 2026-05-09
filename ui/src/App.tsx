@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Program } from "@plc-sim/ladder-types";
 import { PlcEngine } from "@plc-sim/plc-engine";
 
-import { DiagramBuilder, type CircuitSnapshot } from "./DiagramBuilder";
+import { DiagramBuilder, type CircuitSnapshot, type DiagramFault } from "./DiagramBuilder";
 import {
   captureInputValues,
   type ProjectBundle,
@@ -49,6 +49,7 @@ export function App() {
   const [tick, setTick] = useState(0);
   const [statusMessage, setStatusMessage] = useState("Preparing blank simulator...");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fault, setFault] = useState<DiagramFault | null>(null);
 
   function applyProject(nextProject: ProjectBundle, nextBuilderProgram: Program | null = null) {
     setRunning(false);
@@ -56,6 +57,7 @@ export function App() {
     setProject(nextProject);
     setEngine(buildEngine(nextProject));
     setTick(1);
+    setFault(null);
     setErrorMessage(null);
   }
 
@@ -97,7 +99,10 @@ export function App() {
     setEngine(buildEngine(nextProject));
     setTick((currentTick) => (currentTick === 0 ? 1 : currentTick + 1));
     setStatusMessage("Diagram updated. Press Run to simulate the current wiring.");
-    setErrorMessage(null);
+
+    if (!fault) {
+      setErrorMessage(null);
+    }
   }
 
   function handleCircuitLoad(snapshot: CircuitSnapshot) {
@@ -124,7 +129,7 @@ export function App() {
       return tagMap;
     }, {})
     : {};
-  const simulatorLabel = errorMessage ? "Blocked" : running ? "Running" : activeProject ? "Ready" : "Loading";
+  const simulatorLabel = fault ? "Fault" : errorMessage ? "Blocked" : running ? "Running" : activeProject ? "Ready" : "Loading";
   const simulatorMessage = errorMessage
     ?? (activeProject
       ? running
@@ -132,8 +137,21 @@ export function App() {
         : "Press Run to simulate the current diagram."
       : statusMessage);
 
+  function handleFaultDetected(nextFault: DiagramFault) {
+    setFault((currentFault) => currentFault ?? nextFault);
+    setErrorMessage(nextFault.message);
+    setRunning(false);
+    setStatusMessage("Short circuit detected. Correct the loop and reset the fault before running again.");
+  }
+
+  function handleFaultReset() {
+    setFault(null);
+    setErrorMessage(null);
+    setStatusMessage("Fault reset. Press Run to simulate the current diagram.");
+  }
+
   function handleRunToggle() {
-    if (!activeProject) {
+    if (!activeProject || fault) {
       return;
     }
 
@@ -149,7 +167,10 @@ export function App() {
     <div className="app-shell app-shell--playground">
       <main className="dashboard dashboard--playground">
         <DiagramBuilder
+          fault={fault}
           onCircuitLoad={handleCircuitLoad}
+          onFaultDetected={handleFaultDetected}
+          onFaultReset={handleFaultReset}
           onProgramChange={handleBuilderProgramChange}
           program={project?.program}
           runDisabled={!activeProject}
@@ -157,7 +178,7 @@ export function App() {
           scanIntervalMs={activeProject?.settings.scanIntervalMs ?? 150}
           simulatorLabel={simulatorLabel}
           simulatorMessage={simulatorMessage}
-          simulatorTone={errorMessage ? "error" : "info"}
+          simulatorTone={fault || errorMessage ? "error" : "info"}
           tags={activeProject?.tags ?? []}
           tagValues={activeTagValues}
           tick={tick}
