@@ -137,6 +137,7 @@ interface ElectricalState {
   idleWireCurrentById: Map<string, SourceCurrentType>;
   energizedWireCurrentById: Map<string, SourceCurrentType>;
   energizedWireIds: Set<string>;
+  resolvedTagValues: Readonly<Record<string, boolean>>;
 }
 
 interface ResolvedPortGraph {
@@ -426,19 +427,139 @@ function getConductiveTerminalPairs(
     case "OTE":
     case "OTL":
     case "OTU":
-      return [["in", "out"]];
+      return useLiveTagState ? [] : [["in", "out"]];
     default:
       return [];
   }
 }
 
-function isComponentFullyOnLiveLoop(
+function getComponentSuppliedTerminalNodeIds(
   component: BuilderComponent,
-  liveLoopNodes: ReadonlySet<string>
-): boolean {
+  feedReachableNodes: ReadonlySet<string>,
+  returnReachableNodes: ReadonlySet<string>
+): { feedNodeIds: string[]; returnNodeIds: string[] } | null {
   const terminalNodeIds = getComponentTerminals(component).map((terminal) => getElectricalPortNodeId(terminal.portId));
+  const feedOnlyNodeIds = terminalNodeIds.filter(
+    (nodeId) => feedReachableNodes.has(nodeId) && !returnReachableNodes.has(nodeId)
+  );
+  const returnOnlyNodeIds = terminalNodeIds.filter(
+    (nodeId) => returnReachableNodes.has(nodeId) && !feedReachableNodes.has(nodeId)
+  );
 
-  return terminalNodeIds.length > 0 && terminalNodeIds.every((nodeId) => liveLoopNodes.has(nodeId));
+  if (feedOnlyNodeIds.length === 0 || returnOnlyNodeIds.length === 0) {
+    return null;
+  }
+
+  return {
+    feedNodeIds: feedOnlyNodeIds,
+    returnNodeIds: returnOnlyNodeIds
+  };
+}
+
+function getSourceTraversalTerminalIds(component: BuilderComponent): {
+  feedTerminalId: "left" | "right";
+  returnTerminalId: "left" | "right";
+} {
+  const leftPoint = getTerminalPoint(component, "left");
+  const rightPoint = getTerminalPoint(component, "right");
+  const horizontalSpan = Math.abs(leftPoint.x - rightPoint.x);
+  const verticalSpan = Math.abs(leftPoint.y - rightPoint.y);
+
+  if (horizontalSpan >= verticalSpan) {
+    return leftPoint.x <= rightPoint.x
+      ? { feedTerminalId: "left", returnTerminalId: "right" }
+      : { feedTerminalId: "right", returnTerminalId: "left" };
+  }
+
+  return leftPoint.y <= rightPoint.y
+    ? { feedTerminalId: "left", returnTerminalId: "right" }
+    : { feedTerminalId: "right", returnTerminalId: "left" };
+}
+
+function buildElectricalSimulationGraph(
+  components: BuilderComponent[],
+  wires: BuilderWire[],
+  tagValues: Readonly<Record<string, boolean>>
+): {
+  componentsById: Map<string, BuilderComponent>;
+  electricalConnections: Map<string, Set<string>>;
+  portsById: Map<string, BuilderTerminal>;
+  wireNodeIdsByWire: Map<string, string[]>;
+} {
+  const { connections, portsById, wireNodeIdsByWire } = buildElectricalNodeGraph(components, wires);
+  const componentsById = new Map(components.map((component) => [component.id, component]));
+  const electricalConnections = cloneConnections(connections);
+
+  for (const component of components) {
+    for (const [leftTerminalId, rightTerminalId] of getConductiveTerminalPairs(component, tagValues, true)) {
+      connectGraphNodes(
+        electricalConnections,
+        getElectricalPortNodeId(getPortId(component.id, leftTerminalId)),
+        getElectricalPortNodeId(getPortId(component.id, rightTerminalId))
+      );
+    }
+  }
+
+  return { componentsById, electricalConnections, portsById, wireNodeIdsByWire };
+}
+
+function resolvePhysicalInstructionTagValues(
+  components: BuilderComponent[],
+  wires: BuilderWire[],
+  tagValues: Readonly<Record<string, boolean>>,
+  previousResolvedTagValues: Readonly<Record<string, boolean>> = EMPTY_TAG_VALUES
+): Readonly<Record<string, boolean>> {
+  const coilComponents = components.filter(
+    (component): component is BuilderComponent & { tag: string } => isCoilType(component.type) && component.tag !== null
+  );
+
+  if (coilComponents.length === 0) {
+    return tagValues;
+  }
+
+  const coilTags = [...new Set(coilComponents.map((component) => component.tag))];
+  let resolvedTagValues: Record<string, boolean> = { ...tagValues };
+
+  for (const tag of coilTags) {
+    resolvedTagValues[tag] = previousResolvedTagValues[tag] ?? false;
+  }
+
+  for (let iteration = 0; iteration < Math.max(components.length, 1); iteration += 1) {
+    const { electricalConnections } = buildElectricalSimulationGraph(components, wires, resolvedTagValues);
+    const nextResolvedTagValues: Record<string, boolean> = { ...resolvedTagValues };
+
+    for (const tag of coilTags) {
+      nextResolvedTagValues[tag] = false;
+    }
+
+    for (const component of components) {
+      if (!isSourceType(component.type)) {
+        continue;
+      }
+
+      const { feedTerminalId, returnTerminalId } = getSourceTraversalTerminalIds(component);
+      const feedPortId = getElectricalPortNodeId(getPortId(component.id, feedTerminalId));
+      const returnPortId = getElectricalPortNodeId(getPortId(component.id, returnTerminalId));
+      const feedReachable = collectReachableNodes(electricalConnections, feedPortId);
+      const returnReachable = collectReachableNodes(electricalConnections, returnPortId);
+
+      for (const coilComponent of coilComponents) {
+        if (getComponentSuppliedTerminalNodeIds(coilComponent, feedReachable, returnReachable)) {
+          nextResolvedTagValues[coilComponent.tag] = true;
+        }
+      }
+    }
+
+    const tagStateChanged = coilTags.some((tag) => nextResolvedTagValues[tag] !== resolvedTagValues[tag]);
+
+    resolvedTagValues = nextResolvedTagValues;
+
+    if (!tagStateChanged) {
+      return resolvedTagValues;
+    }
+  }
+
+  return resolvedTagValues;
 }
 
 function getInstructionSymbol(type: BuilderComponentType): string {
@@ -922,8 +1043,8 @@ function renderSymbolGraphic(
           <line x1="86" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
           <line x1="42" y1="12" x2="42" y2="48" className="diagram-symbol__line" />
           <line x1="86" y1="12" x2="86" y2="48" className="diagram-symbol__line" />
-          {options.contactActuated ? (
-            <line x1="42" y1="30" x2="86" y2="30" className="diagram-symbol__line diagram-symbol__contact-arm" />
+          {options.contactClosed ? (
+            <line x1="42" y1="46" x2="86" y2="14" className="diagram-symbol__line diagram-symbol__contact-slash" />
           ) : null}
         </svg>
       );
@@ -2520,43 +2641,45 @@ function collectPathNodesFromParents(
   return pathNodeIds;
 }
 
-function getIdleFlowSinkNodeIds(
+function collectCurrentFlowPathNodeIds(
   components: BuilderComponent[],
+  liveLoadComponentIds: ReadonlySet<string>,
+  feedParents: ReadonlyMap<string, string | null>,
+  returnParents: ReadonlyMap<string, string | null>,
   feedReachableNodes: ReadonlySet<string>,
-  tagValues: Readonly<Record<string, boolean>>
+  returnReachableNodes: ReadonlySet<string>
 ): Set<string> {
-  const sinkNodeIds = new Set<string>();
+  const feedTargetNodeIds = new Set<string>();
+  const returnTargetNodeIds = new Set<string>();
 
   for (const component of components) {
-    if (isSourceType(component.type)) {
+    if (!liveLoadComponentIds.has(component.id)) {
       continue;
     }
 
-    const inputPortNodeIds = getComponentTerminals(component)
-      .filter((port) => port.role === "input")
-      .map((port) => getElectricalPortNodeId(port.portId))
-      .filter((nodeId) => feedReachableNodes.has(nodeId));
+    const suppliedTerminalNodeIds = getComponentSuppliedTerminalNodeIds(
+      component,
+      feedReachableNodes,
+      returnReachableNodes
+    );
 
-    if (inputPortNodeIds.length === 0) {
+    if (!suppliedTerminalNodeIds) {
       continue;
     }
 
-    if (isVisualLoadType(component.type)) {
-      for (const nodeId of inputPortNodeIds) {
-        sinkNodeIds.add(nodeId);
-      }
-
-      continue;
+    for (const nodeId of suppliedTerminalNodeIds.feedNodeIds) {
+      feedTargetNodeIds.add(nodeId);
     }
 
-    if (isPassThroughType(component.type) && getConductiveTerminalPairs(component, tagValues, true).length === 0) {
-      for (const nodeId of inputPortNodeIds) {
-        sinkNodeIds.add(nodeId);
-      }
+    for (const nodeId of suppliedTerminalNodeIds.returnNodeIds) {
+      returnTargetNodeIds.add(nodeId);
     }
   }
 
-  return sinkNodeIds;
+  return new Set<string>([
+    ...collectPathNodesFromParents(feedParents, feedTargetNodeIds),
+    ...collectPathNodesFromParents(returnParents, returnTargetNodeIds)
+  ]);
 }
 
 function buildResolvedPortGraph(components: BuilderComponent[], wires: BuilderWire[]): ResolvedPortGraph {
@@ -2741,7 +2864,8 @@ function computeElectricalState(
   components: BuilderComponent[],
   wires: BuilderWire[],
   running: boolean,
-  tagValues: Readonly<Record<string, boolean>>
+  tagValues: Readonly<Record<string, boolean>>,
+  previousResolvedTagValues: Readonly<Record<string, boolean>> = EMPTY_TAG_VALUES
 ): ElectricalState {
   const emptyState: ElectricalState = {
     componentVoltageById: new Map(),
@@ -2750,26 +2874,25 @@ function computeElectricalState(
     fault: null,
     idleWireCurrentById: new Map(),
     energizedWireCurrentById: new Map(),
-    energizedWireIds: new Set()
+    energizedWireIds: new Set(),
+    resolvedTagValues: EMPTY_TAG_VALUES
   };
 
   if (!running) {
     return emptyState;
   }
 
-  const { connections, portsById, wireNodeIdsByWire } = buildElectricalNodeGraph(components, wires);
-  const componentsById = new Map(components.map((component) => [component.id, component]));
-  const electricalConnections = cloneConnections(connections);
-
-  for (const component of components) {
-    for (const [leftTerminalId, rightTerminalId] of getConductiveTerminalPairs(component, tagValues, true)) {
-      connectGraphNodes(
-        electricalConnections,
-        getElectricalPortNodeId(getPortId(component.id, leftTerminalId)),
-        getElectricalPortNodeId(getPortId(component.id, rightTerminalId))
-      );
-    }
-  }
+  const resolvedTagValues = resolvePhysicalInstructionTagValues(
+    components,
+    wires,
+    tagValues,
+    previousResolvedTagValues
+  );
+  const { componentsById, electricalConnections, portsById, wireNodeIdsByWire } = buildElectricalSimulationGraph(
+    components,
+    wires,
+    resolvedTagValues
+  );
 
   const energizedNodeIds = new Set<string>();
   const energizedComponentIds = new Set<string>();
@@ -2783,21 +2906,28 @@ function computeElectricalState(
     }
 
     const sourceVoltage = getSourceVoltage(component);
-    const leftPortId = getElectricalPortNodeId(getPortId(component.id, "left"));
-    const rightPortId = getElectricalPortNodeId(getPortId(component.id, "right"));
-    const { parents: leftParents, visited: leftReachable } = collectReachableNodesWithParents(electricalConnections, leftPortId);
-    const rightReachable = collectReachableNodes(electricalConnections, rightPortId);
-    const feedReachableNodes = leftReachable;
-    const liveLoopNodes = new Set<string>([...leftReachable].filter((nodeId) => rightReachable.has(nodeId)));
+    const { feedTerminalId, returnTerminalId } = getSourceTraversalTerminalIds(component);
+    const feedPortId = getElectricalPortNodeId(getPortId(component.id, feedTerminalId));
+    const returnPortId = getElectricalPortNodeId(getPortId(component.id, returnTerminalId));
+    const { parents: feedParents, visited: feedReachableNodes } = collectReachableNodesWithParents(electricalConnections, feedPortId);
+    const { parents: returnParents, visited: returnReachableNodes } = collectReachableNodesWithParents(electricalConnections, returnPortId);
+    const liveLoopNodes = new Set<string>([...feedReachableNodes].filter((nodeId) => returnReachableNodes.has(nodeId)));
     const sourceCurrentType = getSourceCurrentType(component.type) ?? "ac";
     const liveLoadComponentIds = new Set(
       components
-        .filter((loopComponent) => isVisualLoadType(loopComponent.type) && isComponentFullyOnLiveLoop(loopComponent, liveLoopNodes))
+        .filter(
+          (loopComponent) => isVisualLoadType(loopComponent.type)
+            && getComponentSuppliedTerminalNodeIds(loopComponent, feedReachableNodes, returnReachableNodes) !== null
+        )
         .map((loopComponent) => loopComponent.id)
     );
-    const idleFlowPathNodeIds = collectPathNodesFromParents(
-      leftParents,
-      getIdleFlowSinkNodeIds(components, feedReachableNodes, tagValues)
+    const currentFlowPathNodeIds = collectCurrentFlowPathNodeIds(
+      components,
+      liveLoadComponentIds,
+      feedParents,
+      returnParents,
+      feedReachableNodes,
+      returnReachableNodes
     );
 
     if (liveLoopNodes.size > 0 && liveLoadComponentIds.size === 0) {
@@ -2845,26 +2975,10 @@ function computeElectricalState(
     }
 
     for (const [wireId, nodeIds] of wireNodeIdsByWire.entries()) {
-      const touchesFeed = nodeIds.some((nodeId) => feedReachableNodes.has(nodeId));
-
-      if (!touchesFeed) {
-        continue;
-      }
-
-      if (nodeIds.some((nodeId) => liveLoopNodes.has(nodeId))) {
+      if (nodeIds.some((nodeId) => currentFlowPathNodeIds.has(nodeId))) {
         if (!energizedWireCurrentById.has(wireId)) {
           energizedWireCurrentById.set(wireId, sourceCurrentType);
         }
-
-        continue;
-      }
-
-      if (!nodeIds.some((nodeId) => idleFlowPathNodeIds.has(nodeId))) {
-        continue;
-      }
-
-      if (!idleWireCurrentById.has(wireId)) {
-        idleWireCurrentById.set(wireId, sourceCurrentType);
       }
     }
   }
@@ -2882,7 +2996,8 @@ function computeElectricalState(
     fault: null,
     idleWireCurrentById,
     energizedWireCurrentById,
-    energizedWireIds
+    energizedWireIds,
+    resolvedTagValues
   };
 }
 
@@ -2983,6 +3098,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     timeoutId: number;
   } | null>(null);
   const reportedFaultSignatureRef = useRef<string | null>(null);
+  const resolvedPhysicalTagValuesRef = useRef<Record<string, boolean>>({});
   const lastProgramSignature = useRef(JSON.stringify({ rungs: [] }));
   const lastBuilderTagsSignature = useRef("[]");
   const [components, setComponents] = useState<BuilderComponent[]>([]);
@@ -3135,6 +3251,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     componentDragMovedRef.current = false;
     setIsPanning(false);
     setHasCustomLayout(customLayout);
+    resolvedPhysicalTagValuesRef.current = {};
     lastProgramSignature.current = nextProgramSignature;
     lastBuilderTagsSignature.current = JSON.stringify(mergeInstructionBindingTags(availableTags, resolvedScene.components));
   }
@@ -3326,7 +3443,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   const liveTagValues = running ? tagValues : EMPTY_TAG_VALUES;
   const derivedState = deriveProgram(components, wires);
-  const electricalState = computeElectricalState(components, wires, running, liveTagValues);
+  const electricalState = computeElectricalState(
+    components,
+    wires,
+    running,
+    liveTagValues,
+    resolvedPhysicalTagValuesRef.current
+  );
   const derivedProgramSignature = JSON.stringify(derivedState.program);
   const selectedComponent = selection?.kind === "component"
     ? components.find((component) => component.id === selection.id) ?? null
@@ -3355,6 +3478,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const selectedComponentVoltage = selectedComponent
     ? electricalState.componentVoltageById.get(selectedComponent.id) ?? 0
     : 0;
+
+  useEffect(() => {
+    if (!running) {
+      resolvedPhysicalTagValuesRef.current = {};
+      return;
+    }
+
+    resolvedPhysicalTagValuesRef.current = { ...electricalState.resolvedTagValues };
+  }, [electricalState.resolvedTagValues, running]);
 
   useEffect(() => {
     if (
@@ -4676,10 +4808,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 const terminals = getComponentTerminals(component);
                 const selected = selection?.kind === "component" && selection.id === component.id;
                 const energized = running && electricalState.energizedComponentIds.has(component.id);
-                const tagActive = componentNeedsTag(component.type) ? getInstructionTagValue(component, liveTagValues) : false;
-                const coilActive = isCoilType(component.type) && tagActive;
+                const tagActive = componentNeedsTag(component.type)
+                  ? getInstructionTagValue(component, electricalState.resolvedTagValues)
+                  : false;
+                const coilActive = isCoilType(component.type) && energized;
                 const contactActuated = isContactType(component.type) && tagActive;
-                const contactClosed = isContactType(component.type) && isContactClosed(component, liveTagValues);
+                const contactClosed = isContactType(component.type) && isContactClosed(component, electricalState.resolvedTagValues);
                 const pushButtonPressed = isMomentaryPushButtonType(component.type) && isMomentaryPushButtonPressed(component);
                 const componentBadge = getComponentStatusBadge(component, running, energized);
 
