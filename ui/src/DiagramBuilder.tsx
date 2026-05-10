@@ -13,7 +13,7 @@ import type { TagDefinition } from "./projectData";
 
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
-type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | SourceComponentType | "LAMP" | "MOTOR";
+type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | SourceComponentType | "LAMP" | "MOTOR";
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
 type WireEndpointKey = "start" | "end";
@@ -209,7 +209,7 @@ const DEFAULT_WIRE_COLOR = "#c2410c";
 const DEFAULT_WIRE_THICKNESS = 4;
 const DEFAULT_SOURCE_VOLTAGE = 120;
 const DEFAULT_DC_SOURCE_VOLTAGE = 24;
-const BREAKER_CLICK_DELAY_MS = 220;
+const MAINTAINED_SWITCH_CLICK_DELAY_MS = 220;
 const GENERATED_INSTRUCTION_TAG_PREFIX = "__builder_label__:";
 const CIRCUIT_SNAPSHOT_VERSION = 1;
 const ROTATION_CENTER_X = COMPONENT_WIDTH / 2;
@@ -226,6 +226,7 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
   "DC_SOURCE",
   "BREAKER_1P",
   "BREAKER_2P",
+  "SWITCH_1P",
   "PUSH_BUTTON_NO",
   "PUSH_BUTTON_NC",
   "LAMP",
@@ -247,6 +248,7 @@ const instructionPalette: Array<{
   { type: "DC_SOURCE", label: "DC source", description: "Direct source + / -" },
   { type: "BREAKER_1P", label: "1P breaker", description: "Single-pole breaker" },
   { type: "BREAKER_2P", label: "2P breaker", description: "Two-pole breaker" },
+  { type: "SWITCH_1P", label: "Single switch", description: "Maintained open/closed switch" },
   { type: "PUSH_BUTTON_NO", label: "NO push button", description: "Momentary normally open switch" },
   { type: "PUSH_BUTTON_NC", label: "NC push button", description: "Momentary normally closed switch" },
   { type: "LAMP", label: "Lamp", description: "Indicator lamp load" },
@@ -292,11 +294,15 @@ function getSourceCurrentType(type: BuilderComponentType): SourceCurrentType | n
 }
 
 function isPassThroughType(type: BuilderComponentType): boolean {
-  return type === "BREAKER_1P" || type === "BREAKER_2P" || type === "PUSH_BUTTON_NO" || type === "PUSH_BUTTON_NC" || type === "XIC" || type === "XIO";
+  return type === "BREAKER_1P" || type === "BREAKER_2P" || type === "SWITCH_1P" || type === "PUSH_BUTTON_NO" || type === "PUSH_BUTTON_NC" || type === "XIC" || type === "XIO";
 }
 
 function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREAKER_2P" {
   return type === "BREAKER_1P" || type === "BREAKER_2P";
+}
+
+function isMaintainedSwitchType(type: BuilderComponentType): type is "SWITCH_1P" {
+  return type === "SWITCH_1P";
 }
 
 function isMomentaryPushButtonType(type: BuilderComponentType): type is "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" {
@@ -315,6 +321,7 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
     case "BREAKER_1P":
     case "BREAKER_2P":
       return "breaker";
+    case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
       return "contact";
@@ -374,7 +381,11 @@ function formatSourceVoltage(component: BuilderComponent): string {
 }
 
 function isBreakerClosed(component: BuilderComponent): boolean {
-  return isBreakerType(component.type) ? component.isClosed ?? false : false;
+  return isBreakerType(component.type);
+}
+
+function isMaintainedSwitchClosed(component: BuilderComponent): boolean {
+  return isMaintainedSwitchType(component.type) ? component.isClosed ?? false : false;
 }
 
 function isMomentaryPushButtonPressed(component: BuilderComponent): boolean {
@@ -415,6 +426,8 @@ function getConductiveTerminalPairs(
       return !useLiveTagState || isBreakerClosed(component)
         ? [["in-top", "out-top"], ["in-bottom", "out-bottom"]]
         : [];
+    case "SWITCH_1P":
+      return !useLiveTagState || isMaintainedSwitchClosed(component) ? [["in", "out"]] : [];
     case "PUSH_BUTTON_NO":
       return !useLiveTagState || isMomentaryPushButtonPressed(component) ? [["in", "out"]] : [];
     case "PUSH_BUTTON_NC":
@@ -572,6 +585,8 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--/ CB1 --";
     case "BREAKER_2P":
       return "--// CB2 --";
+    case "SWITCH_1P":
+      return "--o/ o--";
     case "PUSH_BUTTON_NO":
       return "--[PB NO]--";
     case "PUSH_BUTTON_NC":
@@ -603,6 +618,8 @@ function getComponentName(type: BuilderComponentType): string {
       return "Breaker 1P";
     case "BREAKER_2P":
       return "Breaker 2P";
+    case "SWITCH_1P":
+      return "Single switch";
     case "PUSH_BUTTON_NO":
       return "Push button NO";
     case "PUSH_BUTTON_NC":
@@ -722,6 +739,8 @@ function getDefaultComponentLabel(
       return "CB-1";
     case "BREAKER_2P":
       return "CB-2";
+    case "SWITCH_1P":
+      return "SW-1";
     case "PUSH_BUTTON_NO":
       return "PB-NO";
     case "PUSH_BUTTON_NC":
@@ -763,20 +782,29 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
     }
     case "BREAKER_1P":
       {
-        const inputTerminal = projectSymbolPoint(6, 32, 64);
-        const outputTerminal = projectSymbolPoint(122, 32, 64);
+        const inputTerminal = projectSymbolPoint(6, 34, 64);
+        const outputTerminal = projectSymbolPoint(122, 34, 64);
 
       return [
         { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
         { id: "out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
       ];
       }
+    case "SWITCH_1P": {
+      const inputTerminal = projectSymbolPoint(6, 34, 64);
+      const outputTerminal = projectSymbolPoint(122, 34, 64);
+
+      return [
+        { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
+      ];
+    }
     case "BREAKER_2P":
       {
-        const inputTopTerminal = projectSymbolPoint(6, 22, 74);
-        const outputTopTerminal = projectSymbolPoint(122, 22, 74);
-        const inputBottomTerminal = projectSymbolPoint(6, 52, 74);
-        const outputBottomTerminal = projectSymbolPoint(122, 52, 74);
+        const inputTopTerminal = projectSymbolPoint(6, 26, 84);
+        const outputTopTerminal = projectSymbolPoint(122, 26, 84);
+        const inputBottomTerminal = projectSymbolPoint(6, 58, 84);
+        const outputBottomTerminal = projectSymbolPoint(122, 58, 84);
 
       return [
         { id: "in-top", pairId: "top", role: "input", x: inputTopTerminal.x, y: inputTopTerminal.y },
@@ -807,8 +835,8 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
     }
     case "XIC":
     case "XIO": {
-      const inputTerminal = projectSymbolPoint(6, 30, 60);
-      const outputTerminal = projectSymbolPoint(122, 30, 60);
+      const inputTerminal = projectSymbolPoint(6, 32, 64);
+      const outputTerminal = projectSymbolPoint(122, 32, 64);
 
       return [
         { id: "in", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
@@ -838,6 +866,7 @@ function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "BREAKER_2P":
       return "in-top";
     case "BREAKER_1P":
+    case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
     case "LAMP":
@@ -862,6 +891,7 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
     case "BREAKER_2P":
       return "out-top";
     case "BREAKER_1P":
+    case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
     case "XIC":
@@ -885,10 +915,13 @@ function renderSymbolGraphic(
     contactClosed?: boolean;
     energized?: boolean;
     pushButtonPressed?: boolean;
+    switchClosed?: boolean;
   } = {}
 ): ReactNode {
   const symbolClassName = [
     "diagram-symbol",
+    type === "PUSH_BUTTON_NO" ? "diagram-symbol--pushbutton-no" : "",
+    type === "PUSH_BUTTON_NC" ? "diagram-symbol--pushbutton-nc" : "",
     options.energized ? "diagram-symbol--energized" : "",
     options.coilActive ? "diagram-symbol--coil-active" : "",
     options.contactClosed ? "diagram-symbol--contact-closed" : "",
@@ -920,55 +953,49 @@ function renderSymbolGraphic(
     case "BREAKER_1P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="32" x2="36" y2="32" className="diagram-symbol__line" />
-          <line x1="92" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
-          <circle cx="36" cy="32" r="4" className="diagram-symbol__fill" />
-          <circle cx="92" cy="32" r="4" className="diagram-symbol__fill" />
-          <line
-            x1="40"
-            y1={options.breakerClosed ? "32" : "30"}
-            x2="88"
-            y2={options.breakerClosed ? "32" : "16"}
-            className="diagram-symbol__line"
-          />
-          <rect x="48" y="42" width="32" height="14" rx="4" className="diagram-symbol__shape" />
-          <text x="64" y="52" textAnchor="middle" className="diagram-symbol__text">CB</text>
+          <text x="34" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">1</text>
+          <text x="94" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">2</text>
+          <line x1="6" y1="34" x2="28" y2="34" className="diagram-symbol__line" />
+          <line x1="100" y1="34" x2="122" y2="34" className="diagram-symbol__line" />
+          <circle cx="34" cy="34" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="94" cy="34" r="5.5" className="diagram-symbol__terminal" />
+          <path d="M41 28 C50 10 78 10 87 28" className="diagram-symbol__line" fill="none" />
         </svg>
       );
     case "BREAKER_2P":
       return (
-        <svg viewBox="0 0 128 74" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="22" x2="34" y2="22" className="diagram-symbol__line" />
-          <line x1="96" y1="22" x2="122" y2="22" className="diagram-symbol__line" />
-          <circle cx="34" cy="22" r="4" className="diagram-symbol__fill" />
-          <circle cx="96" cy="22" r="4" className="diagram-symbol__fill" />
-          <line x1="6" y1="52" x2="34" y2="52" className="diagram-symbol__line" />
-          <line x1="96" y1="52" x2="122" y2="52" className="diagram-symbol__line" />
-          <circle cx="34" cy="52" r="4" className="diagram-symbol__fill" />
-          <circle cx="96" cy="52" r="4" className="diagram-symbol__fill" />
+        <svg viewBox="0 0 128 84" className={symbolClassName} aria-hidden="true">
+          <text x="34" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">1</text>
+          <text x="94" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">2</text>
+          <text x="34" y="46" textAnchor="middle" className="diagram-symbol__terminal-label">3</text>
+          <text x="94" y="46" textAnchor="middle" className="diagram-symbol__terminal-label">4</text>
+          <line x1="6" y1="26" x2="28" y2="26" className="diagram-symbol__line" />
+          <line x1="100" y1="26" x2="122" y2="26" className="diagram-symbol__line" />
+          <circle cx="34" cy="26" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="94" cy="26" r="5.5" className="diagram-symbol__terminal" />
+          <line x1="6" y1="58" x2="28" y2="58" className="diagram-symbol__line" />
+          <line x1="100" y1="58" x2="122" y2="58" className="diagram-symbol__line" />
+          <circle cx="34" cy="58" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="94" cy="58" r="5.5" className="diagram-symbol__terminal" />
+          <path d="M41 21 C50 8 78 8 87 21" className="diagram-symbol__line" fill="none" />
+          <path d="M41 53 C50 40 78 40 87 53" className="diagram-symbol__line" fill="none" />
+          <line x1="64" y1="11" x2="64" y2="39" className="diagram-symbol__linkage" />
+        </svg>
+      );
+    case "SWITCH_1P":
+      return (
+        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
+          <line x1="6" y1="34" x2="28" y2="34" className="diagram-symbol__line" />
+          <line x1="100" y1="34" x2="122" y2="34" className="diagram-symbol__line" />
+          <circle cx="34" cy="34" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="94" cy="34" r="5.5" className="diagram-symbol__terminal" />
           <line
-            x1="38"
-            y1="22"
-            x2={options.breakerClosed ? "92" : "78"}
-            y2={options.breakerClosed ? "22" : "12"}
-            className="diagram-symbol__line"
+            x1="40"
+            y1="34"
+            x2={options.switchClosed ? "88" : "82"}
+            y2={options.switchClosed ? "30" : "16"}
+            className="diagram-symbol__line diagram-symbol__contact-arm"
           />
-          <line
-            x1="38"
-            y1="52"
-            x2={options.breakerClosed ? "92" : "78"}
-            y2={options.breakerClosed ? "52" : "42"}
-            className="diagram-symbol__line"
-          />
-          <line
-            x1={options.breakerClosed ? "66" : "78"}
-            y1={options.breakerClosed ? "22" : "12"}
-            x2={options.breakerClosed ? "66" : "78"}
-            y2={options.breakerClosed ? "52" : "42"}
-            className="diagram-symbol__line"
-          />
-          <line x1="56" y1="18" x2="72" y2="18" className="diagram-symbol__line" />
-          <line x1="56" y1="56" x2="72" y2="56" className="diagram-symbol__line" />
         </svg>
       );
     case "LAMP":
@@ -1037,36 +1064,45 @@ function renderSymbolGraphic(
       );
     }
     case "XIC":
+      {
+        const contactClosed = options.contactClosed ?? false;
+        const contactSymbolClassName = [
+          "diagram-symbol",
+          options.energized ? "diagram-symbol--energized" : ""
+        ].filter(Boolean).join(" ");
+
       return (
-        <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="30" x2="42" y2="30" className="diagram-symbol__line" />
-          <line x1="86" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
-          <line x1="42" y1="12" x2="42" y2="48" className="diagram-symbol__line" />
-          <line x1="86" y1="12" x2="86" y2="48" className="diagram-symbol__line" />
-          {options.contactClosed ? (
-            <line x1="42" y1="46" x2="86" y2="14" className="diagram-symbol__line diagram-symbol__contact-slash" />
+        <svg viewBox="0 0 128 64" className={contactSymbolClassName} aria-hidden="true">
+          <line x1="6" y1="32" x2="54" y2="32" className="diagram-symbol__line" />
+          <line x1="74" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
+          <line x1="56" y1="12" x2="56" y2="52" className="diagram-symbol__line" />
+          <line x1="72" y1="12" x2="72" y2="52" className="diagram-symbol__line" />
+          {contactClosed ? (
+            <line x1="46" y1="48" x2="82" y2="16" className="diagram-symbol__line" />
           ) : null}
         </svg>
       );
+      }
     case "XIO":
+      {
+        const contactClosed = options.contactClosed ?? true;
+        const contactSymbolClassName = [
+          "diagram-symbol",
+          options.energized ? "diagram-symbol--energized" : ""
+        ].filter(Boolean).join(" ");
+
       return (
-        <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="30" x2="42" y2="30" className="diagram-symbol__line" />
-          <line x1="86" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
-          <line x1="42" y1="12" x2="42" y2="48" className="diagram-symbol__line" />
-          <line x1="86" y1="12" x2="86" y2="48" className="diagram-symbol__line" />
-          {options.contactClosed ? (
-            <line x1="42" y1="30" x2="86" y2="30" className="diagram-symbol__line diagram-symbol__contact-arm" />
+        <svg viewBox="0 0 128 64" className={contactSymbolClassName} aria-hidden="true">
+          <line x1="6" y1="32" x2="54" y2="32" className="diagram-symbol__line" />
+          <line x1="74" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
+          <line x1="56" y1="12" x2="56" y2="52" className="diagram-symbol__line" />
+          <line x1="72" y1="12" x2="72" y2="52" className="diagram-symbol__line" />
+          {contactClosed ? (
+            <line x1="46" y1="48" x2="82" y2="16" className="diagram-symbol__line" />
           ) : null}
-          <line
-            x1={options.contactActuated ? "46" : "42"}
-            y1={options.contactActuated ? "46" : "46"}
-            x2={options.contactActuated ? "82" : "86"}
-            y2={options.contactActuated ? "18" : "14"}
-            className="diagram-symbol__line diagram-symbol__contact-slash"
-          />
         </svg>
       );
+      }
     case "OTE":
       return (
         <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
@@ -2435,7 +2471,7 @@ function createCanvasComponent(
     usesCustomLabel: false,
     x,
     y,
-    ...(isBreakerType(type) ? { isClosed: false } : {}),
+    ...(isMaintainedSwitchType(type) ? { isClosed: false } : {}),
     ...(isMomentaryPushButtonType(type) ? { isPressed: false } : {}),
     ...(isSourceType(type) ? { sourceVoltage: getDefaultSourceVoltage(type) } : {})
   };
@@ -2953,6 +2989,20 @@ function computeElectricalState(
     componentVoltageById.set(component.id, sourceVoltage);
     energizedComponentIds.add(component.id);
 
+    for (const nodeId of currentFlowPathNodeIds) {
+      const currentPort = nodeId.startsWith("port:")
+        ? portsById.get(nodeId.slice(5))
+        : undefined;
+
+      if (!currentPort) {
+        continue;
+      }
+
+      const previousVoltage = componentVoltageById.get(currentPort.componentId) ?? 0;
+      componentVoltageById.set(currentPort.componentId, Math.max(previousVoltage, sourceVoltage));
+      energizedComponentIds.add(currentPort.componentId);
+    }
+
     for (const nodeId of liveLoopNodes) {
       energizedNodeIds.add(nodeId);
 
@@ -3020,8 +3070,12 @@ function getComponentStatusBadge(component: BuilderComponent, running: boolean, 
     return formatSourceVoltage(component);
   }
 
+  if (isMaintainedSwitchType(component.type)) {
+    return isMaintainedSwitchClosed(component) ? "Closed" : "Open";
+  }
+
   if (isBreakerType(component.type)) {
-    return isBreakerClosed(component) ? "Closed" : "Open";
+    return null;
   }
 
   if (isMomentaryPushButtonType(component.type)) {
@@ -3093,7 +3147,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     startY: number;
   } | null>(null);
   const wirePointDragState = useRef<WirePointDragState | null>(null);
-  const pendingBreakerClickRef = useRef<{
+  const pendingSwitchToggleRef = useRef<{
     componentId: string;
     timeoutId: number;
   } | null>(null);
@@ -3147,9 +3201,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }, [components]);
 
   useEffect(() => () => {
-    if (pendingBreakerClickRef.current) {
-      window.clearTimeout(pendingBreakerClickRef.current.timeoutId);
-      pendingBreakerClickRef.current = null;
+    if (pendingSwitchToggleRef.current) {
+      window.clearTimeout(pendingSwitchToggleRef.current.timeoutId);
+      pendingSwitchToggleRef.current = null;
     }
   }, []);
 
@@ -4098,36 +4152,36 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
-  function cancelPendingBreakerClick(componentId?: string) {
-    if (!pendingBreakerClickRef.current) {
+  function cancelPendingSwitchToggle(componentId?: string) {
+    if (!pendingSwitchToggleRef.current) {
       return;
     }
 
-    if (componentId && pendingBreakerClickRef.current.componentId !== componentId) {
+    if (componentId && pendingSwitchToggleRef.current.componentId !== componentId) {
       return;
     }
 
-    window.clearTimeout(pendingBreakerClickRef.current.timeoutId);
-    pendingBreakerClickRef.current = null;
+    window.clearTimeout(pendingSwitchToggleRef.current.timeoutId);
+    pendingSwitchToggleRef.current = null;
   }
 
-  function scheduleBreakerToggle(componentId: string) {
-    cancelPendingBreakerClick();
+  function scheduleMaintainedSwitchToggle(componentId: string) {
+    cancelPendingSwitchToggle();
 
-    pendingBreakerClickRef.current = {
+    pendingSwitchToggleRef.current = {
       componentId,
       timeoutId: window.setTimeout(() => {
-        pendingBreakerClickRef.current = null;
-        toggleBreaker(componentId);
-      }, BREAKER_CLICK_DELAY_MS)
+        pendingSwitchToggleRef.current = null;
+        toggleMaintainedSwitch(componentId);
+      }, MAINTAINED_SWITCH_CLICK_DELAY_MS)
     };
   }
 
-  function toggleBreaker(componentId: string) {
+  function toggleMaintainedSwitch(componentId: string) {
     setComponents((currentComponents) =>
       currentComponents.map((component) =>
-        component.id === componentId && isBreakerType(component.type)
-          ? { ...component, isClosed: !isBreakerClosed(component) }
+        component.id === componentId && isMaintainedSwitchType(component.type)
+          ? { ...component, isClosed: !isMaintainedSwitchClosed(component) }
           : component
       )
     );
@@ -4425,10 +4479,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       <strong className="builder-props-value">{formatSourceVoltage(selectedComponent)}</strong>
                     </>
                   ) : null}
-                  {isBreakerType(selectedComponent.type) ? (
+                  {isBreakerType(selectedComponent.type) || isMaintainedSwitchType(selectedComponent.type) ? (
                     <>
                       <span className="builder-props-label">State</span>
-                      <strong className="builder-props-value">{isBreakerClosed(selectedComponent) ? "Closed" : "Open"}</strong>
+                      <strong className="builder-props-value">
+                        {isMaintainedSwitchType(selectedComponent.type)
+                          ? (isMaintainedSwitchClosed(selectedComponent) ? "Closed" : "Open")
+                          : "Closed"}
+                      </strong>
                     </>
                   ) : null}
                   {running ? (
@@ -4470,13 +4528,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   </label>
                 ) : null}
 
-                {isBreakerType(selectedComponent.type) ? (
+                {isMaintainedSwitchType(selectedComponent.type) ? (
                   <button
                     type="button"
-                    className={`button ${isBreakerClosed(selectedComponent) ? "button--secondary" : "button--primary"} builder-selection__action-button`.trim()}
-                    onClick={() => toggleBreaker(selectedComponent.id)}
+                    className={`button ${isMaintainedSwitchClosed(selectedComponent) ? "button--secondary" : "button--primary"} builder-selection__action-button`.trim()}
+                    onClick={() => toggleMaintainedSwitch(selectedComponent.id)}
                   >
-                    {isBreakerClosed(selectedComponent) ? "Open breaker" : "Close breaker"}
+                    {isMaintainedSwitchClosed(selectedComponent) ? "Open switch" : "Close switch"}
                   </button>
                 ) : null}
 
@@ -4493,7 +4551,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   </p>
                 ) : isBreakerType(selectedComponent.type) ? (
                   <p className="builder-card__copy">
-                    Single-click the breaker on the sheet to toggle continuity. Double-click it to rotate.
+                    This breaker stays closed and only rotates on the sheet.
+                  </p>
+                ) : isMaintainedSwitchType(selectedComponent.type) ? (
+                  <p className="builder-card__copy">
+                    Single-click the switch on the sheet to toggle continuity. Double-click it to rotate.
                   </p>
                 ) : isMomentaryPushButtonType(selectedComponent.type) ? (
                   <p className="builder-card__copy">
@@ -4808,6 +4870,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 const terminals = getComponentTerminals(component);
                 const selected = selection?.kind === "component" && selection.id === component.id;
                 const energized = running && electricalState.energizedComponentIds.has(component.id);
+                const visualEnergized = energized && !isMomentaryPushButtonType(component.type);
                 const tagActive = componentNeedsTag(component.type)
                   ? getInstructionTagValue(component, electricalState.resolvedTagValues)
                   : false;
@@ -4823,13 +4886,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     className={[
                       "freeplay-component",
                       selected ? "freeplay-component--selected" : "",
-                      energized ? "freeplay-component--energized" : "",
+                      visualEnergized ? "freeplay-component--energized" : "",
                       component.type === "LAMP" && energized ? "freeplay-component--lamp-on" : "",
                       component.type === "MOTOR" && energized ? "freeplay-component--motor-on" : "",
                       pushButtonPressed ? "freeplay-component--pushbutton-down" : "",
-                      coilActive ? "freeplay-component--coil-on" : "",
-                      contactClosed ? "freeplay-component--contact-closed" : "",
-                      contactActuated ? "freeplay-component--contact-active" : ""
+                      coilActive ? "freeplay-component--coil-on" : ""
                     ].filter(Boolean).join(" ")}
                     style={{ left: component.x, top: component.y }}
                     onClick={(event) => {
@@ -4887,15 +4948,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                         setSelection({ kind: "component", id: component.id });
 
-                        if (draftWirePoints.length === 0 && wireReconnectTarget === null && isBreakerType(component.type)) {
-                          scheduleBreakerToggle(component.id);
+                        if (draftWirePoints.length === 0 && wireReconnectTarget === null && isMaintainedSwitchType(component.type)) {
+                          scheduleMaintainedSwitchToggle(component.id);
                         }
                       }}
                       onDoubleClick={(event) => {
                         event.stopPropagation();
 
-                        if (isBreakerType(component.type)) {
-                          cancelPendingBreakerClick(component.id);
+                        if (isMaintainedSwitchType(component.type)) {
+                          cancelPendingSwitchToggle(component.id);
                         }
 
                         rotateComponent(component.id, 1);
@@ -4922,9 +4983,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           coilActive,
                           contactActuated,
                           contactClosed,
-                          energized,
+                          energized: visualEnergized,
                           pushButtonPressed,
-                          ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {})
+                          ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {}),
+                          ...(isMaintainedSwitchType(component.type) ? { switchClosed: isMaintainedSwitchClosed(component) } : {})
                         })}
                       </div>
                     </div>

@@ -350,6 +350,14 @@
 	color: #d97706;
 }
 
+.diagram-symbol--pushbutton-no {
+	color: #16a34a;
+}
+
+.diagram-symbol--pushbutton-nc {
+	color: #dc2626;
+}
+
 .diagram-symbol__line {
 	stroke: currentColor;
 	stroke-width: 3;
@@ -368,6 +376,15 @@
 	stroke: currentColor;
 	stroke-width: 2.6;
 	fill: rgba(255, 255, 255, 0.98);
+}
+
+.diagram-symbol__linkage {
+	stroke: currentColor;
+	stroke-width: 2.5;
+	fill: none;
+	stroke-linecap: round;
+	stroke-dasharray: 3 3;
+	opacity: 1;
 }
 
 .diagram-symbol__fill {
@@ -397,22 +414,30 @@
 	letter-spacing: 0.06em;
 }
 
+.diagram-symbol__terminal-label {
+	fill: currentColor;
+	font-size: 9px;
+	font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+	font-weight: 700;
+	letter-spacing: 0;
+}
+
 .diagram-symbol--energized .diagram-symbol__shape {
 	fill: rgba(254, 243, 199, 0.54);
 }
 
 .diagram-symbol--coil-active {
-	color: #0f766e;
+	color: #d97706;
 }
 
 .diagram-symbol--coil-active .diagram-symbol__shape {
-	fill: rgba(222, 247, 241, 0.9);
+	fill: rgba(254, 243, 199, 0.74);
 	stroke: currentColor;
 }
 
 .diagram-symbol--coil-active .diagram-symbol__coil-core {
 	opacity: 1;
-	fill: rgba(45, 212, 191, 0.24);
+	fill: rgba(250, 204, 21, 0.24);
 	transform: scale(1.05);
 }
 
@@ -1764,7 +1789,7 @@
 }
 
 .freeplay-component--coil-on .freeplay-component__symbol-rotator {
-	filter: drop-shadow(0 14px 24px rgba(13, 148, 136, 0.22));
+	filter: drop-shadow(0 14px 24px rgba(245, 158, 11, 0.22));
 }
 
 .freeplay-component--contact-active .freeplay-component__symbol-rotator {
