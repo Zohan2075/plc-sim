@@ -1746,6 +1746,7 @@
 	gap: 0.2rem;
 	user-select: none;
 	z-index: 3;
+	pointer-events: none;
 }
 
 .freeplay-component--selected {
@@ -1760,10 +1761,30 @@
 	min-height: 102px;
 	display: grid;
 	place-items: center;
-	cursor: grab;
+	pointer-events: auto;
 }
 
-.freeplay-component__glyph:active {
+.freeplay-component__glyph-handle {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	border-radius: 18px;
+	background: transparent;
+	cursor: grab;
+	pointer-events: auto;
+	z-index: 1;
+}
+
+.freeplay-component__glyph-handle:active {
+	cursor: grabbing;
+}
+
+.freeplay-component__glyph-handle--manual {
+	cursor: pointer;
+}
+
+.freeplay-component__glyph-handle--manual:active {
 	cursor: grabbing;
 }
 
@@ -1777,6 +1798,21 @@
 	transition: transform 140ms ease, filter 140ms ease;
 	transform-origin: center;
 	filter: drop-shadow(0 12px 18px rgba(15, 23, 42, 0.1));
+	pointer-events: none;
+}
+
+.freeplay-component__glyph-handle--manual:hover ~ .freeplay-component__symbol-rotator,
+.freeplay-component__press-target:hover ~ .freeplay-component__symbol-rotator,
+.freeplay-component--manual-active .freeplay-component__symbol-rotator {
+	filter: drop-shadow(0 14px 24px rgba(14, 116, 144, 0.18));
+}
+
+.freeplay-component__glyph-handle--manual:hover ~ .freeplay-component__symbol-rotator .diagram-symbol,
+.freeplay-component__press-target:hover ~ .freeplay-component__symbol-rotator .diagram-symbol,
+.freeplay-component--manual-active .diagram-symbol {
+	transform: scale(1.02);
+	transform-origin: center;
+	transition: transform 140ms ease;
 }
 
 .freeplay-component__glyph .diagram-symbol {
@@ -1813,6 +1849,13 @@
 	margin: 0;
 	z-index: 2;
 	cursor: pointer;
+	pointer-events: auto;
+}
+
+.freeplay-component__badge,
+.freeplay-component__label-row,
+.freeplay-port {
+	pointer-events: auto;
 }
 
 .freeplay-component__press-target:focus-visible {

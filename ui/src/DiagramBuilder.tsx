@@ -214,6 +214,8 @@ const GENERATED_INSTRUCTION_TAG_PREFIX = "__builder_label__:";
 const CIRCUIT_SNAPSHOT_VERSION = 1;
 const ROTATION_CENTER_X = COMPONENT_WIDTH / 2;
 const ROTATION_CENTER_Y = COMPONENT_GLYPH_HEIGHT / 2;
+const TERMINAL_LATTICE_X_OFFSET = ((ROTATION_CENTER_X % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
+const TERMINAL_LATTICE_Y_OFFSET = ((ROTATION_CENTER_Y % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
 const MAJOR_GRID_MULTIPLIER = 5;
 const EMPTY_TAG_VALUES: Readonly<Record<string, boolean>> = {};
 const DEFAULT_PLANE_SETTINGS: BuilderPlaneSettings = {
@@ -762,7 +764,7 @@ function projectSymbolPoint(x: number, y: number, viewBoxHeight: number): Point 
   const offsetX = (SYMBOL_VIEWPORT_WIDTH - SYMBOL_VIEWBOX_WIDTH * scale) / 2;
   const offsetY = SYMBOL_VIEWPORT_TOP + (SYMBOL_VIEWPORT_HEIGHT - viewBoxHeight * scale) / 2;
 
-  return roundPoint({
+  return snapPointToTerminalLattice({
     x: offsetX + x * scale,
     y: offsetY + y * scale
   });
@@ -979,7 +981,7 @@ function renderSymbolGraphic(
           <circle cx="94" cy="58" r="5.5" className="diagram-symbol__terminal" />
           <path d="M41 21 C50 8 78 8 87 21" className="diagram-symbol__line" fill="none" />
           <path d="M41 53 C50 40 78 40 87 53" className="diagram-symbol__line" fill="none" />
-          <line x1="64" y1="11" x2="64" y2="39" className="diagram-symbol__linkage" />
+          <line x1="64" y1="11" x2="64" y2="40" className="diagram-symbol__linkage" />
         </svg>
       );
     case "SWITCH_1P":
@@ -1068,7 +1070,8 @@ function renderSymbolGraphic(
         const contactClosed = options.contactClosed ?? false;
         const contactSymbolClassName = [
           "diagram-symbol",
-          options.energized ? "diagram-symbol--energized" : ""
+          options.contactActuated ? "diagram-symbol--energized" : "",
+          options.contactActuated ? "diagram-symbol--contact-actuated" : ""
         ].filter(Boolean).join(" ");
 
       return (
@@ -1088,7 +1091,8 @@ function renderSymbolGraphic(
         const contactClosed = options.contactClosed ?? true;
         const contactSymbolClassName = [
           "diagram-symbol",
-          options.energized ? "diagram-symbol--energized" : ""
+          options.contactActuated ? "diagram-symbol--energized" : "",
+          options.contactActuated ? "diagram-symbol--contact-actuated" : ""
         ].filter(Boolean).join(" ");
 
       return (
@@ -1295,6 +1299,24 @@ function distanceBetween(left: Point, right: Point): number {
   return Math.hypot(dx, dy);
 }
 
+function snapCoordinateToLattice(value: number, spacing: number, offset: number): number {
+  return offset + Math.round((value - offset) / spacing) * spacing;
+}
+
+function snapPointToTerminalLattice(point: Point): Point {
+  return roundPoint({
+    x: snapCoordinateToLattice(point.x, DEFAULT_GRID_SPACING, TERMINAL_LATTICE_X_OFFSET),
+    y: snapCoordinateToLattice(point.y, DEFAULT_GRID_SPACING, TERMINAL_LATTICE_Y_OFFSET)
+  });
+}
+
+function pointsShareCanonicalCoordinates(left: Point, right: Point): boolean {
+  const normalizedLeft = roundPoint(left);
+  const normalizedRight = roundPoint(right);
+
+  return normalizedLeft.x === normalizedRight.x && normalizedLeft.y === normalizedRight.y;
+}
+
 function pointsAreClose(left: Point, right: Point): boolean {
   return distanceBetween(left, right) < 3;
 }
@@ -1303,10 +1325,11 @@ function normalizeWirePoints(points: Point[]): Point[] {
   const normalized: Point[] = [];
 
   for (const point of points) {
+    const canonicalPoint = roundPoint(point);
     const previousPoint = normalized[normalized.length - 1];
 
-    if (!previousPoint || !pointsAreClose(previousPoint, point)) {
-      normalized.push(point);
+    if (!previousPoint || !pointsShareCanonicalCoordinates(previousPoint, canonicalPoint)) {
+      normalized.push(canonicalPoint);
     }
   }
 
@@ -2234,8 +2257,8 @@ function insertPointIntoWire(points: Point[], insertIndex: number, point: Point)
   const nextPoint = points[insertIndex];
 
   if (
-    (previousPoint && pointsAreClose(previousPoint, roundedPoint))
-    || (nextPoint && pointsAreClose(nextPoint, roundedPoint))
+    (previousPoint && pointsShareCanonicalCoordinates(previousPoint, roundedPoint))
+    || (nextPoint && pointsShareCanonicalCoordinates(nextPoint, roundedPoint))
   ) {
     return points;
   }
@@ -3029,6 +3052,15 @@ function computeElectricalState(
         if (!energizedWireCurrentById.has(wireId)) {
           energizedWireCurrentById.set(wireId, sourceCurrentType);
         }
+
+        continue;
+      }
+
+      if (
+        !idleWireCurrentById.has(wireId)
+        && nodeIds.some((nodeId) => feedReachableNodes.has(nodeId))
+      ) {
+        idleWireCurrentById.set(wireId, sourceCurrentType);
       }
     }
   }
@@ -3063,6 +3095,50 @@ function getComponentLabelRowStyle(rotation: number): CSSProperties {
   }
 
   return { bottom: "0.25rem" };
+}
+
+function getComponentGlyphHitboxStyle(type: BuilderComponentType, rotation: number): CSSProperties {
+  const normalizedRotation = normalizeQuarterTurns(rotation);
+  const vertical = normalizedRotation === 1 || normalizedRotation === 3;
+
+  if (type === "BREAKER_2P") {
+    return vertical
+      ? { height: 124, width: 108 }
+      : { height: 92, width: 138 };
+  }
+
+  switch (getSymbolCategory(type)) {
+    case "power":
+      return vertical
+        ? { height: 116, width: 104 }
+        : { height: 84, width: 136 };
+    case "breaker":
+      return vertical
+        ? { height: 118, width: 94 }
+        : { height: 80, width: 128 };
+    case "contact":
+      return vertical
+        ? { height: 120, width: 90 }
+        : { height: 78, width: 126 };
+    case "coil":
+    case "load":
+      return vertical
+        ? { height: 108, width: 100 }
+        : { height: 84, width: 112 };
+  }
+}
+
+function getPushButtonPressTargetStyle(rotation: number): CSSProperties {
+  const normalizedRotation = normalizeQuarterTurns(rotation);
+  const vertical = normalizedRotation === 1 || normalizedRotation === 3;
+  const rotatedCenter = rotatePoint({ x: ROTATION_CENTER_X, y: 28 }, rotation);
+
+  return {
+    height: vertical ? 68 : 46,
+    left: rotatedCenter.x,
+    top: rotatedCenter.y,
+    width: vertical ? 46 : 68
+  };
 }
 
 function getComponentStatusBadge(component: BuilderComponent, running: boolean, energized: boolean): string | null {
@@ -3525,6 +3601,56 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const previewPoints = draftWirePoints.length > 0 && cursorPoint !== null
     ? [...draftWirePoints, cursorPoint]
     : draftWirePoints;
+  const wireDisplayNodes = Array.from(
+    wires.reduce((nodesByPointKey, wire) => {
+      const isSelected = selection?.kind === "wire" && selection.id === wire.id;
+
+      wire.points.forEach((point, index) => {
+        const pointKey = getPointKey(point);
+        const entry = nodesByPointKey.get(pointKey) ?? {
+          occurrences: [] as Array<{
+            color: string;
+            isEndpoint: boolean;
+            isSelected: boolean;
+            pointIndex: number;
+            wireId: string;
+          }> ,
+          point: roundPoint(point)
+        };
+
+        entry.occurrences.push({
+          color: wire.color,
+          isEndpoint: isWireEndpointIndex(index, wire.points.length),
+          isSelected,
+          pointIndex: index,
+          wireId: wire.id
+        });
+        nodesByPointKey.set(pointKey, entry);
+      });
+
+      return nodesByPointKey;
+    }, new Map<string, {
+      occurrences: Array<{
+        color: string;
+        isEndpoint: boolean;
+        isSelected: boolean;
+        pointIndex: number;
+        wireId: string;
+      }>;
+      point: Point;
+    }>()).entries()
+  ).map(([pointKey, entry]) => {
+    const primaryOccurrence = entry.occurrences.find((occurrence) => occurrence.isSelected) ?? entry.occurrences[0];
+
+    return {
+      hasEndpoint: entry.occurrences.some((occurrence) => occurrence.isEndpoint),
+      hasMultipleOccurrences: entry.occurrences.length > 1,
+      hasSelectedOccurrence: entry.occurrences.some((occurrence) => occurrence.isSelected),
+      key: pointKey,
+      point: entry.point,
+      primaryOccurrence
+    };
+  });
   const syncLabel = hasCustomLayout ? "Playground wiring drives the sim" : "Loaded program seeded into canvas";
   const selectedPaletteType = selectedComponent?.type ?? null;
   const activeWireColor = selectedWire?.color ?? wireColor;
@@ -4213,6 +4339,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   function handlePushButtonPointerDown(event: ReactPointerEvent<HTMLButtonElement>, componentId: string) {
     event.preventDefault();
     event.stopPropagation();
+    setWireReconnectTarget(null);
+    setSelection({ kind: "component", id: componentId });
     event.currentTarget.setPointerCapture(event.pointerId);
     activePushButtonPressRef.current = { componentId, pointerId: event.pointerId };
     pressMomentaryPushButton(componentId);
@@ -4827,32 +4955,48 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           cutWireSegmentAtPoint(wire.id, point);
                         }}
                       />
-
-                      {wire.points.map((point, index) => (
-                        <circle
-                          key={`${wire.id}-${index}`}
-                          className={`freeplay-wire__node ${isSelected ? "freeplay-wire__node--selected" : ""} ${isWireEndpointIndex(index, wire.points.length) ? "freeplay-wire__node--endpoint" : "freeplay-wire__node--bend"}`.trim()}
-                          cx={point.x}
-                          cy={point.y}
-                          r={isSelected ? (isWireEndpointIndex(index, wire.points.length) ? 6 : 5) : 4}
-                          style={{ fill: isSelected ? wire.color : undefined, stroke: wire.color }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setWireReconnectTarget(null);
-                            setSelection({ kind: "wire", id: wire.id });
-                          }}
-                          onDoubleClick={(event) => {
-                            if (isWireEndpointIndex(index, wire.points.length)) {
-                              return;
-                            }
-
-                            event.stopPropagation();
-                            removeWireBendPoint(wire.id, index);
-                          }}
-                          onMouseDown={(event) => handleWirePointMouseDown(event, wire.id, index)}
-                        />
-                      ))}
                     </g>
+                  );
+                })}
+
+                {wireDisplayNodes.map((node) => {
+                  const primaryOccurrence = node.primaryOccurrence;
+
+                  if (!primaryOccurrence) {
+                    return null;
+                  }
+
+                  const selectedNode = node.hasSelectedOccurrence;
+
+                  return (
+                    <circle
+                      key={node.key}
+                      className={`freeplay-wire__node ${selectedNode ? "freeplay-wire__node--selected" : ""} ${node.hasEndpoint ? "freeplay-wire__node--endpoint" : "freeplay-wire__node--bend"}`.trim()}
+                      cx={node.point.x}
+                      cy={node.point.y}
+                      r={selectedNode ? (node.hasEndpoint ? 6 : 5) : 4}
+                      style={{ fill: selectedNode ? primaryOccurrence.color : undefined, stroke: primaryOccurrence.color }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setWireReconnectTarget(null);
+                        setSelection({ kind: "wire", id: primaryOccurrence.wireId });
+                      }}
+                      onDoubleClick={(event) => {
+                        if (node.hasEndpoint || node.hasMultipleOccurrences) {
+                          return;
+                        }
+
+                        event.stopPropagation();
+                        removeWireBendPoint(primaryOccurrence.wireId, primaryOccurrence.pointIndex);
+                      }}
+                      onMouseDown={(event) => {
+                        if (node.hasMultipleOccurrences) {
+                          return;
+                        }
+
+                        handleWirePointMouseDown(event, primaryOccurrence.wireId, primaryOccurrence.pointIndex);
+                      }}
+                    />
                   );
                 })}
 
@@ -4870,14 +5014,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 const terminals = getComponentTerminals(component);
                 const selected = selection?.kind === "component" && selection.id === component.id;
                 const energized = running && electricalState.energizedComponentIds.has(component.id);
-                const visualEnergized = energized && !isMomentaryPushButtonType(component.type);
                 const tagActive = componentNeedsTag(component.type)
                   ? getInstructionTagValue(component, electricalState.resolvedTagValues)
                   : false;
                 const coilActive = isCoilType(component.type) && energized;
                 const contactActuated = isContactType(component.type) && tagActive;
                 const contactClosed = isContactType(component.type) && isContactClosed(component, electricalState.resolvedTagValues);
+                const visualEnergized = energized
+                  && !isMomentaryPushButtonType(component.type)
+                  && !isContactType(component.type);
                 const pushButtonPressed = isMomentaryPushButtonType(component.type) && isMomentaryPushButtonPressed(component);
+                const manualControl = isMaintainedSwitchType(component.type) || isMomentaryPushButtonType(component.type);
+                const manualControlActive = pushButtonPressed || (isMaintainedSwitchType(component.type) && isMaintainedSwitchClosed(component));
+                const glyphHitboxStyle = getComponentGlyphHitboxStyle(component.type, component.rotation);
+                const pushButtonPressTargetStyle = isMomentaryPushButtonType(component.type)
+                  ? getPushButtonPressTargetStyle(component.rotation)
+                  : undefined;
                 const componentBadge = getComponentStatusBadge(component, running, energized);
 
                 return (
@@ -4889,15 +5041,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       visualEnergized ? "freeplay-component--energized" : "",
                       component.type === "LAMP" && energized ? "freeplay-component--lamp-on" : "",
                       component.type === "MOTOR" && energized ? "freeplay-component--motor-on" : "",
+                      manualControl ? "freeplay-component--manual" : "",
+                      manualControlActive ? "freeplay-component--manual-active" : "",
                       pushButtonPressed ? "freeplay-component--pushbutton-down" : "",
                       coilActive ? "freeplay-component--coil-on" : ""
                     ].filter(Boolean).join(" ")}
                     style={{ left: component.x, top: component.y }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setWireReconnectTarget(null);
-                      setSelection({ kind: "component", id: component.id });
-                    }}
                   >
                     {componentBadge ? (
                       <div className={`freeplay-component__badge ${energized ? "freeplay-component__badge--live" : ""}`.trim()}>
@@ -4937,38 +5086,44 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     ))}
 
                     <div
-                      className="freeplay-component__glyph"
-                      onClick={(event) => {
-                        event.stopPropagation();
-
-                        if (componentDragMovedRef.current) {
-                          componentDragMovedRef.current = false;
-                          return;
-                        }
-
-                        setSelection({ kind: "component", id: component.id });
-
-                        if (draftWirePoints.length === 0 && wireReconnectTarget === null && isMaintainedSwitchType(component.type)) {
-                          scheduleMaintainedSwitchToggle(component.id);
-                        }
-                      }}
-                      onDoubleClick={(event) => {
-                        event.stopPropagation();
-
-                        if (isMaintainedSwitchType(component.type)) {
-                          cancelPendingSwitchToggle(component.id);
-                        }
-
-                        rotateComponent(component.id, 1);
-                      }}
-                      onMouseDown={(event) => handleComponentHandleMouseDown(event, component.id)}
+                      className={`freeplay-component__glyph ${manualControl ? "freeplay-component__glyph--manual" : ""}`.trim()}
                     >
+                      <div
+                        className={`freeplay-component__glyph-handle ${manualControl ? "freeplay-component__glyph-handle--manual" : ""}`.trim()}
+                        style={glyphHitboxStyle}
+                        onClick={(event) => {
+                          event.stopPropagation();
+
+                          if (componentDragMovedRef.current) {
+                            componentDragMovedRef.current = false;
+                            return;
+                          }
+
+                          setWireReconnectTarget(null);
+                          setSelection({ kind: "component", id: component.id });
+
+                          if (draftWirePoints.length === 0 && wireReconnectTarget === null && isMaintainedSwitchType(component.type)) {
+                            scheduleMaintainedSwitchToggle(component.id);
+                          }
+                        }}
+                        onDoubleClick={(event) => {
+                          event.stopPropagation();
+
+                          if (isMaintainedSwitchType(component.type)) {
+                            cancelPendingSwitchToggle(component.id);
+                          }
+
+                          rotateComponent(component.id, 1);
+                        }}
+                        onMouseDown={(event) => handleComponentHandleMouseDown(event, component.id)}
+                      />
                       {isMomentaryPushButtonType(component.type) ? (
                         <button
                           type="button"
                           className="freeplay-component__press-target"
                           aria-label={`Press ${component.label || getComponentName(component.type)}`}
                           aria-pressed={pushButtonPressed}
+                          style={pushButtonPressTargetStyle}
                           onLostPointerCapture={() => handlePushButtonLostCapture(component.id)}
                           onPointerCancel={(event) => handlePushButtonPointerRelease(event, component.id)}
                           onPointerDown={(event) => handlePushButtonPointerDown(event, component.id)}
@@ -4994,7 +5149,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     <div
                       className="freeplay-component__label-row"
                       style={getComponentLabelRowStyle(component.rotation)}
-                      onClick={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        if (selected) {
+                          return;
+                        }
+
+                        setWireReconnectTarget(null);
+                        setSelection({ kind: "component", id: component.id });
+                      }}
                     >
                       {selected ? (
                         <input
