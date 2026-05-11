@@ -837,8 +837,8 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
       ];
       }
     case "SWITCH_1P": {
-      const inputTerminal = projectSymbolPoint(6, 34, 64);
-      const outputTerminal = projectSymbolPoint(122, 34, 64);
+      const inputTerminal = projectSymbolPoint(25.6, 32, 64);
+      const outputTerminal = projectSymbolPoint(102.4, 32, 64);
 
       return [
         { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
@@ -847,10 +847,10 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
     }
     case "BREAKER_2P":
       {
-        const topInputTerminal = projectSymbolPoint(6.4, 12.8, 64);
-        const topOutputTerminal = projectSymbolPoint(121.6, 12.8, 64);
-        const bottomInputTerminal = projectSymbolPoint(6.4, 51.2, 64);
-        const bottomOutputTerminal = projectSymbolPoint(121.6, 51.2, 64);
+        const topInputTerminal = projectSymbolPoint(34.4, 12.8, 64, { snapToLattice: false });
+        const topOutputTerminal = projectSymbolPoint(93.6, 12.8, 64, { snapToLattice: false });
+        const bottomInputTerminal = projectSymbolPoint(34.4, 51.2, 64, { snapToLattice: false });
+        const bottomOutputTerminal = projectSymbolPoint(93.6, 51.2, 64, { snapToLattice: false });
 
       return [
         { id: "in-top", label: "1", pairId: "top", role: "input", x: topInputTerminal.x, y: topInputTerminal.y },
@@ -861,8 +861,8 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
       }
     case "LAMP":
     case "MOTOR": {
-      const inputTerminal = projectSymbolPoint(6, 32, 64);
-      const outputTerminal = projectSymbolPoint(122, 32, 64);
+      const inputTerminal = projectSymbolPoint(6.4, 32, 64);
+      const outputTerminal = projectSymbolPoint(121.6, 32, 64);
 
       return [
         { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
@@ -892,8 +892,8 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
     case "OTE":
     case "OTL":
     case "OTU": {
-      const inputTerminal = projectSymbolPoint(6, 30, 60);
-      const outputTerminal = projectSymbolPoint(122, 30, 60);
+      const inputTerminal = projectSymbolPoint(6.4, 30, 60);
+      const outputTerminal = projectSymbolPoint(121.6, 30, 60);
 
       return [
         { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
@@ -1036,15 +1036,15 @@ function renderSymbolGraphic(
     case "SWITCH_1P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="34" x2="28" y2="34" className="diagram-symbol__line" />
-          <line x1="100" y1="34" x2="122" y2="34" className="diagram-symbol__line" />
-          <circle cx="34" cy="34" r="5.5" className="diagram-symbol__terminal" />
-          <circle cx="94" cy="34" r="5.5" className="diagram-symbol__terminal" />
+          <line x1="3.2" y1="32" x2="20.1" y2="32" className="diagram-symbol__line" />
+          <line x1="107.9" y1="32" x2="124.8" y2="32" className="diagram-symbol__line" />
+          <circle cx="25.6" cy="32" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="102.4" cy="32" r="5.5" className="diagram-symbol__terminal" />
           <line
-            x1="40"
-            y1="34"
-            x2={options.switchClosed ? "88" : "82"}
-            y2={options.switchClosed ? "30" : "16"}
+            x1="32.6"
+            y1="32"
+            x2={options.switchClosed ? "95.4" : "89.4"}
+            y2={options.switchClosed ? "28" : "16"}
             className="diagram-symbol__line diagram-symbol__contact-arm"
           />
         </svg>
@@ -1052,8 +1052,8 @@ function renderSymbolGraphic(
     case "LAMP":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
-          <line x1="90" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
+          <line x1="6.4" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
+          <line x1="90" y1="32" x2="121.6" y2="32" className="diagram-symbol__line" />
           <circle cx="64" cy="32" r="22" className="diagram-symbol__shape" />
           <path d="M48 16 L80 48 M80 16 L48 48" className="diagram-symbol__line" />
         </svg>
@@ -1061,8 +1061,8 @@ function renderSymbolGraphic(
     case "MOTOR":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
-          <line x1="90" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
+          <line x1="6.4" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
+          <line x1="90" y1="32" x2="121.6" y2="32" className="diagram-symbol__line" />
           <circle cx="64" cy="32" r="22" className="diagram-symbol__shape" />
           <circle cx="64" cy="32" r="13" className="diagram-symbol__shape" />
           <g className="diagram-symbol__motor-rotor">
@@ -1159,8 +1159,8 @@ function renderSymbolGraphic(
     case "OTE":
       return (
         <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="30" x2="44" y2="30" className="diagram-symbol__line" />
-          <line x1="84" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
+          <line x1="6.4" y1="30" x2="44" y2="30" className="diagram-symbol__line" />
+          <line x1="84" y1="30" x2="121.6" y2="30" className="diagram-symbol__line" />
           <circle cx="64" cy="30" r="20" className="diagram-symbol__shape" />
           <circle cx="64" cy="30" r="12" className="diagram-symbol__coil-core" />
         </svg>
@@ -1168,8 +1168,8 @@ function renderSymbolGraphic(
     case "OTL":
       return (
         <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="30" x2="44" y2="30" className="diagram-symbol__line" />
-          <line x1="84" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
+          <line x1="6.4" y1="30" x2="44" y2="30" className="diagram-symbol__line" />
+          <line x1="84" y1="30" x2="121.6" y2="30" className="diagram-symbol__line" />
           <circle cx="64" cy="30" r="20" className="diagram-symbol__shape" />
           <circle cx="64" cy="30" r="12" className="diagram-symbol__coil-core" />
           <text x="64" y="36" textAnchor="middle" className="diagram-symbol__text">L</text>
@@ -1178,8 +1178,8 @@ function renderSymbolGraphic(
     case "OTU":
       return (
         <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
-          <line x1="6" y1="30" x2="44" y2="30" className="diagram-symbol__line" />
-          <line x1="84" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
+          <line x1="6.4" y1="30" x2="44" y2="30" className="diagram-symbol__line" />
+          <line x1="84" y1="30" x2="121.6" y2="30" className="diagram-symbol__line" />
           <circle cx="64" cy="30" r="20" className="diagram-symbol__shape" />
           <circle cx="64" cy="30" r="12" className="diagram-symbol__coil-core" />
           <text x="64" y="36" textAnchor="middle" className="diagram-symbol__text">U</text>
@@ -3999,6 +3999,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       primaryOccurrence
     };
   });
+  const componentTerminalPointKeys = getComponentTerminalPointKeys(components);
   const syncLabel = hasCustomLayout ? "Playground wiring drives the sim" : "Loaded program seeded into canvas";
   const selectedPaletteType = selectedComponent?.type ?? null;
   const activeWireColor = selectedWire?.color ?? wireColor;
@@ -5555,6 +5556,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   const primaryOccurrence = node.primaryOccurrence;
 
                   if (!primaryOccurrence) {
+                    return null;
+                  }
+
+                  if (node.hasEndpoint && componentTerminalPointKeys.has(node.key)) {
                     return null;
                   }
 
