@@ -1,32 +1,49 @@
-import type { InstructionBase, Program, Rung } from "@plc-sim/ladder-types";
+import type {
+  InstructionBase,
+  Program,
+  Rung,
+  TimedContactInstruction
+} from "@plc-sim/ladder-types";
 import type { ScanTrace, TraceRung, TraceStep } from "./types";
 import { TagMemory } from "./tagMemory";
 
+interface TimedContactRuntimeState {
+  elapsedMs: number;
+}
+
+function isTimedContactInstruction(instruction: InstructionBase): instruction is TimedContactInstruction {
+  return instruction.type === "NOTC" || instruction.type === "NCTO";
+}
+
 export class ProgramRunner {
   private program: Program = { rungs: [] };
+  private readonly timedContactStateByInstructionId = new Map<string, TimedContactRuntimeState>();
 
   load(program: Program): void {
     this.program = program;
+    this.timedContactStateByInstructionId.clear();
   }
 
-  runScan(memory: TagMemory): void {
+  runScan(memory: TagMemory, elapsedMs = 0): void {
     const inputImage = memory.snapshotInputs();
     const pendingWrites = new Map<string, boolean>();
+    const elapsedMsThisScan = this.normalizeElapsedMs(elapsedMs);
 
     for (const rung of this.program.rungs) {
-      this.evaluateRung(rung, memory, inputImage, pendingWrites);
+      this.evaluateRung(rung, memory, inputImage, pendingWrites, elapsedMsThisScan);
     }
 
     memory.commitWrites(pendingWrites);
   }
 
-  runScanWithTrace(memory: TagMemory): ScanTrace {
+  runScanWithTrace(memory: TagMemory, elapsedMs = 0): ScanTrace {
     const inputImage = memory.snapshotInputs();
     const pendingWrites = new Map<string, boolean>();
     const rungTraces: TraceRung[] = [];
+    const elapsedMsThisScan = this.normalizeElapsedMs(elapsedMs);
 
     for (const rung of this.program.rungs) {
-      rungTraces.push(this.evaluateRungWithTrace(rung, memory, inputImage, pendingWrites));
+      rungTraces.push(this.evaluateRungWithTrace(rung, memory, inputImage, pendingWrites, elapsedMsThisScan));
     }
 
     memory.commitWrites(pendingWrites);
@@ -41,12 +58,13 @@ export class ProgramRunner {
     rung: Rung,
     memory: TagMemory,
     inputImage: ReadonlyMap<string, boolean>,
-    pendingWrites: Map<string, boolean>
+    pendingWrites: Map<string, boolean>,
+    elapsedMsThisScan: number
   ): void {
     let power = true;
 
     for (const instruction of rung.instructions) {
-      power = this.evaluateInstruction(instruction, power, memory, inputImage, pendingWrites);
+      power = this.evaluateInstruction(instruction, power, memory, inputImage, pendingWrites, elapsedMsThisScan);
     }
   }
 
@@ -54,7 +72,8 @@ export class ProgramRunner {
     rung: Rung,
     memory: TagMemory,
     inputImage: ReadonlyMap<string, boolean>,
-    pendingWrites: Map<string, boolean>
+    pendingWrites: Map<string, boolean>,
+    elapsedMsThisScan: number
   ): TraceRung {
     let power = true;
     const steps: TraceStep[] = [];
@@ -66,7 +85,8 @@ export class ProgramRunner {
         powerBefore,
         memory,
         inputImage,
-        pendingWrites
+        pendingWrites,
+        elapsedMsThisScan
       );
 
       steps.push(step);
@@ -81,7 +101,8 @@ export class ProgramRunner {
     powerBefore: boolean,
     memory: TagMemory,
     inputImage: ReadonlyMap<string, boolean>,
-    pendingWrites: Map<string, boolean>
+    pendingWrites: Map<string, boolean>,
+    elapsedMsThisScan: number
   ): boolean {
     switch (instruction.type) {
       case "XIC": {
@@ -91,6 +112,12 @@ export class ProgramRunner {
       case "XIO": {
         const value = memory.readDuringScan(instruction.tag, inputImage);
         return powerBefore && !value;
+      }
+      case "NOTC":
+      case "NCTO": {
+        const inputValue = memory.readDuringScan(instruction.tag, inputImage);
+        const { contactClosed } = this.advanceTimedContact(instruction, inputValue, elapsedMsThisScan);
+        return powerBefore && contactClosed;
       }
       case "OTE": {
         pendingWrites.set(instruction.tag, powerBefore);
@@ -116,7 +143,8 @@ export class ProgramRunner {
     powerBefore: boolean,
     memory: TagMemory,
     inputImage: ReadonlyMap<string, boolean>,
-    pendingWrites: Map<string, boolean>
+    pendingWrites: Map<string, boolean>,
+    elapsedMsThisScan: number
   ): { powerAfter: boolean; step: TraceStep } {
     const base: Omit<TraceStep, "powerAfter" | "powerBefore"> = {
       instructionId: instruction.id,
@@ -139,6 +167,24 @@ export class ProgramRunner {
         return {
           powerAfter,
           step: { ...base, powerBefore, powerAfter, readValue: value }
+        };
+      }
+      case "NOTC":
+      case "NCTO": {
+        const inputValue = memory.readDuringScan(instruction.tag, inputImage);
+        const timedContactState = this.advanceTimedContact(instruction, inputValue, elapsedMsThisScan);
+        const powerAfter = powerBefore && timedContactState.contactClosed;
+        return {
+          powerAfter,
+          step: {
+            ...base,
+            delayMs: timedContactState.delayMs,
+            powerBefore,
+            powerAfter,
+            readValue: inputValue,
+            timerDone: timedContactState.done,
+            timerElapsedMs: timedContactState.elapsedMs
+          }
         };
       }
       case "OTE": {
@@ -182,5 +228,45 @@ export class ProgramRunner {
         };
       }
     }
+  }
+
+  private advanceTimedContact(
+    instruction: TimedContactInstruction,
+    inputValue: boolean,
+    elapsedMsThisScan: number
+  ): { contactClosed: boolean; delayMs: number; done: boolean; elapsedMs: number } {
+    const delayMs = this.normalizeDelayMs(instruction.delayMs);
+
+    if (!inputValue) {
+      this.timedContactStateByInstructionId.delete(instruction.id);
+
+      return {
+        contactClosed: instruction.type === "NCTO",
+        delayMs,
+        done: false,
+        elapsedMs: 0
+      };
+    }
+
+    const previousElapsedMs = this.timedContactStateByInstructionId.get(instruction.id)?.elapsedMs ?? 0;
+    const nextElapsedMs = Math.min(delayMs, previousElapsedMs + elapsedMsThisScan);
+    const done = nextElapsedMs >= delayMs;
+
+    this.timedContactStateByInstructionId.set(instruction.id, { elapsedMs: nextElapsedMs });
+
+    return {
+      contactClosed: instruction.type === "NOTC" ? done : !done,
+      delayMs,
+      done,
+      elapsedMs: nextElapsedMs
+    };
+  }
+
+  private normalizeDelayMs(delayMs: number): number {
+    return Number.isFinite(delayMs) ? Math.max(0, Math.round(delayMs)) : 0;
+  }
+
+  private normalizeElapsedMs(elapsedMs: number): number {
+    return Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
   }
 }

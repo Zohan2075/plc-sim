@@ -360,27 +360,31 @@
 
 .diagram-symbol__line {
 	stroke: currentColor;
-	stroke-width: 3;
+	stroke-width: 3.2;
 	fill: none;
 	stroke-linecap: round;
 	stroke-linejoin: round;
 }
 
+.diagram-symbol__breaker-lead {
+	stroke-width: 3.45;
+}
+
 .diagram-symbol__shape {
 	stroke: currentColor;
-	stroke-width: 2.8;
+	stroke-width: 3;
 	fill: rgba(255, 255, 255, 0.94);
 }
 
 .diagram-symbol__terminal {
 	stroke: currentColor;
-	stroke-width: 2.6;
+	stroke-width: 2.9;
 	fill: rgba(255, 255, 255, 0.98);
 }
 
 .diagram-symbol__linkage {
 	stroke: currentColor;
-	stroke-width: 2.5;
+	stroke-width: 2.8;
 	fill: none;
 	stroke-linecap: round;
 	stroke-dasharray: 3 3;
@@ -1655,8 +1659,8 @@
 }
 
 .freeplay-canvas {
-	--grid-spacing: 24px;
-	--major-grid-spacing: 120px;
+	--grid-spacing: 18px;
+	--major-grid-spacing: 90px;
 	position: relative;
 	width: 1720px;
 	height: 940px;
@@ -1701,6 +1705,10 @@
 
 .freeplay-canvas--wire {
 	cursor: crosshair;
+}
+
+.freeplay-canvas--wire.freeplay-canvas--panning {
+	cursor: grabbing;
 }
 
 .freeplay-plane-overlay {
@@ -1781,7 +1789,7 @@
 	fill: none;
 	stroke-linecap: round;
 	stroke-linejoin: round;
-	stroke-width: 4;
+	stroke-width: 3.5;
 }
 
 .freeplay-wire--selected {
@@ -2034,6 +2042,14 @@
 	background: linear-gradient(180deg, rgba(255, 244, 214, 0.98), rgba(254, 231, 176, 0.96));
 	border-color: rgba(245, 158, 11, 0.22);
 	color: #9a3412;
+}
+
+.freeplay-component__badge--timer {
+	background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(219, 234, 254, 0.94));
+	border-color: rgba(37, 99, 235, 0.18);
+	color: #1d4ed8;
+	font-variant-numeric: tabular-nums;
+	min-width: 4.8rem;
 }
 
 .freeplay-component__label-row {

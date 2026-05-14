@@ -1,13 +1,16 @@
 import type { InstructionType, Program } from "@plc-sim/ladder-types";
 
 export interface TraceStep {
+  delayMs?: number;
   instructionId: string;
-  type: InstructionType;
+  timerDone?: boolean;
+  timerElapsedMs?: number;
   tag: string;
   powerBefore: boolean;
   powerAfter: boolean;
   readValue?: boolean;
   pendingWrite?: boolean;
+  type: InstructionType;
 }
 
 export interface TraceRung {
@@ -23,6 +26,7 @@ export interface ScanTrace {
 export interface PlcEngineApi {
   loadProgram(program: Program): void;
   setInput(tag: string, value: boolean): void;
-  scan(): void;
+  scan(elapsedMs?: number): void;
+  scanWithTrace(elapsedMs?: number): ScanTrace;
   getTag(tag: string): boolean;
 }

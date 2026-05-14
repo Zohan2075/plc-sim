@@ -18,13 +18,13 @@ export class PlcEngine implements PlcEngineApi {
     this.memory.setInput(tag, value);
   }
 
-  scan(): void {
+  scan(elapsedMs = 0): void {
     this.lastTrace = undefined;
-    this.runner.runScan(this.memory);
+    this.runner.runScan(this.memory, elapsedMs);
   }
 
-  scanWithTrace(): ScanTrace {
-    const trace = this.runner.runScanWithTrace(this.memory);
+  scanWithTrace(elapsedMs = 0): ScanTrace {
+    const trace = this.runner.runScanWithTrace(this.memory, elapsedMs);
     this.lastTrace = trace;
     return trace;
   }

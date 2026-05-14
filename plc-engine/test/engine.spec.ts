@@ -53,6 +53,117 @@ describe("PlcEngine scan semantics", () => {
     expect(engine.getTag("O:0/0")).toBe(false);
   });
 
+  it("NOTC closes only after its preset and resets when the input drops", () => {
+    const program: Program = {
+      rungs: [
+        {
+          id: "r1",
+          instructions: [
+            { id: "i1", type: "NOTC", tag: "I:0/0", delayMs: 300 },
+            { id: "i2", type: "OTE", tag: "O:0/0" }
+          ]
+        }
+      ]
+    };
+
+    const engine = new PlcEngine();
+    engine.loadProgram(program);
+
+    engine.setInput("I:0/0", true);
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(false);
+
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(false);
+
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(true);
+
+    engine.setInput("I:0/0", false);
+    engine.scan(0);
+    expect(engine.getTag("O:0/0")).toBe(false);
+  });
+
+  it("NCTO stays closed while timing and opens after its preset", () => {
+    const program: Program = {
+      rungs: [
+        {
+          id: "r1",
+          instructions: [
+            { id: "i1", type: "NCTO", tag: "I:0/0", delayMs: 300 },
+            { id: "i2", type: "OTE", tag: "O:0/0" }
+          ]
+        }
+      ]
+    };
+
+    const engine = new PlcEngine();
+    engine.loadProgram(program);
+
+    engine.setInput("I:0/0", false);
+    engine.scan(0);
+    expect(engine.getTag("O:0/0")).toBe(true);
+
+    engine.setInput("I:0/0", true);
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(true);
+
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(true);
+
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(false);
+
+    engine.setInput("I:0/0", false);
+    engine.scan(0);
+    expect(engine.getTag("O:0/0")).toBe(true);
+  });
+
+  it("timed contacts with the same label keep independent presets", () => {
+    const program: Program = {
+      rungs: [
+        {
+          id: "drive",
+          instructions: [
+            { id: "drive-in", type: "XIC", tag: "I:0/0" },
+            { id: "drive-coil", type: "OTE", tag: "B3:0/7" }
+          ]
+        },
+        {
+          id: "fast",
+          instructions: [
+            { id: "fast-contact", type: "NOTC", tag: "B3:0/7", delayMs: 100 },
+            { id: "fast-out", type: "OTE", tag: "O:0/0" }
+          ]
+        },
+        {
+          id: "slow",
+          instructions: [
+            { id: "slow-contact", type: "NOTC", tag: "B3:0/7", delayMs: 300 },
+            { id: "slow-out", type: "OTE", tag: "O:0/1" }
+          ]
+        }
+      ]
+    };
+
+    const engine = new PlcEngine();
+    engine.loadProgram(program);
+
+    engine.setInput("I:0/0", true);
+    engine.scan(100);
+    expect(engine.getTag("B3:0/7")).toBe(true);
+    expect(engine.getTag("O:0/0")).toBe(false);
+    expect(engine.getTag("O:0/1")).toBe(false);
+
+    engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(true);
+    expect(engine.getTag("O:0/1")).toBe(false);
+
+    engine.scan(200);
+    expect(engine.getTag("O:0/0")).toBe(true);
+    expect(engine.getTag("O:0/1")).toBe(true);
+  });
+
   it("OTE writes do not affect logic mid-scan", () => {
     const program: Program = {
       rungs: [

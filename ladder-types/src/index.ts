@@ -1,10 +1,21 @@
-export type InstructionType = "XIC" | "XIO" | "OTE" | "OTL" | "OTU";
+export type TimedContactInstructionType = "NOTC" | "NCTO";
+export type InstructionType = "XIC" | "XIO" | TimedContactInstructionType | "OTE" | "OTL" | "OTU";
 
-export interface InstructionBase {
+interface InstructionCommon {
   id: string;
   tag: string;
-  type: InstructionType;
 }
+
+export interface ImmediateInstruction extends InstructionCommon {
+  type: Exclude<InstructionType, TimedContactInstructionType>;
+}
+
+export interface TimedContactInstruction extends InstructionCommon {
+  delayMs: number;
+  type: TimedContactInstructionType;
+}
+
+export type InstructionBase = ImmediateInstruction | TimedContactInstruction;
 
 export interface Rung {
   id: string;

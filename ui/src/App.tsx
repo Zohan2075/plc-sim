@@ -36,7 +36,7 @@ function buildEngine(project: ProjectBundle): PlcEngine {
     }
   }
 
-  engine.scanWithTrace();
+  engine.scanWithTrace(0);
 
   return engine;
 }
@@ -72,7 +72,7 @@ export function App() {
     }
 
     const handle = window.setInterval(() => {
-      engine.scanWithTrace();
+      engine.scanWithTrace(project.settings.scanIntervalMs);
       setTick((t) => t + 1);
     }, project.settings.scanIntervalMs);
 

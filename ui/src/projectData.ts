@@ -4,7 +4,7 @@ const PROJECT_FORMAT_VERSION = 1;
 const DEFAULT_SCAN_INTERVAL_MS = 150;
 const STORAGE_KEY = "plc-sim.project-snapshot";
 
-const instructionTypes = new Set<InstructionType>(["XIC", "XIO", "OTE", "OTL", "OTU"]);
+const instructionTypes = new Set<InstructionType>(["XIC", "XIO", "NOTC", "NCTO", "OTE", "OTL", "OTU"]);
 const tagKinds = new Set<TagKind>(["input", "output", "internal"]);
 
 export type TagKind = "input" | "output" | "internal";
@@ -217,6 +217,32 @@ function parseProgram(value: unknown): Program {
 
         if (!instructionTypes.has(type as InstructionType)) {
           throw new Error(`Unsupported instruction type \"${type}\".`);
+        }
+
+        if (type === "NOTC" || type === "NCTO") {
+          const delayMs = expectNumber(
+            instructionObject.delayMs,
+            `Program rung ${rungIndex} instruction ${instructionIndex} delayMs`
+          );
+
+          if (!Number.isInteger(delayMs) || delayMs < 0) {
+            throw new Error(
+              `Program rung ${rungIndex} instruction ${instructionIndex} delayMs must be an integer >= 0.`
+            );
+          }
+
+          return {
+            delayMs,
+            id: expectString(
+              instructionObject.id,
+              `Program rung ${rungIndex} instruction ${instructionIndex} id`
+            ),
+            tag: expectString(
+              instructionObject.tag,
+              `Program rung ${rungIndex} instruction ${instructionIndex} tag`
+            ),
+            type: type as InstructionType
+          };
         }
 
         return {
