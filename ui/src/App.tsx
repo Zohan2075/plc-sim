@@ -156,11 +156,24 @@ export function App() {
     }
 
     setErrorMessage(null);
-    setRunning((currentRunning) => {
-      const nextRunning = !currentRunning;
-      setStatusMessage(nextRunning ? "Simulation running." : "Simulation stopped.");
-      return nextRunning;
-    });
+
+    const nextProject: ProjectBundle = {
+      ...activeProject,
+      inputValues: captureInputValues(activeProject.tags, (tagName) => engine.getTag(tagName))
+    };
+
+    if (!running) {
+      setEngine(buildEngine(nextProject));
+      setTick((currentTick) => currentTick + 1);
+      setRunning(true);
+      setStatusMessage("Simulation running.");
+      return;
+    }
+
+    setEngine(buildEngine(nextProject));
+    setTick((currentTick) => currentTick + 1);
+    setRunning(false);
+    setStatusMessage("Simulation stopped.");
   }
 
   return (

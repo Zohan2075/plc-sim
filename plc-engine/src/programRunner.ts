@@ -8,8 +8,11 @@ import type { ScanTrace, TraceRung, TraceStep } from "./types";
 import { TagMemory } from "./tagMemory";
 
 interface TimedContactRuntimeState {
+  actuationElapsedMs: number;
   elapsedMs: number;
 }
+
+const TIMED_CONTACT_ACTUATION_DELAY_MS = 250;
 
 function isTimedContactInstruction(instruction: InstructionBase): instruction is TimedContactInstruction {
   return instruction.type === "NOTC" || instruction.type === "NCTO";
@@ -248,11 +251,22 @@ export class ProgramRunner {
       };
     }
 
-    const previousElapsedMs = this.timedContactStateByInstructionId.get(instruction.id)?.elapsedMs ?? 0;
-    const nextElapsedMs = Math.min(delayMs, previousElapsedMs + elapsedMsThisScan);
-    const done = nextElapsedMs >= delayMs;
+    const previousState = this.timedContactStateByInstructionId.get(instruction.id);
+    const previousActuationElapsedMs = previousState?.actuationElapsedMs ?? 0;
+    const previousElapsedMs = previousState?.elapsedMs ?? 0;
+    const actuationRemainingMs = Math.max(0, TIMED_CONTACT_ACTUATION_DELAY_MS - previousActuationElapsedMs);
+    const actuationStepMs = Math.min(elapsedMsThisScan, actuationRemainingMs);
+    const nextActuationElapsedMs = Math.min(
+      TIMED_CONTACT_ACTUATION_DELAY_MS,
+      previousActuationElapsedMs + elapsedMsThisScan
+    );
+    const nextElapsedMs = Math.min(delayMs, previousElapsedMs + Math.max(0, elapsedMsThisScan - actuationStepMs));
+    const done = nextActuationElapsedMs >= TIMED_CONTACT_ACTUATION_DELAY_MS && nextElapsedMs >= delayMs;
 
-    this.timedContactStateByInstructionId.set(instruction.id, { elapsedMs: nextElapsedMs });
+    this.timedContactStateByInstructionId.set(instruction.id, {
+      actuationElapsedMs: nextActuationElapsedMs,
+      elapsedMs: nextElapsedMs
+    });
 
     return {
       contactClosed: instruction.type === "NOTC" ? done : !done,

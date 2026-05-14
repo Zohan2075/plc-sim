@@ -77,6 +77,12 @@ describe("PlcEngine scan semantics", () => {
     expect(engine.getTag("O:0/0")).toBe(false);
 
     engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(false);
+
+    engine.scan(200);
+    expect(engine.getTag("O:0/0")).toBe(false);
+
+    engine.scan(50);
     expect(engine.getTag("O:0/0")).toBe(true);
 
     engine.setInput("I:0/0", false);
@@ -112,6 +118,12 @@ describe("PlcEngine scan semantics", () => {
     expect(engine.getTag("O:0/0")).toBe(true);
 
     engine.scan(100);
+    expect(engine.getTag("O:0/0")).toBe(true);
+
+    engine.scan(200);
+    expect(engine.getTag("O:0/0")).toBe(true);
+
+    engine.scan(50);
     expect(engine.getTag("O:0/0")).toBe(false);
 
     engine.setInput("I:0/0", false);
@@ -150,8 +162,12 @@ describe("PlcEngine scan semantics", () => {
     engine.loadProgram(program);
 
     engine.setInput("I:0/0", true);
-    engine.scan(100);
+    engine.scan(250);
     expect(engine.getTag("B3:0/7")).toBe(true);
+    expect(engine.getTag("O:0/0")).toBe(false);
+    expect(engine.getTag("O:0/1")).toBe(false);
+
+    engine.scan(250);
     expect(engine.getTag("O:0/0")).toBe(false);
     expect(engine.getTag("O:0/1")).toBe(false);
 
