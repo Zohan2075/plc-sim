@@ -135,7 +135,7 @@ export class ProgramRunner {
         return powerBefore;
       }
       default: {
-        const _exhaustive: never = instruction.type;
+        const _exhaustive: never = instruction;
         return powerBefore;
       }
     }
@@ -224,7 +224,7 @@ export class ProgramRunner {
         };
       }
       default: {
-        const _exhaustive: never = instruction.type;
+        const _exhaustive: never = instruction;
         return {
           powerAfter: powerBefore,
           step: { ...base, powerBefore, powerAfter: powerBefore }

@@ -1,0 +1,7 @@
+[build]
+command = "pnpm --filter @plc-sim/ui... run build"
+publish = "ui/dist"
+
+[build.environment]
+NODE_VERSION = "20"
+PNPM_VERSION = "9.15.4"

@@ -25,6 +25,18 @@ docker build -t plc-sim .
 docker run -p 3000:3000 plc-sim
 ```
 
+## Netlify
+
+The static UI can be deployed from the repository root with the checked-in Netlify config.
+
+```bash
+pnpm --filter @plc-sim/ui... run build
+```
+
+- Build config: `netlify.toml`
+- Publish directory: `ui/dist`
+- The `@plc-sim/ui` filter includes its workspace dependencies, so Netlify builds `ladder-types/` and `plc-engine/` first.
+
 Notes:
 
 - This is intentionally a *minimal* server: it only serves static UI files and a health check.
