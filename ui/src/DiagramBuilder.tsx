@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import type { InstructionType, Program } from "@plc-sim/ladder-types";
 import { SheetLayer, createDefaultSheetMetadata } from "./diagram/sheet";
+import { buildWirePathD, findWireCrossings } from "./diagram/wireHops";
 import type { SheetMetadata } from "./diagram/sheet";
 import {
   buildDuplicatedComponent,
@@ -272,7 +273,9 @@ export const COMPONENT_HEIGHT = 136;
 const COMPONENT_GLYPH_HEIGHT = 102;
 const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
 const SYMBOL_VIEWPORT_HEIGHT = 84;
-const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2;
+// Top efectivo del glifo: centrado (9) menos 1 px (CSS .freeplay-component__glyph .diagram-symbol),
+// para que las patas de 64/60/72 de alto caigan en y=50 (retícula de terminales).
+const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2 - 1;
 const SYMBOL_VIEWBOX_WIDTH = 128;
 const DEFAULT_PLANE_WIDTH = 1720;
 const DEFAULT_PLANE_HEIGHT = 940;
@@ -284,6 +287,9 @@ export const MAX_PLANE_HEIGHT = 2400;
 export const MIN_GRID_SPACING = 8;
 export const MAX_GRID_SPACING = 96;
 const SNAP_DISTANCE = 18;
+// Unión deliberada a un cable existente: hay que soltar el punto practicamente
+// encima del cable (SNAP_DISTANCE se usa para terminales, que es mas permisivo).
+const WIRE_ANCHOR_DISTANCE = 4;
 const DEFAULT_WIRE_COLOR = "#111827";
 const DEFAULT_WIRE_THICKNESS = 3.5;
 const DEFAULT_SOURCE_VOLTAGE = 120;
@@ -1395,8 +1401,8 @@ const LIMIT_SWITCH_VECTOR_OUTLINE_PATHS = [
 
 const LIMIT_SWITCH_NC_VECTOR_OUTLINE_PATHS = pickVectorSubpaths(LIMIT_SWITCH_NC_VECTOR_SYMBOL_PATH, [0, 2, 3]);
 
-const LIMIT_SWITCH_VECTOR_STROKE_WIDTH = 2 / LIMIT_SWITCH_VECTOR_SCALE;
-const LIMIT_SWITCH_NC_VECTOR_STROKE_WIDTH = 2 / LIMIT_SWITCH_NC_VECTOR_SCALE;
+const LIMIT_SWITCH_VECTOR_STROKE_WIDTH = 2.3 / LIMIT_SWITCH_VECTOR_SCALE;
+const LIMIT_SWITCH_NC_VECTOR_STROKE_WIDTH = 2.3 / LIMIT_SWITCH_NC_VECTOR_SCALE;
 
 // Fuente AC del usuario (AC source.svg, viewBox 980x980). Escala uniforme que
 // encaja el dibujo en el viewBox 128x64: los anillos caen en (8.54,31.90) y
@@ -1413,7 +1419,7 @@ const AC_SOURCE_VECTOR_WAVE_PATH = "M368.482 492.501 C368.581 488.171 370.995 48
 // 3.2 unidades del viewBox = 3.2 / escala en unidades locales.
 const SPST_SWITCH_VECTOR_SCALE = 0.365714;
 const SPST_SWITCH_VECTOR_TRANSFORM = `translate(3.84 7.86) scale(${SPST_SWITCH_VECTOR_SCALE})`;
-const SPST_SWITCH_VECTOR_STROKE_WIDTH = 3.2 / SPST_SWITCH_VECTOR_SCALE;
+const SPST_SWITCH_VECTOR_STROKE_WIDTH = 3.5 / SPST_SWITCH_VECTOR_SCALE;
 const SPST_SWITCH_VECTOR_RING_LEFT_PATH = "M140 66a19 19 0 1 1-38 0 19 19 0 1 1 38 0z";
 const SPST_SWITCH_VECTOR_RING_RIGHT_PATH = "M228 66a19 19 0 1 1-38 0 19 19 0 1 1 38 0z";
 const SPST_SWITCH_VECTOR_OPEN_LEVER_PATH = "M238 221h93m-315 0h93m21-58 94 61";
@@ -1426,16 +1432,16 @@ const SPST_SWITCH_VECTOR_CLOSED_LEVER_PATH = "M229 66 L322 66 M7 66 L100 66 M138
 // (2.286,36)/(125.714,36) del viewBox 128x72 (terminales 8/68 y 152/68).
 const ESTOP_VECTOR_SCALE = 0.288588;
 const ESTOP_VECTOR_TRANSFORM = `translate(-0.193 6.482) scale(${ESTOP_VECTOR_SCALE})`;
-const ESTOP_VECTOR_STROKE_WIDTH = 2 / ESTOP_VECTOR_SCALE;
-const ESTOP_RING_STROKE_WIDTH = 3.2 / ESTOP_VECTOR_SCALE;
+const ESTOP_VECTOR_STROKE_WIDTH = 2.3 / ESTOP_VECTOR_SCALE;
+const ESTOP_RING_STROKE_WIDTH = 3.5 / ESTOP_VECTOR_SCALE;
 const ESTOP_VECTOR_SYMBOL_PATH = "M112.047 104.403 L8.589 104.44 L8.589 100.241 C8.589 100.241 18.088 100.129 22.826 100.129 L45.579 100.129 C67.723 100.129 89.889 99.843 112.03 100.162 M325.591 100.055 C325.685 100.452 378.407 100.024 404.805 100.024 L436.285 100.365 L436.285 104.672 L404.641 104.335 L325.514 104.335 M302.544 126.445 L135.017 126.426 L135.017 122.677 L216.844 122.76 L216.642 60.626 C206.556 61.515 197.329 65.714 189.209 71.668 C186.607 73.575 184.121 75.694 181.753 77.884 C180.672 78.883 179.615 80.401 178.285 81.063 C177.316 81.546 175.997 81.624 174.958 81.843 C175.124 80.738 175.099 79.234 175.635 78.211 C177.138 75.344 185.984 68.657 188.939 66.697 C207.025 54.705 223.85 52.833 243.212 63.295 C247.448 65.585 259.902 74.243 261.982 78.277 C262.451 79.187 262.271 80.383 262.173 81.357 C261.233 81.356 260.11 81.099 259.252 80.636 C257.928 79.921 256.89 78.848 255.788 77.839 C253.415 75.665 250.934 73.517 248.327 71.625 C240.217 65.737 231.018 61.453 220.952 60.646 L220.952 100.295 C220.952 107.753 220.739 122.76 220.739 122.76 L302.544 122.68";
 const ESTOP_VECTOR_LABEL_PATHS = ["M24.428 13.28 L24.428 54.953 L19.338 54.916 L19.338 20.221 C15.707 21.332 12.019 22.597 8.589 24.242 L8.589 19.408 Z", "M40.976 19.248 L56.625 13.414 L56.554 54.894 L51.66 54.966 L51.675 20.287 C48.063 21.412 44.562 22.857 40.865 23.672 Z", "M378.293 19.337 C383.633 17.923 389.07 15.759 394.082 13.451 L394.082 55.123 L389.065 55.152 L388.925 20.481 L378.178 24.315 Z", "M415.64 50.821 L436.285 50.857 L436.232 55.124 L409.274 55.129 C409.225 53.945 408.975 52.496 409.44 51.356 C409.941 50.13 411.364 49.215 412.19 48.196 C416.557 42.809 428.948 32.002 429.031 25.19 C429.128 17.231 418.675 15.033 414.747 21.571 C413.908 22.968 413.746 24.736 413.462 26.301 L408.463 26.301 C408.652 23.257 409.203 20.488 411.185 18.045 C416.755 11.179 430.916 11.786 433.893 20.954 C437.216 31.193 421.765 43.972 415.64 50.821 Z"];
 const ESTOP_VECTOR_RINGS = [[302.544, 102.225], [135.017, 102.301]] as const;
 
 const ESTOP_VECTOR_OPEN_SCALE = 0.290296;
 const ESTOP_VECTOR_OPEN_TRANSFORM = `translate(-0.353 6.103) scale(${ESTOP_VECTOR_OPEN_SCALE})`;
-const ESTOP_VECTOR_OPEN_STROKE_WIDTH = 2 / ESTOP_VECTOR_OPEN_SCALE;
-const ESTOP_VECTOR_OPEN_RING_STROKE_WIDTH = 3.2 / ESTOP_VECTOR_OPEN_SCALE;
+const ESTOP_VECTOR_OPEN_STROKE_WIDTH = 2.3 / ESTOP_VECTOR_OPEN_SCALE;
+const ESTOP_VECTOR_OPEN_RING_STROKE_WIDTH = 3.5 / ESTOP_VECTOR_OPEN_SCALE;
 const ESTOP_VECTOR_OPEN_SYMBOL_PATH = "M112.548 105.05 L9.09 105.087 L9.09 100.888 C9.09 100.888 18.589 100.776 23.327 100.776 L46.08 100.776 C68.224 100.776 90.39 100.49 112.531 100.809 M323.576 100.58 C323.669 100.977 376.392 100.549 402.789 100.549 L434.27 100.89 L434.27 105.197 L402.626 104.86 L323.499 104.86 M301.876 145.867 L134.349 145.848 L134.349 142.099 L216.176 142.182 L215.974 80.048 C205.888 80.937 196.661 85.136 188.541 91.09 C185.939 92.997 183.453 95.116 181.085 97.306 C180.004 98.305 178.947 99.823 177.617 100.485 C176.648 100.968 175.329 101.046 174.29 101.265 C174.456 100.16 174.431 98.656 174.967 97.633 C176.47 94.766 185.316 88.079 188.271 86.119 C206.357 74.127 223.182 72.255 242.544 82.717 C246.78 85.007 259.234 93.665 261.314 97.699 C261.783 98.609 261.603 99.805 261.505 100.779 C260.565 100.778 259.442 100.521 258.584 100.058 C257.26 99.343 256.222 98.27 255.12 97.261 C252.747 95.087 250.266 92.939 247.659 91.047 C239.549 85.159 230.35 80.875 220.284 80.068 L220.284 119.717 C220.284 127.175 220.071 142.182 220.071 142.182 L301.876 142.102";
 const ESTOP_VECTOR_OPEN_LABEL_PATHS = ["M24.929 13.461 L24.929 55.134 L19.839 55.097 L19.839 20.402 C16.208 21.513 12.52 22.778 9.09 24.423 L9.09 19.589 Z", "M41.477 19.429 L57.126 13.595 L57.055 55.075 L52.161 55.147 L52.176 20.468 C48.564 21.593 45.063 23.038 41.366 23.853 Z", "M378.999 19.384 C384.339 17.97 389.776 15.806 394.788 13.498 L394.788 55.17 L389.771 55.199 L389.631 20.528 L378.884 24.362 Z", "M416.346 50.868 L436.991 50.904 L436.938 55.171 L409.98 55.176 C409.931 53.992 409.681 52.543 410.146 51.403 C410.647 50.177 412.07 49.262 412.896 48.243 C417.263 42.856 429.654 32.049 429.737 25.237 C429.834 17.278 419.381 15.08 415.453 21.618 C414.614 23.015 414.452 24.783 414.168 26.348 L409.169 26.348 C409.358 23.304 409.909 20.535 411.891 18.092 C417.461 11.226 431.622 11.833 434.599 21.001 C437.922 31.24 422.471 44.019 416.346 50.868 Z"];
 const ESTOP_VECTOR_OPEN_RINGS = [[302.603, 102.873], [134.947, 102.873]] as const;
@@ -2309,7 +2315,7 @@ function findNearestWireSegmentAnchor(
   excludeWireId?: ReadonlySet<string> | string
 ): WireSegmentAnchor | null {
   let nearestAnchor: WireSegmentAnchor | null = null;
-  let nearestDistance = SNAP_DISTANCE + 1;
+  let nearestDistance = WIRE_ANCHOR_DISTANCE + 0.001;
 
   for (const wire of wires) {
     const isExcluded = typeof excludeWireId === "string"
@@ -2534,6 +2540,16 @@ function applyWireAnchors(
   });
 
   return didChange ? nextWires : currentWires;
+}
+
+function removeWiresAttachedToComponent(component: BuilderComponent, wires: BuilderWire[]): BuilderWire[] {
+  const portIds = new Set(getComponentTerminals(component).map((terminal) => terminal.portId));
+
+  return wires.filter(
+    (wire) =>
+      !(wire.startPortId !== null && portIds.has(wire.startPortId))
+      && !(wire.endPortId !== null && portIds.has(wire.endPortId))
+  );
 }
 
 function anchorWireEndpoints(
@@ -3018,6 +3034,17 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
   const connections = new Map<string, Set<string>>();
   const wireNodeIdsByWire = new Map<string, string[]>();
 
+  // Coincidencia visual = conexion: si un extremo del cable cae exactamente
+  // sobre un terminal, se conecta aunque su portId falte o este obsoleto (p.
+  // ej. tras borrar/rotar el componente que lo origino).
+  const terminalPortIdsByPointKey = new Map<string, string>();
+
+  for (const component of components) {
+    for (const terminal of getComponentTerminals(component)) {
+      terminalPortIdsByPointKey.set(getPointKey(terminal), terminal.portId);
+    }
+  }
+
   for (const wire of wires) {
     const pointNodeIds = wire.points.map((point) => getElectricalPointNodeId(point));
 
@@ -3043,6 +3070,19 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
 
     if (wire.endPortId && endPointNodeId) {
       connectGraphNodes(connections, getElectricalPortNodeId(wire.endPortId), endPointNodeId);
+    }
+
+    const startPoint = wire.points[0];
+    const endPoint = wire.points[wire.points.length - 1];
+    const startTerminalPortId = startPoint ? terminalPortIdsByPointKey.get(getPointKey(startPoint)) : undefined;
+    const endTerminalPortId = endPoint ? terminalPortIdsByPointKey.get(getPointKey(endPoint)) : undefined;
+
+    if (startTerminalPortId && startPointNodeId) {
+      connectGraphNodes(connections, getElectricalPortNodeId(startTerminalPortId), startPointNodeId);
+    }
+
+    if (endTerminalPortId && endPointNodeId) {
+      connectGraphNodes(connections, getElectricalPortNodeId(endTerminalPortId), endPointNodeId);
     }
   }
 
@@ -3524,6 +3564,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [isPanModeEnabled, setIsPanModeEnabled] = useState(true);
   const [selection, setSelection] = useState<BuilderSelection>(null);
   const [componentMenu, setComponentMenu] = useState<ComponentMenuState>(null);
+  const [wireMenu, setWireMenu] = useState<{ anchor: Point; wireId: string } | null>(null);
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -3590,6 +3631,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       }
 
       setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "escape"));
+        setWireMenu(null);
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -4878,6 +4920,41 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     updateWirePoints(selectedWire.id, (points) => simplifyWirePoints(points));
   }
 
+  function simplifyWireById(wireId: string) {
+    if (running) {
+      return;
+    }
+
+    updateWirePoints(wireId, (points) => simplifyWirePoints(points));
+  }
+
+  function deleteWireById(wireId: string) {
+    if (running) {
+      return;
+    }
+
+    setWires((currentWires) => currentWires.filter((wire) => wire.id !== wireId));
+    setSelection((current) => (current?.kind === "wire" && current.id === wireId ? null : current));
+    setWireReconnectTarget(null);
+    setHasCustomLayout(true);
+  }
+
+  function updateWireColorById(wireId: string, nextColor: string) {
+    setWires((currentWires) =>
+      currentWires.map((wire) => (wire.id === wireId ? { ...wire, color: nextColor } : wire))
+    );
+    setHasCustomLayout(true);
+  }
+
+  function updateWireThicknessById(wireId: string, nextThickness: number) {
+    const resolvedThickness = clampWireThickness(nextThickness);
+
+    setWires((currentWires) =>
+      currentWires.map((wire) => (wire.id === wireId ? { ...wire, thickness: resolvedThickness } : wire))
+    );
+    setHasCustomLayout(true);
+  }
+
   function updateWireColor(nextColor: string) {
     setWireColor(nextColor);
 
@@ -4916,6 +4993,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   function handleCanvasClick(event: ReactMouseEvent<HTMLDivElement>) {
     setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+    setWireMenu(null);
 
     if (performance.now() < suppressCanvasClickUntilRef.current) {
       return;
@@ -4962,6 +5040,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   function handleCanvasContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
     setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+    setWireMenu(null);
 
     const action = resolveCanvasContextMenuAction({
       draftPointCount: draftWirePoints.length,
@@ -5400,7 +5479,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setComponents((currentComponents) =>
       currentComponents.map((component) => (component.id === componentId ? nextComponent : component))
     );
-    setWires((currentWires) => moveAttachedWireEndpoints(currentWires, currentComponent, nextComponent));
+    // Al rotar, los cables NO siguen: los que quedarian sueltos se eliminan
+    // para no dejar conexiones falsas ni cables desalineados.
+    setWires((currentWires) => removeWiresAttachedToComponent(currentComponent, currentWires));
     setHasCustomLayout(true);
   }
 
@@ -6150,8 +6231,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                 <svg className="freeplay-svg" viewBox={`0 0 ${planeSettings.width} ${planeSettings.height}`} aria-hidden="true">
                   <SheetLayer planeSettings={planeSettings} sheet={sheetMetadata} />
-                  {wires.map((wire) => {
+                  {wires.map((wire, wireIndex) => {
                   const pointString = wire.points.map((point) => `${point.x},${point.y}`).join(" ");
+                  const wireHops = findWireCrossings(wire, wireIndex, wires);
+                  const wirePathD = buildWirePathD(wire.points, wireHops);
                   const isSelected = selection?.kind === "wire" && selection.id === wire.id;
                   const isEnergized = running && electricalState.energizedWireIds.has(wire.id);
                   const idleCurrentType = electricalState.idleWireCurrentById.get(wire.id) ?? null;
@@ -6162,22 +6245,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                   return (
                     <g key={wire.id}>
-                      <polyline
+                      <path
                         className={`freeplay-wire ${isSelected ? "freeplay-wire--selected" : ""}`.trim()}
-                        points={pointString}
+                        d={wirePathD}
                         stroke={wire.color}
                         style={{ strokeWidth }}
                       />
                       {isEnergized ? (
-                        <polyline
+                        <path
                           className={`freeplay-wire freeplay-wire--energized freeplay-wire--energized-${energizedCurrentType}`.trim()}
-                          points={pointString}
+                          d={wirePathD}
                           style={{ strokeWidth: wire.thickness + 1 }}
                         />
                       ) : isIdle ? (
-                        <polyline
+                        <path
                           className={`freeplay-wire freeplay-wire--idle freeplay-wire--idle-${idleCurrentType}`.trim()}
-                          points={pointString}
+                          d={wirePathD}
                           style={{ strokeWidth: wire.thickness + 0.8 }}
                         />
                       ) : null}
@@ -6214,6 +6297,24 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                           cutWireSegmentAtPoint(wire.id, point);
                         }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+
+                          if (running || layoutEditingLocked || draftWirePoints.length > 0 || wireReconnectTarget) {
+                            return;
+                          }
+
+                          const point = getCanvasPointFromClient(event.clientX, event.clientY);
+
+                          if (!point) {
+                            return;
+                          }
+
+                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+                          setSelection({ kind: "wire", id: wire.id });
+                          setWireMenu({ anchor: point, wireId: wire.id });
+                        }}
                       />
                     </g>
                   );
@@ -6230,6 +6331,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     return null;
                   }
 
+                  // Solo se marca el nodo cuando hay union real (varios cables);
+                  // un simple quiebre de un cable no dibuja circulo.
+                  if (!node.hasMultipleOccurrences) {
+                    return null;
+                  }
+
                   const selectedNode = node.hasSelectedOccurrence;
 
                   return (
@@ -6239,7 +6346,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       cx={node.point.x}
                       cy={node.point.y}
                       r={selectedNode ? (node.hasEndpoint ? 6 : 5) : 4}
-                      style={{ fill: selectedNode ? primaryOccurrence.color : undefined, stroke: primaryOccurrence.color }}
+                      style={{
+                        fill: selectedNode ? primaryOccurrence.color : undefined,
+                        stroke: primaryOccurrence.color,
+                        pointerEvents: isWireAuthoringEnabled ? "none" : "auto"
+                      }}
                       onClick={(event) => {
                         event.stopPropagation();
 
@@ -6275,6 +6386,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   );
                 })}
 
+                {isWireAuthoringEnabled && cursorPoint ? (
+                  <circle
+                    className="freeplay-wire__snap-marker"
+                    cx={cursorPoint.x}
+                    cy={cursorPoint.y}
+                    r={5}
+                  />
+                ) : null}
                 {previewPoints.length >= 1 ? (
                   <polyline
                     className="freeplay-wire freeplay-wire--draft"
@@ -6468,7 +6587,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         className={`freeplay-component__symbol-rotator freeplay-component__symbol-rotator--${getSymbolCategory(component.type)}`.trim()}
                         style={{
                           color: getDefaultComponentColor(component.type),
-                          transform: `rotate(${normalizeQuarterTurns(component.rotation) * 90}deg)`
+                          // Sin rotacion no se aplica transform: evita la capa de
+                          // composicion y el medio pixel de desfase glifo/cable.
+                          ...(normalizeQuarterTurns(component.rotation) === 0
+                            ? {}
+                            : { transform: `rotate(${normalizeQuarterTurns(component.rotation) * 90}deg)` })
                         }}
                       >
                         {renderSymbolGraphic(component.type, {
@@ -6582,6 +6705,69 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           </button>
                         </>
                       )}
+                    </div>
+                  );
+                })() : null}
+                {wireMenu && !layoutEditingLocked ? (() => {
+                  const menuWire = wires.find((entry) => entry.id === wireMenu.wireId);
+
+                  if (!menuWire) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      className="freeplay-component-menu freeplay-wire-menu"
+                      style={{ left: wireMenu.anchor.x, top: wireMenu.anchor.y }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onContextMenu={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="freeplay-component-menu__action"
+                        onClick={() => {
+                          setWireMenu(null);
+                          deleteWireById(menuWire.id);
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                      <div className="freeplay-wire-menu__row">
+                        <span className="freeplay-wire-menu__label">Color</span>
+                        <input
+                          type="color"
+                          className="freeplay-wire-menu__color"
+                          value={menuWire.color}
+                          onChange={(event) => updateWireColorById(menuWire.id, event.target.value)}
+                        />
+                      </div>
+                      <div className="freeplay-wire-menu__row">
+                        <span className="freeplay-wire-menu__label">Grosor</span>
+                        <span className="freeplay-wire-menu__thickness">
+                          {[2, 3.5, 5, 7].map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              className={`freeplay-wire-menu__thickness-button ${menuWire.thickness === value ? "freeplay-wire-menu__thickness-button--active" : ""}`.trim()}
+                              onClick={() => updateWireThicknessById(menuWire.id, value)}
+                            >
+                              {value}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="freeplay-component-menu__action"
+                        onClick={() => {
+                          setWireMenu(null);
+                          simplifyWireById(menuWire.id);
+                        }}
+                      >
+                        Simplificar
+                      </button>
                     </div>
                   );
                 })() : null}

@@ -6,6 +6,7 @@ import {
   TITLE_BLOCK_ROW_HEIGHT,
   TITLE_BLOCK_WIDTH
 } from "../DiagramBuilder";
+import { memo } from "react";
 import type { BuilderPlaneSettings } from "../DiagramBuilder";
 
 /** Pure sheet geometry: grid lines, zone marks, frame and title-block rect. */
@@ -146,7 +147,7 @@ export function createDefaultSheetMetadata(projectName: string, savedAtIso: stri
  * block. Rendered as the first child of the free-play SVG so components and wires sit on top.
  * Geometry shares `gridSpacing` with `grid.ts`, so the drawn grid is exactly where snapping happens.
  */
-export function SheetLayer({ planeSettings, sheet }: { planeSettings: BuilderPlaneSettings; sheet?: SheetMetadata | undefined }) {
+function SheetLayerBase({ planeSettings, sheet }: { planeSettings: BuilderPlaneSettings; sheet?: SheetMetadata | undefined }) {
   const gridLines = buildGridLines(planeSettings);
   const zoneMarks = computeZoneMarks(planeSettings);
   const frame = computeSheetFrame(planeSettings);
@@ -201,3 +202,5 @@ export function SheetLayer({ planeSettings, sheet }: { planeSettings: BuilderPla
     </g>
   );
 }
+
+export const SheetLayer = memo(SheetLayerBase);

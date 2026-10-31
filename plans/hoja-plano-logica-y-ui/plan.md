@@ -322,3 +322,12 @@ Orden estricto: 1 → 2 → 3 → 4 → 5 → 6 → 7. Fase 3 puede empezar tras
 - **Mapeo recalculado**: accionado `translate(-0.353 6.103) scale(0.290296)`, `stroke-width = 2/escala ≈ 6.89`, anillos `3.2/escala ≈ 11.02`. Reposo sin cambios (`translate(-0.193 6.482) scale(0.288588)`).
 - **Rótulos por estado**: `ESTOP_VECTOR_LABEL_PATHS` (reposo) y `ESTOP_VECTOR_OPEN_LABEL_PATHS` (accionado); el render elige según `isPressed`. Anillos: `ESTOP_VECTOR_RINGS` / `ESTOP_VECTOR_OPEN_RINGS`.
 - Constantes extraídas de los archivos con script (paths[2..5] = dígitos, paths[6] = traza principal, círculos/elipse = anillos). Gates: ui tsc **28** · vitest **194/194** · engine **7/7** · build **OK**. Verificado con Chrome headless a 200 y 450 px.
+
+### 2026-10-31 (WP19): cableado — uniones deliberadas, puentes, rotación y menú
+
+- **Uniones deliberadas**: `findNearestWireSegmentAnchor` usa `WIRE_ANCHOR_DISTANCE = 4` en vez de `SNAP_DISTANCE = 18`; antes cualquier click dentro de una celda se fusionaba con el cable. Los terminales conservan la tolerancia de 18.
+- **Puentes en cruces**: nuevo `ui/src/diagram/wireHops.ts` (`findWireCrossings`, `buildWirePathD`, `WIRE_HOP_RADIUS = 5`). Los cruces horizontal/vertical sin punto compartido se dibujan con un arco (Q) sobre el otro cable, como en un plano eléctrico; un nodo compartido (union eléctrica) no lleva puente. 6 tests nuevos.
+- **Rotación**: `detachWiresFromComponent` suelta los cables del componente al rotar (conservan sus puntos, pierden `startPortId`/`endPortId`); ya no se mueven con el giro ni se duplican.
+- **Menú de cable (click derecho)**: Eliminar, Color (`input type=color`), Grosor (2/3.5/5/7) y Simplificar, con `wireMenu` y helpers por id (`deleteWireById`, `updateWireColorById`, `updateWireThicknessById`, `simplifyWireById`). Se cierra con click/context/Escape/acción.
+- **Feedback al dibujar**: los nodos de cable son `pointer-events: none` mientras el modo cable está activo (el click llega al canvas y engancha al nodo) y se dibuja un marcador discontinuo en el punto de enganche (`freeplay-wire__snap-marker`).
+- Gates: ui tsc **28 == baseline** · ui vitest **204/204** · plc-engine **7/7** · `pnpm -r build` **OK**. Verificado el puente con Chrome headless.
