@@ -1,4 +1,10 @@
-import type { InstructionType, Program } from "@plc-sim/ladder-types";
+import type {
+  ImmediateInstruction,
+  InstructionType,
+  Program,
+  TimedContactInstruction,
+  TimedContactInstructionType
+} from "@plc-sim/ladder-types";
 
 const PROJECT_FORMAT_VERSION = 1;
 const DEFAULT_SCAN_INTERVAL_MS = 150;
@@ -176,12 +182,14 @@ function parseProjectBundle(value: unknown): ProjectBundle {
   const bundle = expectObject(value, "Project bundle");
   const tags = parseTagDefinitions(bundle.tags);
   const parsedInputValues = parseBooleanRecord(bundle.inputValues, "Project bundle inputValues");
+  const id = expectOptionalString(bundle.id, "Project bundle id");
+  const description = expectOptionalString(bundle.description, "Project bundle description");
 
   return {
     version: expectNumber(bundle.version, "Project bundle version"),
-    id: expectOptionalString(bundle.id, "Project bundle id"),
+    ...(id !== undefined ? { id } : {}),
     name: expectString(bundle.name, "Project bundle name"),
-    description: expectOptionalString(bundle.description, "Project bundle description"),
+    ...(description !== undefined ? { description } : {}),
     program: parseProgram(bundle.program),
     tags,
     settings: parseProjectSettings(bundle.settings),
@@ -241,8 +249,8 @@ function parseProgram(value: unknown): Program {
               instructionObject.tag,
               `Program rung ${rungIndex} instruction ${instructionIndex} tag`
             ),
-            type: type as InstructionType
-          };
+            type: type as TimedContactInstructionType
+          } as TimedContactInstruction;
         }
 
         return {
@@ -254,8 +262,8 @@ function parseProgram(value: unknown): Program {
             instructionObject.tag,
             `Program rung ${rungIndex} instruction ${instructionIndex} tag`
           ),
-          type: type as InstructionType
-        };
+          type: type as Exclude<InstructionType, TimedContactInstructionType>
+        } as ImmediateInstruction;
       }
     );
 
