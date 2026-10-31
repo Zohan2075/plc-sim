@@ -21,6 +21,8 @@ COPY ui ./ui
 COPY plc-engine ./plc-engine
 COPY ladder-types ./ladder-types
 COPY server ./server
+# ui/vite.config.ts uses ../data as publicDir; include it so the image ships sample data.
+COPY data ./data
 
 RUN pnpm -r build
 

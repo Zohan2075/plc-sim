@@ -884,7 +884,7 @@ function buildElectricalSimulationGraph(
   return { componentsById, electricalConnections, portsById, wireNodeIdsByWire };
 }
 
-function resolvePhysicalInstructionTagValues(
+export function resolvePhysicalInstructionTagValues(
   components: BuilderComponent[],
   wires: BuilderWire[],
   tagValues: Readonly<Record<string, boolean>>,
@@ -925,6 +925,14 @@ function resolvePhysicalInstructionTagValues(
     resolvedTagValues[tag] = previousResolvedTagValues[tag] ?? false;
   }
 
+  // La resolucion es un punto fijo: la bobina cambia el contacto que realimenta
+  // su propia alimentacion. Si el circuito oscila (p. ej. un contacto en
+  // paralelo con la bobina, que la cortocircuita), el resultado no puede
+  // depender del numero de iteraciones ni del numero de componentes: se detecta
+  // el ciclo y se dejan las bobinas fisicas en reposo (estado seguro).
+  const visitedStates = new Set<string>();
+  const stateKey = () => physicalOutputTags.map((tag) => (resolvedTagValues[tag] ? "1" : "0")).join("");
+
   for (let iteration = 0; iteration < Math.max(components.length, 1); iteration += 1) {
     const { electricalConnections } = buildElectricalSimulationGraph(
       components,
@@ -964,6 +972,22 @@ function resolvePhysicalInstructionTagValues(
     if (!tagStateChanged) {
       break;
     }
+
+    const key = stateKey();
+
+    if (visitedStates.has(key)) {
+      // El circuito no tiene punto fijo (una bobina realimenta su propio
+      // contacto y se cortocircuita). Se resuelve con las bobinas accionadas
+      // para que la comprobacion de cortocircuito vea el contacto cerrado y
+      // avise, en vez de dejar la simulacion silenciosamente muerta.
+      for (const tag of physicalOutputTags) {
+        resolvedTagValues[tag] = true;
+      }
+
+      break;
+    }
+
+    visitedStates.add(key);
   }
 
   return {
@@ -3220,7 +3244,7 @@ function computeElectricalState(
       returnReachableNodes
     );
 
-    if (liveLoopNodes.size > 0 && liveLoadComponentIds.size === 0) {
+    if (liveLoopNodes.size > 0) {
       const sourceLabel = component.label || getComponentName(component.type);
 
       return {
@@ -5446,7 +5470,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     event.currentTarget.setPointerCapture(event.pointerId);
     activePushButtonPressRef.current = { componentId, pointerId: event.pointerId };
-    pressMomentaryPushButton(componentId);
+
+    // El E-stop no se acciona al presionar el pointer: enclava en el click
+    // limpio (pointer up sin arrastre), para que seleccionar o mover el
+    // componente no dispare el paro de emergencia.
+    if (component?.type !== "ESTOP") {
+      pressMomentaryPushButton(componentId);
+    }
   }
 
   function handlePushButtonPointerMove(event: ReactPointerEvent<HTMLButtonElement>, componentId: string) {
@@ -5475,7 +5505,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       activePushButtonPressRef.current = null;
     }
 
+    const wasDragged = componentDragMovedRef.current;
     finalizeComponentDrag(componentId);
+    componentDragMovedRef.current = false;
+
+    const component = componentsRef.current.find((entry) => entry.id === componentId);
+
+    if (component?.type === "ESTOP") {
+      // Click limpio = accionar/liberar el enclavamiento; arrastre = solo mover.
+      if (!wasDragged) {
+        pressMomentaryPushButton(componentId);
+      }
+
+      return;
+    }
+
     releaseMomentaryPushButton(componentId);
   }
 
@@ -5485,6 +5529,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     finalizeComponentDrag(componentId);
+    componentDragMovedRef.current = false;
     releaseMomentaryPushButton(componentId);
   }
 
