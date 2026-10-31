@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "name": "Bombeo v1",
+  "savedAt": "2026-05-04T18:22:10.000Z",
+  "settings": {
+    "gridSpacing": 18,
+    "height": 940,
+    "scanIntervalMs": 50,
+    "width": 1720
+  },
+  "components": [
+    {
+      "id": "component-1",
+      "type": "POWER_SOURCE",
+      "label": "L1/L2",
+      "rotation": 0,
+      "tag": null,
+      "usesCustomLabel": true,
+      "x": 72,
+      "y": 198,
+      "sourceVoltage": 220
+    },
+    {
+      "id": "component-2",
+      "type": "BREAKER_1P",
+      "label": "Q1",
+      "rotation": 0,
+      "tag": null,
+      "usesCustomLabel": true,
+      "x": 252,
+      "y": 198,
+      "isClosed": true
+    },
+    {
+      "id": "component-3",
+      "type": "PUSH_BUTTON_NO",
+      "label": "Marcha",
+      "rotation": 0,
+      "tag": null,
+      "usesCustomLabel": true,
+      "x": 450,
+      "y": 198,
+      "isPressed": false,
+      "terminalLabels": { "in": "A1", "out": "A2" }
+    },
+    {
+      "id": "component-4",
+      "type": "XIC",
+      "label": "Sello",
+      "rotation": 0,
+      "tag": "MOTOR",
+      "usesCustomLabel": false,
+      "x": 450,
+      "y": 378
+    },
+    {
+      "id": "component-5",
+      "type": "OTE",
+      "label": "Bobina",
+      "rotation": 0,
+      "tag": "MOTOR",
+      "usesCustomLabel": false,
+      "x": 648,
+      "y": 378
+    },
+    {
+      "id": "component-6",
+      "type": "LAMP",
+      "label": "Luz marcha",
+      "rotation": 0,
+      "tag": "MOTOR",
+      "usesCustomLabel": true,
+      "x": 648,
+      "y": 198,
+      "lampGlowColor": "green"
+    },
+    {
+      "id": "component-7",
+      "type": "NOTC",
+      "label": "Retardo arranque",
+      "rotation": 0,
+      "tag": "T_ARRANQUE",
+      "usesCustomLabel": true,
+      "x": 846,
+      "y": 378,
+      "delayMs": 2500
+    }
+  ],
+  "wires": [
+    {
+      "id": "wire-1",
+      "points": [
+        { "x": 144, "y": 249 },
+        { "x": 252, "y": 249 }
+      ],
+      "startPortId": "component-1:right",
+      "endPortId": "component-2:in",
+      "color": "#111827",
+      "thickness": 3.5
+    },
+    {
+      "id": "wire-2",
+      "points": [
+        { "x": 396, "y": 249 },
+        { "x": 450, "y": 249 }
+      ],
+      "startPortId": "component-2:out",
+      "endPortId": "component-3:in",
+      "color": "#111827",
+      "thickness": 3.5
+    },
+    {
+      "id": "wire-3",
+      "points": [
+        { "x": 594, "y": 249 },
+        { "x": 648, "y": 249 }
+      ],
+      "startPortId": "component-3:out",
+      "endPortId": "component-6:in",
+      "color": "#b45309",
+      "thickness": 2.5
+    }
+  ],
+  "program": {
+    "rungs": [
+      {
+        "id": "rung-1",
+        "instructions": [
+          { "id": "instruction-1", "type": "XIC", "tag": "MOTOR" },
+          { "id": "instruction-2", "type": "OTE", "tag": "MOTOR" }
+        ]
+      }
+    ]
+  },
+  "tags": [
+    { "name": "MOTOR", "kind": "output", "label": "Marcha motor", "initialValue": false },
+    { "name": "T_ARRANQUE", "kind": "internal", "label": "Temporizador de arranque" },
+    { "name": "START_PB", "kind": "input", "label": "Pulsador de marcha", "description": "Entrada física del panel", "initialValue": false }
+  ]
+}

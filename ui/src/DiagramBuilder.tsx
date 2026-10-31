@@ -10,12 +10,62 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { InstructionType, Program } from "@plc-sim/ladder-types";
+import { SheetLayer, createDefaultSheetMetadata } from "./diagram/sheet";
+import type { SheetMetadata } from "./diagram/sheet";
+import {
+  buildDuplicatedComponent,
+  closeComponentMenuOnEvent,
+  isWireOriginHit,
+  resolveCanvasContextMenuAction
+} from "./diagram/interaction";
+import type { ComponentMenuState } from "./diagram/interaction";
 import type { TagDefinition } from "./projectData";
+import {
+  clampComponentToPlane,
+  clampGridSpacing,
+  clampPlaneHeight,
+  clampPlaneWidth,
+  clampPointToPlane,
+  clampSceneToPlane,
+  clampWireToPlane,
+  createOrthogonalPath,
+  distanceBetween,
+  getCanonicalWirePoint,
+  getComponentPlanePadding,
+  getComponentPlaneSnapOffset,
+  getSegmentAxis,
+  getTerminalApproachAxis,
+  getWireSegmentMidpoint,
+  isWireEndpointIndex,
+  moveAttachedWireEndpoints,
+  normalizeWirePoints,
+  pointsAreClose,
+  pointsShareCanonicalCoordinates,
+  requantizeComponentToPlaneGrid,
+  requantizeCoordinateToGrid,
+  requantizePointToPlaneGrid,
+  requantizeSceneToPlaneGrid,
+  sanitizePlaneSettings,
+  simplifyWirePoints,
+  snapComponentToPlaneGrid,
+  snapPointToGrid,
+  repositionWireEndpointOrthogonally
+} from "./diagram/grid";
+import {
+  createCircuitSnapshot,
+  createGeneratedInstructionTag,
+  downloadCircuitSnapshot,
+  isGeneratedInstructionTag,
+  normalizeInstructionLabel,
+  readCircuitSnapshotFile,
+  readGeneratedInstructionLabel,
+  syncInstructionComponentTag
+} from "./diagram/snapshot";
 
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
-type LampGlowColorOption = "red" | "green" | "yellow" | "blue" | "white";
-type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | SourceComponentType | "LAMP" | "MOTOR";
+export type LampGlowColorOption = "red" | "green" | "yellow" | "blue" | "white";
+export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
 type WireEndpointKey = "start" | "end";
@@ -24,12 +74,12 @@ type BuilderSelection =
   | { kind: "wire"; id: string }
   | null;
 
-interface Point {
+export interface Point {
   x: number;
   y: number;
 }
 
-interface BuilderComponent {
+export interface BuilderComponent {
   delayMs?: number;
   id: string;
   isClosed?: boolean;
@@ -55,7 +105,7 @@ interface BuilderComponent {
   y: number;
 }
 
-interface BuilderWire {
+export interface BuilderWire {
   color: string;
   endPortId: string | null;
   id: string;
@@ -85,12 +135,12 @@ interface BuilderTerminal {
   y: number;
 }
 
-interface BuilderScene {
+export interface BuilderScene {
   components: BuilderComponent[];
   wires: BuilderWire[];
 }
 
-interface BuilderPlaneSettings {
+export interface BuilderPlaneSettings {
   gridSpacing: number;
   height: number;
   width: number;
@@ -109,6 +159,7 @@ export interface CircuitSnapshot {
   name: string;
   program: Program;
   savedAt: string;
+  sheet: SheetMetadata;
   settings: {
     gridSpacing: number;
     height: number;
@@ -216,8 +267,8 @@ interface DiagramBuilderProps {
   tick?: number;
 }
 
-const COMPONENT_WIDTH = 160;
-const COMPONENT_HEIGHT = 136;
+export const COMPONENT_WIDTH = 160;
+export const COMPONENT_HEIGHT = 136;
 const COMPONENT_GLYPH_HEIGHT = 102;
 const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
 const SYMBOL_VIEWPORT_HEIGHT = 84;
@@ -225,13 +276,13 @@ const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 
 const SYMBOL_VIEWBOX_WIDTH = 128;
 const DEFAULT_PLANE_WIDTH = 1720;
 const DEFAULT_PLANE_HEIGHT = 940;
-const DEFAULT_GRID_SPACING = 18;
-const MIN_PLANE_WIDTH = 960;
-const MAX_PLANE_WIDTH = 4200;
-const MIN_PLANE_HEIGHT = 600;
-const MAX_PLANE_HEIGHT = 2400;
-const MIN_GRID_SPACING = 8;
-const MAX_GRID_SPACING = 96;
+export const DEFAULT_GRID_SPACING = 18;
+export const MIN_PLANE_WIDTH = 960;
+export const MAX_PLANE_WIDTH = 4200;
+export const MIN_PLANE_HEIGHT = 600;
+export const MAX_PLANE_HEIGHT = 2400;
+export const MIN_GRID_SPACING = 8;
+export const MAX_GRID_SPACING = 96;
 const SNAP_DISTANCE = 18;
 const DEFAULT_WIRE_COLOR = "#111827";
 const DEFAULT_WIRE_THICKNESS = 3.5;
@@ -243,56 +294,42 @@ const MAX_CANVAS_ZOOM = 2;
 const CANVAS_ZOOM_STEP = 0.1;
 const MAINTAINED_SWITCH_CLICK_DELAY_MS = 220;
 const TIMED_CONTACT_ACTUATION_DELAY_MS = 250;
-const DEFAULT_TIMED_CONTACT_DELAY_MS = 1000;
+export const DEFAULT_TIMED_CONTACT_DELAY_MS = 1000;
 const DEFAULT_LAMP_GLOW_COLOR: LampGlowColorOption = "yellow";
 const MAX_TIMED_CONTACT_DELAY_MS = 3_600_000;
-const GENERATED_INSTRUCTION_TAG_PREFIX = "__builder_label__:";
-const CIRCUIT_SNAPSHOT_VERSION = 1;
-const ROTATION_CENTER_X = COMPONENT_WIDTH / 2;
-const ROTATION_CENTER_Y = COMPONENT_GLYPH_HEIGHT / 2;
+export const GENERATED_INSTRUCTION_TAG_PREFIX = "__builder_label__:";
+export const CIRCUIT_SNAPSHOT_VERSION = 2;
+export const ROTATION_CENTER_X = COMPONENT_WIDTH / 2;
+export const ROTATION_CENTER_Y = COMPONENT_GLYPH_HEIGHT / 2;
 const BREAKER_2P_LEFT_TERMINAL_X = 8;
 const BREAKER_2P_RIGHT_TERMINAL_X = 152;
-const BREAKER_2P_TOP_TERMINAL_Y = 24;
-const BREAKER_2P_BOTTOM_TERMINAL_Y = 78;
-const TERMINAL_LATTICE_X_OFFSET = ((ROTATION_CENTER_X % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
-const TERMINAL_LATTICE_Y_OFFSET = ((ROTATION_CENTER_Y % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
-const MAJOR_GRID_MULTIPLIER = 5;
+const BREAKER_2P_TOP_TERMINAL_Y = 15;
+const BREAKER_2P_BOTTOM_TERMINAL_Y = 69;
+export const TERMINAL_LATTICE_X_OFFSET = ((ROTATION_CENTER_X % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
+export const TERMINAL_LATTICE_Y_OFFSET = ((ROTATION_CENTER_Y % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
+export const MAJOR_GRID_MULTIPLIER = 5;
+export const SHEET_FRAME_INSET = 10;
+export const TITLE_BLOCK_WIDTH = 360;
+export const TITLE_BLOCK_HEIGHT = 110;
+export const TITLE_BLOCK_PADDING = 12;
+export const TITLE_BLOCK_ROW_HEIGHT = 22;
 const PALETTE_DRAG_THRESHOLD = 6;
 const EMPTY_TAG_VALUES: Readonly<Record<string, boolean>> = {};
 const EMPTY_TIMED_CONTACT_STATES: TimedContactStateByComponentId = {};
-const DEFAULT_PLANE_SETTINGS: BuilderPlaneSettings = {
+export const DEFAULT_PLANE_SETTINGS: BuilderPlaneSettings = {
   gridSpacing: DEFAULT_GRID_SPACING,
   height: DEFAULT_PLANE_HEIGHT,
   width: DEFAULT_PLANE_WIDTH
 };
-const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
-  "POWER_SOURCE",
-  "DC_SOURCE",
-  "BREAKER_1P",
-  "BREAKER_2P",
-  "SWITCH_1P",
-  "PUSH_BUTTON_NO",
-  "PUSH_BUTTON_NC",
-  "LAMP",
-  "MOTOR",
-  "XIC",
-  "XIO",
-  "NOTC",
-  "NCTO",
-  "OTE",
-  "OTL",
-  "OTU"
-]);
-const LAMP_GLOW_COLOR_OPTIONS: ReadonlyArray<{ label: string; value: LampGlowColorOption }> = [
+export const LAMP_GLOW_COLOR_OPTIONS: ReadonlyArray<{ label: string; value: LampGlowColorOption }> = [
   { label: "Red", value: "red" },
   { label: "Green", value: "green" },
   { label: "Yellow", value: "yellow" },
   { label: "Blue", value: "blue" },
   { label: "White", value: "white" }
 ];
-const circuitSnapshotTagKinds = new Set<TagDefinition["kind"]>(["input", "output", "internal"]);
 
-const instructionPalette: Array<{
+export const instructionPalette: Array<{
   description: string;
   label: string;
   type: BuilderComponentType;
@@ -304,7 +341,12 @@ const instructionPalette: Array<{
   { type: "SWITCH_1P", label: "Single switch", description: "Maintained open/closed switch" },
   { type: "PUSH_BUTTON_NO", label: "NO push button", description: "Momentary normally open switch" },
   { type: "PUSH_BUTTON_NC", label: "NC push button", description: "Momentary normally closed switch" },
+  { type: "ESTOP", label: "E-stop", description: "Emergency stop, mushroom NC button" },
+  { type: "LIMIT_SWITCH_NO", label: "Limit switch NO", description: "Plunger roller, normally open" },
+  { type: "LIMIT_SWITCH_NC", label: "Limit switch NC", description: "Plunger roller, normally closed" },
+  { type: "OL_CONTACT", label: "OL contact", description: "Overload contact, toggle from inspector" },
   { type: "LAMP", label: "Lamp", description: "Indicator lamp load" },
+  { type: "MOTOR", label: "Motor", description: "Motor load" },
   { type: "XIC", label: "XIC", description: "Normally open contact" },
   { type: "XIO", label: "XIO", description: "Normally closed contact" },
   { type: "NOTC", label: "NOTC", description: "Normally open on-delay contact" },
@@ -318,7 +360,7 @@ const fallbackTags: TagDefinition[] = [
   { name: "B3:0/0", kind: "internal", label: "Internal bit" }
 ];
 
-function componentNeedsTag(type: BuilderComponentType): type is InstructionType {
+export function componentNeedsTag(type: BuilderComponentType): type is InstructionType {
   return type === "XIC"
     || type === "XIO"
     || type === "NOTC"
@@ -336,7 +378,7 @@ function isContactType(type: BuilderComponentType): type is "XIC" | "XIO" | "NOT
   return type === "XIC" || type === "XIO" || type === "NOTC" || type === "NCTO";
 }
 
-function isTimedContactType(type: BuilderComponentType): type is "NOTC" | "NCTO" {
+export function isTimedContactType(type: BuilderComponentType): type is "NOTC" | "NCTO" {
   return type === "NOTC" || type === "NCTO";
 }
 
@@ -362,6 +404,10 @@ function isPassThroughType(type: BuilderComponentType): boolean {
     || type === "SWITCH_1P"
     || type === "PUSH_BUTTON_NO"
     || type === "PUSH_BUTTON_NC"
+    || type === "ESTOP"
+    || type === "LIMIT_SWITCH_NO"
+    || type === "LIMIT_SWITCH_NC"
+    || type === "OL_CONTACT"
     || type === "XIC"
     || type === "XIO"
     || type === "NOTC"
@@ -372,12 +418,12 @@ function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREA
   return type === "BREAKER_1P" || type === "BREAKER_2P";
 }
 
-function isMaintainedSwitchType(type: BuilderComponentType): type is "SWITCH_1P" {
-  return type === "SWITCH_1P";
+function isMaintainedSwitchType(type: BuilderComponentType): type is "SWITCH_1P" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" {
+  return type === "SWITCH_1P" || type === "LIMIT_SWITCH_NO" || type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT";
 }
 
-function isMomentaryPushButtonType(type: BuilderComponentType): type is "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" {
-  return type === "PUSH_BUTTON_NO" || type === "PUSH_BUTTON_NC";
+function isMomentaryPushButtonType(type: BuilderComponentType): type is "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" {
+  return type === "PUSH_BUTTON_NO" || type === "PUSH_BUTTON_NC" || type === "ESTOP";
 }
 
 function isVisualLoadType(type: BuilderComponentType): boolean {
@@ -395,6 +441,10 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
+    case "ESTOP":
+    case "LIMIT_SWITCH_NO":
+    case "LIMIT_SWITCH_NC":
+    case "OL_CONTACT":
       return "contact";
     case "LAMP":
     case "MOTOR":
@@ -450,10 +500,6 @@ function clampWireThickness(value: number): number {
   return clamp(Math.round(value), 2, 12);
 }
 
-function clampPlaneWidth(value: number): number {
-  return clamp(Math.round(value), MIN_PLANE_WIDTH, MAX_PLANE_WIDTH);
-}
-
 function normalizeWheelDeltaValue(delta: number, deltaMode: number): number {
   switch (deltaMode) {
     case 1:
@@ -465,19 +511,11 @@ function normalizeWheelDeltaValue(delta: number, deltaMode: number): number {
   }
 }
 
-function clampPlaneHeight(value: number): number {
-  return clamp(Math.round(value), MIN_PLANE_HEIGHT, MAX_PLANE_HEIGHT);
-}
-
-function clampGridSpacing(value: number): number {
-  return clamp(Math.round(value), MIN_GRID_SPACING, MAX_GRID_SPACING);
-}
-
 function clampCanvasZoom(value: number): number {
   return clamp(Math.round(value * 100) / 100, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM);
 }
 
-function clampTimedContactDelayMs(value: number): number {
+export function clampTimedContactDelayMs(value: number): number {
   if (!Number.isFinite(value)) {
     return DEFAULT_TIMED_CONTACT_DELAY_MS;
   }
@@ -547,14 +585,6 @@ function getTimedContactTimerDisplay(
     };
 }
 
-function sanitizePlaneSettings(settings: Partial<BuilderPlaneSettings> | undefined): BuilderPlaneSettings {
-  return {
-    gridSpacing: clampGridSpacing(settings?.gridSpacing ?? DEFAULT_PLANE_SETTINGS.gridSpacing),
-    height: clampPlaneHeight(settings?.height ?? DEFAULT_PLANE_SETTINGS.height),
-    width: clampPlaneWidth(settings?.width ?? DEFAULT_PLANE_SETTINGS.width)
-  };
-}
-
 function getSourceVoltage(component: BuilderComponent): number {
   return clamp(Math.round(component.sourceVoltage ?? getDefaultSourceVoltage(component.type)), 1, 600);
 }
@@ -579,6 +609,36 @@ function isMaintainedSwitchClosed(component: BuilderComponent): boolean {
 
 function isMomentaryPushButtonPressed(component: BuilderComponent): boolean {
   return isMomentaryPushButtonType(component.type) ? component.isPressed ?? false : false;
+}
+
+/**
+ * Acciona un pulsador momentaneo. El paro de emergencia enclava: cada click
+ * alterna entre accionado y liberado, en vez de soltarse al levantar el pointer.
+ */
+export function applyMomentaryPress(components: BuilderComponent[], componentId: string): BuilderComponent[] {
+  return components.map((component) => {
+    if (component.id !== componentId) {
+      return component;
+    }
+
+    if (component.type === "ESTOP") {
+      return { ...component, isPressed: component.isPressed !== true };
+    }
+
+    return isMomentaryPushButtonType(component.type) ? { ...component, isPressed: true } : component;
+  });
+}
+
+/** Suelta un pulsador momentaneo; el paro de emergencia queda enclavado. */
+export function applyMomentaryRelease(components: BuilderComponent[], componentId: string): BuilderComponent[] {
+  return components.map((component) =>
+    component.id === componentId
+      && component.type !== "ESTOP"
+      && isMomentaryPushButtonType(component.type)
+      && component.isPressed
+      ? { ...component, isPressed: false }
+      : component
+  );
 }
 
 function getInstructionTagValue(
@@ -715,7 +775,12 @@ function getConductiveTerminalPairs(
     case "PUSH_BUTTON_NO":
       return !useLiveTagState || isMomentaryPushButtonPressed(component) ? [["in", "out"]] : [];
     case "PUSH_BUTTON_NC":
+    case "ESTOP":
       return !useLiveTagState || !isMomentaryPushButtonPressed(component) ? [["in", "out"]] : [];
+    case "LIMIT_SWITCH_NO":
+    case "LIMIT_SWITCH_NC":
+    case "OL_CONTACT":
+      return !useLiveTagState || isMaintainedSwitchClosed(component) ? [["in", "out"]] : [];
     case "XIC":
     case "XIO":
     case "NOTC":
@@ -928,6 +993,14 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--[PB NO]--";
     case "PUSH_BUTTON_NC":
       return "--[/PB NC]--";
+    case "ESTOP":
+      return "--[/ES]--";
+    case "LIMIT_SWITCH_NO":
+      return "--o/ NO o--";
+    case "LIMIT_SWITCH_NC":
+      return "--o/ NC o--";
+    case "OL_CONTACT":
+      return "--[/OL]--";
     case "LAMP":
       return "--(Lamp)--";
     case "MOTOR":
@@ -965,6 +1038,14 @@ function getComponentName(type: BuilderComponentType): string {
       return "Push button NO";
     case "PUSH_BUTTON_NC":
       return "Push button NC";
+    case "ESTOP":
+      return "E-stop button";
+    case "LIMIT_SWITCH_NO":
+      return "Limit switch NO";
+    case "LIMIT_SWITCH_NC":
+      return "Limit switch NC";
+    case "OL_CONTACT":
+      return "OL contact";
     case "LAMP":
       return "Lamp";
     case "MOTOR":
@@ -972,55 +1053,6 @@ function getComponentName(type: BuilderComponentType): string {
     default:
       return type;
   }
-}
-
-function normalizeInstructionLabel(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
-}
-
-function isGeneratedInstructionTag(tag: string): boolean {
-  return tag.startsWith(GENERATED_INSTRUCTION_TAG_PREFIX);
-}
-
-function readGeneratedInstructionLabel(tag: string): string | null {
-  if (!isGeneratedInstructionTag(tag)) {
-    return null;
-  }
-
-  try {
-    return decodeURIComponent(tag.slice(GENERATED_INSTRUCTION_TAG_PREFIX.length));
-  } catch {
-    return null;
-  }
-}
-
-function createGeneratedInstructionTag(label: string): string {
-  const normalizedLabel = normalizeInstructionLabel(label);
-  const canonicalLabel = normalizedLabel === "" ? "UNNAMED" : normalizedLabel.toUpperCase();
-
-  return `${GENERATED_INSTRUCTION_TAG_PREFIX}${encodeURIComponent(canonicalLabel)}`;
-}
-
-function syncInstructionComponentTag(component: BuilderComponent): BuilderComponent {
-  if (!componentNeedsTag(component.type)) {
-    return component;
-  }
-
-  if (component.tag !== null && !isGeneratedInstructionTag(component.tag)) {
-    return component;
-  }
-
-  const normalizedLabel = normalizeInstructionLabel(component.label);
-
-  if (normalizedLabel === "") {
-    return component;
-  }
-
-  const nextTag = createGeneratedInstructionTag(normalizedLabel);
-
-  return component.tag === nextTag
-    ? component
-    : { ...component, tag: nextTag };
 }
 
 function mergeInstructionBindingTags(tags: TagDefinition[], components: BuilderComponent[]): TagDefinition[] {
@@ -1086,6 +1118,14 @@ function getDefaultComponentLabel(
       return "PB-NO";
     case "PUSH_BUTTON_NC":
       return "PB-NC";
+    case "ESTOP":
+      return "ES-1";
+    case "LIMIT_SWITCH_NO":
+      return "LS-NO";
+    case "LIMIT_SWITCH_NC":
+      return "LS-NC";
+    case "OL_CONTACT":
+      return "OL-1";
     case "LAMP":
       return "LAMP";
     case "MOTOR":
@@ -1117,12 +1157,12 @@ function projectSymbolPoint(
     : snapPointToTerminalLattice(projectedPoint);
 }
 
-function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[] {
+export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[] {
   switch (type) {
     case "POWER_SOURCE":
 		case "DC_SOURCE": {
-      const leftTerminal = projectSymbolPoint(6, 30, 60);
-      const rightTerminal = projectSymbolPoint(122, 30, 60);
+      const leftTerminal = projectSymbolPoint(6.4, 32, 64);
+      const rightTerminal = projectSymbolPoint(121.6, 32, 64);
 
       return [
         { id: "left", label: type === "POWER_SOURCE" ? "L1" : "-", role: "source", x: leftTerminal.x, y: leftTerminal.y },
@@ -1131,15 +1171,17 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
     }
     case "BREAKER_1P":
       {
-        const inputTerminal = projectSymbolPoint(6, 34, 64);
-        const outputTerminal = projectSymbolPoint(122, 34, 64);
+        const inputTerminal = projectSymbolPoint(6, 32, 64);
+        const outputTerminal = projectSymbolPoint(122, 32, 64);
 
       return [
           { id: "in", label: "1", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
           { id: "out", label: "2", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
       ];
       }
-    case "SWITCH_1P": {
+    case "SWITCH_1P":
+    case "LIMIT_SWITCH_NO":
+    case "LIMIT_SWITCH_NC": {
       const inputTerminal = projectSymbolPoint(6.4, 32, 64);
       const outputTerminal = projectSymbolPoint(121.6, 32, 64);
 
@@ -1173,7 +1215,9 @@ function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[
       ];
     }
     case "PUSH_BUTTON_NO":
-    case "PUSH_BUTTON_NC": {
+    case "PUSH_BUTTON_NC":
+    case "ESTOP":
+    case "OL_CONTACT": {
       const inputTerminal = projectSymbolPoint(6, 36, 72);
       const outputTerminal = projectSymbolPoint(122, 36, 72);
 
@@ -1220,7 +1264,7 @@ function getTerminalCount(type: BuilderComponentType): number {
   return getTerminalDefinitions(type).length;
 }
 
-function getDefaultEntryTerminalId(type: BuilderComponentType): string {
+export function getDefaultEntryTerminalId(type: BuilderComponentType): string {
   switch (type) {
     case "BREAKER_2P":
       return "in-top";
@@ -1228,6 +1272,10 @@ function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
+    case "ESTOP":
+    case "LIMIT_SWITCH_NO":
+    case "LIMIT_SWITCH_NC":
+    case "OL_CONTACT":
     case "LAMP":
     case "MOTOR":
     case "XIC":
@@ -1255,6 +1303,10 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
+    case "ESTOP":
+    case "LIMIT_SWITCH_NO":
+    case "LIMIT_SWITCH_NC":
+    case "OL_CONTACT":
     case "XIC":
     case "XIO":
     case "NOTC":
@@ -1269,6 +1321,101 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
   }
 }
 
+// Vector de referencia del usuario (limit switch NO, viewBox 1024x768) mapeado al
+// viewBox 128x64 del símbolo: los círculos caen en (40,32)/(88,32) y las salidas
+// en 3.2/124.8, la misma retícula que el resto de los símbolos.
+const LIMIT_SWITCH_VECTOR_SCALE = 0.1403;
+const LIMIT_SWITCH_VECTOR_TRANSFORM = `translate(-7.85 -21.85) scale(${LIMIT_SWITCH_VECTOR_SCALE})`;
+
+// Bornes "13" y "14" del vector de referencia.
+const LIMIT_SWITCH_VECTOR_LABEL_PATHS = [
+  "M202.085 306.334 C202.729 309.714 203.329 313.183 205.618 315.902 C207.733 318.414 210.564 320.126 213.783 320.745 C219.84 321.909 226.716 321.523 231.149 316.621 C232.756 314.844 233.585 312.745 234.181 310.456 C236.464 301.687 232.957 292.454 223.504 290.313 C218.762 289.238 213.88 289.581 209.052 289.615 L209.07 280.585 C213.421 280.585 218.261 281.19 222.515 280.049 C228.128 278.544 232.65 274.545 233.384 268.536 C233.534 267.309 233.462 266.024 233.448 264.79 C233.414 261.868 232.682 258.432 230.811 256.102 C224.997 248.863 211.033 249.609 205.831 257.223 C203.998 259.907 203.418 262.851 203.001 266.008 L192.201 265.968 C192.711 261.227 193.748 256.953 196.399 252.917 C204.206 241.034 223.704 239.245 235.055 246.583 C244.744 252.845 247.292 268.128 240.573 277.356 C238.119 280.726 234.856 282.795 231.306 284.863 C235 286.365 238.535 288.204 241.156 291.317 C247.722 299.114 246.832 313.37 240.51 321.031 C230.112 333.63 206.243 333.309 196.222 320.395 C192.936 316.16 192.064 311.743 191.545 306.542 Z",
+  "M128.918 254.75 C133.241 253.659 137.341 251.893 141.469 250.23 C145.008 248.805 148.648 247.65 152.228 246.334 C154.643 245.447 156.969 244.329 159.408 243.5 L161.191 242.97 L161.251 328.994 L150.578 328.924 L150.648 256.785 L128.881 264.699 Z",
+  "M781.023 254.85 C785.694 253.586 790.099 251.602 794.613 249.893 C800.909 247.509 807.233 245.194 813.539 242.828 L813.607 328.95 L802.875 329.021 L802.776 256.784 L780.962 264.732 Z",
+  "M891.107 243.371 C891.261 248.601 891.141 253.84 891.132 259.071 C891.119 267.072 891.175 275.074 891.175 283.075 C891.175 288.695 890.881 294.395 891.321 299.991 L903.218 299.999 L903.043 308.873 L891.124 308.979 L891.171 329.103 L880.232 329.032 L880.391 308.978 L841.4 308.811 C841.4 306.917 841.089 304.639 841.571 302.781 C842.108 300.709 843.753 299.029 844.891 297.275 C846.561 294.703 848.183 292.092 849.845 289.513 C856.281 279.524 862.625 269.467 869.213 259.578 C871.885 255.567 874.388 251.454 877.086 247.462 C877.837 246.351 878.371 244.82 879.47 244.003 C880.989 242.873 888.915 243.406 891.107 243.371 Z M880.316 259.915 C879.814 260.019 879.404 260 879.002 260.38 C878.255 261.086 877.841 262.207 877.321 263.077 C876.019 265.256 874.623 267.484 873.143 269.547 C870.877 272.706 868.993 276.179 866.89 279.447 C862.48 286.3 858.067 293.131 853.71 300.019 L880.239 300.034 Z"
+];
+
+// Terminales + salidas + cuchilla abierta del vector del usuario (izquierda) y
+// terminal + salida (derecha). Los subpaths interiores son huecos: hay que
+// rellenarlos con fill-rule="evenodd" para reproducir el dibujo original.
+const LIMIT_SWITCH_VECTOR_LEFT_TERMINAL_PATH = "M294.061 379.191 C294.617 376.406 294.829 373.399 295.674 370.684 C298.788 360.677 304.883 351.875 313.321 345.659 C314.187 345.021 315.003 344.291 315.921 343.726 C336.554 331.025 363.818 335.596 378.542 355.083 C380.966 358.291 382.786 361.806 384.361 365.48 C386.455 370.364 387.575 374.83 387.949 380.135 C389.895 380.7 391.794 381.397 393.734 381.972 C398.274 383.318 402.895 384.361 407.442 385.686 C409.68 386.338 411.875 387.126 414.114 387.782 C417.784 388.856 421.532 389.688 425.201 390.76 C427.351 391.389 429.467 392.15 431.62 392.78 C435.606 393.946 439.644 394.98 443.65 396.062 C447.261 397.037 450.8 398.316 454.408 399.314 C462.658 401.597 470.905 403.878 479.141 406.226 C481.694 406.954 484.183 407.872 486.742 408.587 C502.914 413.103 519.046 417.721 535.207 422.278 C537.766 423 540.265 423.916 542.828 424.63 C545.712 425.433 548.631 426.112 551.512 426.922 C553.913 427.597 556.261 428.484 558.657 429.165 C563.217 430.46 567.832 431.566 572.381 432.892 C574.778 433.59 577.119 434.475 579.528 435.136 C583.541 436.236 587.579 437.247 591.576 438.412 C600.432 440.993 609.269 443.684 618.163 446.125 C621.361 447.003 624.598 447.78 627.771 448.75 C629.281 449.211 630.755 449.809 632.277 450.236 C645.475 453.942 658.655 457.755 671.858 461.457 C674.741 462.265 677.623 463.059 680.503 463.876 C681.852 464.259 683.266 464.56 684.528 465.196 C685.598 465.735 686.705 466.53 687.101 467.715 C687.629 469.295 686.919 470.968 686.5 472.48 C685.596 472.762 684.613 473.204 683.655 473.262 C681.089 473.418 677.912 471.961 675.432 471.328 C672.768 470.648 670.185 469.689 667.533 468.969 C663.521 467.881 659.478 466.895 655.509 465.65 C653.661 465.071 645.62 462.222 644.294 462.946 C642.772 463.777 640.814 466.716 639.673 468.126 C637.318 471.035 634.795 473.805 632.517 476.775 C631.451 478.164 630.187 479.373 629.076 480.719 C626.436 483.917 623.832 487.155 621.185 490.35 C618.484 493.612 615.794 496.875 613.068 500.116 C612.047 501.329 611.173 502.64 610.109 503.822 C608.221 505.918 606.45 508.139 604.658 510.317 C603.211 512.076 601.877 514.154 599.924 515.404 C599.221 515.854 598.391 516.017 597.564 516.019 C595.485 516.024 593.449 514.414 591.741 513.378 C587.834 511.01 583.833 508.767 580.004 506.273 C577.71 504.779 575.26 503.5 572.896 502.118 C568.816 499.733 564.788 497.209 560.721 494.79 C554.221 490.922 547.851 486.822 541.297 483.047 C531.362 477.325 521.627 471.227 511.82 465.288 C506.702 462.189 501.527 459.163 496.354 456.163 C495.13 455.453 493.994 454.601 492.785 453.871 C483.842 448.47 474.87 443.135 465.954 437.688 C464.254 436.649 462.471 435.751 460.765 434.722 C442.125 423.48 423.468 412.272 404.856 400.998 C399.148 397.541 393.334 394.257 387.672 390.713 C387.287 392.623 386.963 394.576 386.401 396.447 C384.599 402.443 381.545 408.5 377.559 413.331 C366.264 427.018 348.149 433.459 330.776 429.572 C328.866 429.145 327.169 428.413 325.337 427.785 C320.006 425.96 314.947 423.216 310.642 419.541 C305.16 414.861 301.451 409.614 298.358 403.166 C297.788 401.979 297.132 400.782 296.691 399.54 C295.363 395.799 294.821 391.895 294.1 388.01 C287.046 387.731 279.965 387.889 272.905 387.889 L237.401 387.889 L130.389 387.889 C117.554 387.889 104.719 387.893 91.884 387.893 C88.238 387.893 80.467 389.211 80.377 383.75 C80.305 379.34 83.957 379.271 87.325 379.284 C88.825 379.289 90.325 379.278 91.826 379.277 C104.577 379.263 117.328 379.276 130.08 379.276 L237.592 379.276 L273.097 379.276 C280.082 379.276 287.079 379.394 294.061 379.191 Z M302.589 384.5 C303.093 405.745 320.725 422.56 341.97 422.055 C363.216 421.551 380.03 403.919 379.526 382.674 C379.022 361.428 361.39 344.614 340.145 345.118 C318.899 345.622 302.085 363.254 302.589 384.5 Z M416.851 398.021 L416.88 398.991 C419.594 399.566 422.153 401.629 424.483 403.082 C427.095 404.711 429.793 406.17 432.367 407.855 C432.991 408.264 433.704 408.519 434.347 408.898 C435.997 409.869 437.619 410.889 439.268 411.863 C445.421 415.501 451.533 419.23 457.661 422.919 C464.348 426.944 470.988 431.056 477.687 435.053 C482.033 437.646 486.487 440.078 490.815 442.705 C492.02 443.437 493.137 444.312 494.346 445.038 C501.189 449.146 508.106 453.118 514.932 457.247 C526.956 464.52 538.942 471.848 551.065 478.951 C560.098 484.242 568.986 489.774 577.996 495.108 C580.49 496.583 582.872 498.297 585.443 499.635 C587.426 500.667 595.068 506.077 596.68 505.753 C598.034 505.481 599.181 503.574 599.988 502.571 C602.334 499.655 604.739 496.785 607.125 493.901 C611.79 488.264 616.475 482.643 621.206 477.064 C625.967 471.449 630.517 465.671 635.362 460.134 C629.791 458.084 623.97 456.772 618.271 455.119 C606.454 451.691 594.626 448.347 582.775 445.035 C581.653 444.721 580.593 444.214 579.47 443.903 C566.099 440.195 552.756 436.417 539.466 432.44 C535.253 431.18 530.945 430.187 526.716 428.97 C525.596 428.648 524.526 428.164 523.402 427.859 C516.735 426.05 510.122 424.115 503.493 422.175 C499.107 420.892 494.67 419.798 490.283 418.516 C479.026 415.227 467.741 412.043 456.448 408.882 C454.121 408.231 451.86 407.368 449.538 406.71 C445.86 405.667 442.123 404.819 438.45 403.77 C433.739 402.423 429.078 400.917 424.351 399.615 C421.83 398.921 419.491 398.03 416.851 398.021 Z";
+
+const LIMIT_SWITCH_VECTOR_RIGHT_TERMINAL_PATH = "M730.084 379.302 C748.851 378.909 767.659 379.249 786.431 379.249 L894.215 379.249 L932.477 379.249 C935.853 379.249 943.898 378.053 944.059 383.186 C944.247 389.155 936.566 387.916 932.709 387.916 L894.447 387.916 L786.914 387.916 L751.402 387.916 C744.352 387.916 737.285 388.051 730.238 387.81 C728.202 399.895 724.148 410.02 714.865 418.404 C692.925 438.218 658.586 433.322 643.047 408.166 C637.986 399.973 635.998 390.54 636.313 380.999 C636.458 376.586 637.432 372.25 638.847 368.089 C645.843 347.521 666.217 334.79 687.71 336.817 C690.358 337.067 692.998 337.384 695.574 338.085 C708.57 341.621 720.397 351.3 725.901 363.69 C728.11 368.663 729.439 373.914 730.084 379.302 Z M644.727 384.499 C645.233 405.752 662.872 422.57 684.124 422.064 C705.377 421.558 722.196 403.919 721.689 382.667 C721.183 361.414 703.544 344.595 682.292 345.102 C661.039 345.608 644.221 363.247 644.727 384.499 Z";
+
+// SVG del usuario para el limit switch NC (NC limit switch.svg, viewBox 220x53):
+// simbolo cerrado + bornes "11"/"12". Los anillos y la cuna son subpaths huecos,
+// asi que tambien necesita fill-rule="evenodd". El mapeo lleva los centros de los
+// anillos (66.99,37) y (151.49,37) a la reticula (40,32)/(88,32).
+const LIMIT_SWITCH_NC_VECTOR_SCALE = 0.568;
+const LIMIT_SWITCH_NC_VECTOR_TRANSFORM = `translate(1.95 10.99) scale(${LIMIT_SWITCH_NC_VECTOR_SCALE})`;
+const LIMIT_SWITCH_NC_VECTOR_SYMBOL_PATH = "M2.78 36 L55.246 35.941 C55.887 33.816 56.462 31.693 57.844 29.908 C61.911 24.654 69.975 23.931 74.846 28.498 C76.99 30.507 77.841 33.002 78.759 35.718 C86.369 34.851 93.934 33.597 101.519 32.53 C113.811 30.799 126.091 29.007 138.381 27.273 C141.268 26.866 144.147 26.406 147.036 26.009 C148.268 25.84 149.402 25.328 150.659 25.242 C154.64 24.971 158.925 27.318 161.117 30.563 C162.209 32.178 162.708 34.109 163.319 35.936 C175.598 35.996 187.879 35.941 200.158 35.941 C203.242 35.941 206.326 35.948 209.411 35.941 C211.038 35.937 212.788 35.76 214.402 35.977 C214.905 36.045 215.305 36.294 215.753 36.507 L215.768 38.007 L163.307 38.023 C161.964 42.394 160.396 45.767 155.946 47.678 C148.528 50.865 139.897 45.06 139.93 37.019 C139.942 33.866 141.364 31.487 142.921 28.847 L137.438 29.594 L131.025 48.885 L78.73 38.344 C78.07 40.312 77.498 42.288 76.218 43.958 C72.088 49.348 64.012 50.122 59.053 45.394 C56.908 43.35 56.122 40.804 55.194 38.072 L2.765 38.002 Z M135.221 29.822 C124.387 31.528 113.507 33.059 102.639 34.539 C96.547 35.371 90.428 36.084 84.407 37.331 L129.874 46.421 C131.28 40.799 133.31 35.295 135.221 29.822 Z M57.551 36.502 C57.277 41.712 61.28 46.159 66.491 46.434 C71.702 46.708 76.149 42.705 76.423 37.495 C76.697 32.283 72.695 27.837 67.484 27.562 C62.273 27.287 57.826 31.29 57.551 36.502 Z M142.059 37.498 C142.913 50.087 161.811 48.972 160.923 35.906 C160.834 34.601 160.261 33.276 159.612 32.157 C154.825 23.901 141.405 27.87 142.059 37.498 Z";
+const LIMIT_SWITCH_NC_VECTOR_LABEL_PATHS = ["M15.081 3.052 L21.895 2.419 C21.868 7.284 21.92 12.151 21.92 17.017 C21.92 19.167 22.358 21.634 21.189 23.506 L19.192 23.559 L19.085 5.26 L14.753 5.251 Z", "M31.787 3.128 L38.641 2.555 L38.559 23.401 L36.423 23.507 C36.166 23.092 35.868 22.731 35.77 22.24 C35.445 20.601 35.712 18.674 35.712 17.005 L35.712 5.326 L31.432 5.252 Z", "M176.209 3.093 L182.963 2.398 C182.915 7.14 182.981 11.883 182.981 16.625 C182.981 18.841 183.429 21.472 182.357 23.458 L180.142 23.543 L180.073 5.32 L175.831 5.252 Z", "M194.973 21.26 L204.605 21.272 C204.995 22.179 205.035 22.508 204.681 23.424 L190.486 23.408 C192.211 20.808 194.178 18.565 196.272 16.262 C197.919 14.45 199.82 12.629 200.918 10.407 C202.123 7.967 201.096 4.642 198.064 4.511 C196.497 4.444 194.969 5.199 194.374 6.712 C194.15 7.281 194.043 8.027 193.492 8.391 C192.891 8.787 192.018 8.651 191.338 8.644 C190.821 2.886 199.099 0.022 202.818 4.132 C207.863 9.708 198.451 17.467 194.973 21.26 Z"];
+
+// Trazo de los vectores del usuario. El arte trae lineas de ~1.2 unidades y el
+// resto de los simbolos usa 3.2, asi que el contorno se engrosa con un stroke de
+// 2 unidades del viewBox 128x64. Como el stroke se escala con el transform del
+// grupo, el valor local es 2 / escala. Solo se trazan el contorno y los huecos de
+// los bornes: los huecos decorativos (cuchilla/cuna) se dejan intactos.
+function pickVectorSubpaths(pathData: string, indexes: number[]): string[] {
+  const subpaths = pathData.match(/M[^M]*/g) ?? [pathData];
+
+  return indexes
+    .map((index) => subpaths[index])
+    .filter((subpath): subpath is string => Boolean(subpath));
+}
+
+const LIMIT_SWITCH_VECTOR_OUTLINE_PATHS = [
+  ...pickVectorSubpaths(LIMIT_SWITCH_VECTOR_LEFT_TERMINAL_PATH, [0, 1]),
+  ...pickVectorSubpaths(LIMIT_SWITCH_VECTOR_RIGHT_TERMINAL_PATH, [0, 1])
+];
+
+const LIMIT_SWITCH_NC_VECTOR_OUTLINE_PATHS = pickVectorSubpaths(LIMIT_SWITCH_NC_VECTOR_SYMBOL_PATH, [0, 2, 3]);
+
+const LIMIT_SWITCH_VECTOR_STROKE_WIDTH = 2 / LIMIT_SWITCH_VECTOR_SCALE;
+const LIMIT_SWITCH_NC_VECTOR_STROKE_WIDTH = 2 / LIMIT_SWITCH_NC_VECTOR_SCALE;
+
+// Fuente AC del usuario (AC source.svg, viewBox 980x980). Escala uniforme que
+// encaja el dibujo en el viewBox 128x64: los anillos caen en (8.54,31.90) y
+// (119.21,32.44), con los terminales de cable en (6.4,32)/(121.6,32).
+// El arte ya trae un trazo de ~4.0 unidades, asi que no necesita el stroke de normalizacion.
+const AC_SOURCE_VECTOR_SCALE = 0.146087;
+const AC_SOURCE_VECTOR_TRANSFORM = `translate(-7.91 -39.68) scale(${AC_SOURCE_VECTOR_SCALE})`;
+const AC_SOURCE_VECTOR_SYMBOL_PATH = "M162.956 476.864 L285.538 476.822 C286.662 456.975 290.993 437.084 297.96 418.477 C299.362 414.733 300.978 411.077 302.528 407.394 C304.824 401.943 307.561 396.703 310.431 391.539 C318.459 377.095 327.903 363.375 339.258 351.32 C343.647 346.66 348.067 342.013 352.828 337.724 C373.012 319.539 396.501 305.375 422.057 296.147 C441.732 289.043 462.017 285.445 482.86 284.47 C542.071 281.7 599.718 305.306 640.547 348.154 C647.255 355.194 653.619 362.583 659.239 370.535 C676.65 395.168 688.916 423.283 694.377 452.995 C695.828 460.892 696.555 468.833 697.344 476.809 L821.116 476.772 C822.842 470.773 825.855 465.421 829.677 460.511 C848.306 436.578 884.118 434.104 905.878 455.226 C910.665 459.872 914.673 465.28 917.31 471.434 C919.673 476.947 921.252 482.773 921.624 488.785 C923.478 518.699 900.283 543.906 870.197 543.88 C863.368 543.875 856.554 542.661 850.231 540.018 C838.177 534.98 828.472 525.242 823.013 513.443 C821.67 510.54 820.824 507.393 819.846 504.358 L697.408 504.427 C696.63 510.985 696.15 517.57 695.085 524.101 C692.891 537.546 689.278 550.85 684.456 563.585 C664.665 615.852 622.873 659.536 571.146 680.925 C553.045 688.41 533.813 693.677 514.301 695.707 C508.154 696.346 502.018 696.622 495.848 696.782 C494.264 696.823 492.699 697.044 491.109 697.04 C489.774 697.037 488.452 696.83 487.119 696.8 C485.538 696.764 483.95 696.853 482.371 696.794 C471.699 696.398 460.885 694.998 450.419 692.876 C379.446 678.486 320.798 627.231 296.747 558.984 C290.638 541.65 286.354 522.822 285.56 504.413 L161.768 504.428 C156.022 520.55 144.49 533.058 127.791 538.038 C98.682 546.719 68.002 528.96 62.119 498.916 C61.489 495.699 60.977 492.286 60.994 489 C61.142 459.429 85.612 435.435 115.399 437.313 C120.302 437.622 125.175 438.334 129.824 440.017 C142.538 444.618 153.541 454.266 159.275 466.579 C160.821 469.898 161.892 473.372 162.956 476.864 Z M88.798 488.501 C88.685 501.66 99.26 512.419 112.418 512.533 C125.577 512.646 136.336 502.071 136.449 488.913 C136.563 475.754 125.988 464.995 112.829 464.881 C99.671 464.768 88.912 475.343 88.798 488.501 Z M846.341 492.499 C846.41 505.658 857.134 516.27 870.293 516.2 C883.452 516.131 894.063 505.407 893.994 492.248 C893.925 479.089 883.201 468.478 870.042 468.547 C856.883 468.617 846.271 479.34 846.341 492.499 Z M312.606 490.5 C312.582 492 312.842 493.49 312.871 494.99 C313.275 516.092 317.531 537.226 325.494 556.801 C332.004 572.802 340.637 587.749 351.361 601.296 C354.756 605.584 358.229 609.919 362.192 613.703 C362.979 614.454 363.612 615.332 364.373 616.104 C367.026 618.797 370.066 621.672 372.907 624.167 C391.017 640.07 412.079 652.369 434.925 660.088 C497.541 681.243 567.333 665.052 614.991 619.496 C626.238 608.745 636.205 596.328 644.23 583.004 C647.542 577.504 650.388 571.81 653.239 566.075 C662.692 547.055 668.12 524.217 669.589 503.093 C669.774 500.443 670.051 497.779 670.088 495.121 C670.474 467.635 665.206 439.768 653.249 414.89 C635.749 378.483 606.866 348.279 570.471 330.477 C560.446 325.573 550.113 321.369 539.314 318.476 C531.685 316.432 523.953 314.582 516.107 313.554 C491.538 310.336 467.023 311.827 443.106 318.5 C438.445 319.801 433.94 321.507 429.36 323.06 C425.181 324.477 421.161 326.314 417.165 328.168 C401.325 335.517 386.469 344.935 373.375 356.543 C354.991 372.841 340.237 392.707 329.603 414.837 C321.711 431.261 316.384 449.754 314.144 467.832 C313.552 472.616 313.105 477.452 312.863 482.264 C312.779 483.926 312.897 485.599 312.841 487.263 C312.805 488.344 312.624 489.415 312.606 490.5 Z";
+const AC_SOURCE_VECTOR_WAVE_PATH = "M368.482 492.501 C368.581 488.171 370.995 484.923 373.247 481.459 C377.983 474.175 383.817 467.426 390.099 461.435 C397.079 454.778 404.794 448.841 413.615 444.819 C418.441 442.619 423.53 440.798 428.801 440.038 C431.563 439.639 434.464 439.262 437.258 439.28 C462.088 439.44 481.229 457.355 494.344 476.769 C503.348 490.097 513.549 511.334 531.396 513.885 C538.215 514.86 544.801 512.198 550.553 508.791 C561.784 502.138 573.211 489.263 580.508 478.482 C582.182 476.009 583.884 473.529 585.424 470.972 C587.053 468.269 588.494 464.768 590.955 462.71 C597.233 457.459 606.367 457.91 611.407 464.633 C612.92 466.651 613.983 469.218 614.163 471.757 C614.56 477.338 611.277 482.071 608.346 486.523 C607.296 488.118 606.364 489.789 605.297 491.373 C601.436 497.103 597.254 502.58 592.826 507.877 C586.087 515.941 577.984 524.17 569.129 529.895 C562.048 534.472 554.776 538.138 546.579 540.259 C542.531 541.306 538.377 541.666 534.216 541.691 C509.824 541.834 491.98 524.151 479.45 505.024 C476.808 500.992 474.437 496.787 471.778 492.762 C464.851 482.276 454.9 470.729 442.21 467.642 C430.139 464.705 417.499 473.33 409.279 481.396 C405.708 484.899 402.547 488.734 399.349 492.569 C396.004 496.58 394.077 501.768 389.528 504.617 C380.273 510.411 368.236 503.344 368.482 492.501 Z";
+
+// Interruptor SPST del usuario (SPST-Switch.svg, viewBox 347x100). Los extremos
+// de las salidas caen en (6.4,32)/(121.6,32) y los anillos en (48.1,32)/(80.3,32)
+// con r=6.95. El arte ya es de trazo, asi que el grosor se fija directo:
+// 3.2 unidades del viewBox = 3.2 / escala en unidades locales.
+const SPST_SWITCH_VECTOR_SCALE = 0.365714;
+const SPST_SWITCH_VECTOR_TRANSFORM = `translate(3.84 7.86) scale(${SPST_SWITCH_VECTOR_SCALE})`;
+const SPST_SWITCH_VECTOR_STROKE_WIDTH = 3.2 / SPST_SWITCH_VECTOR_SCALE;
+const SPST_SWITCH_VECTOR_RING_LEFT_PATH = "M140 66a19 19 0 1 1-38 0 19 19 0 1 1 38 0z";
+const SPST_SWITCH_VECTOR_RING_RIGHT_PATH = "M228 66a19 19 0 1 1-38 0 19 19 0 1 1 38 0z";
+const SPST_SWITCH_VECTOR_OPEN_LEVER_PATH = "M238 221h93m-315 0h93m21-58 94 61";
+const SPST_SWITCH_VECTOR_CLOSED_LEVER_PATH = "M229 66 L322 66 M7 66 L100 66 M138.163 69 L215 69";
+
+// Pulsador de emergencia del usuario. Reposo: Emergency push button.svg;
+// accionado: Emergency push button (opened).svg. Cada traza (incluidos los
+// rotulos 11/12) tiene sus propias coordenadas, asi que cada estado lleva su
+// escala/traslacion para que el extremo de las salidas caiga en
+// (2.286,36)/(125.714,36) del viewBox 128x72 (terminales 8/68 y 152/68).
+const ESTOP_VECTOR_SCALE = 0.288588;
+const ESTOP_VECTOR_TRANSFORM = `translate(-0.193 6.482) scale(${ESTOP_VECTOR_SCALE})`;
+const ESTOP_VECTOR_STROKE_WIDTH = 2 / ESTOP_VECTOR_SCALE;
+const ESTOP_RING_STROKE_WIDTH = 3.2 / ESTOP_VECTOR_SCALE;
+const ESTOP_VECTOR_SYMBOL_PATH = "M112.047 104.403 L8.589 104.44 L8.589 100.241 C8.589 100.241 18.088 100.129 22.826 100.129 L45.579 100.129 C67.723 100.129 89.889 99.843 112.03 100.162 M325.591 100.055 C325.685 100.452 378.407 100.024 404.805 100.024 L436.285 100.365 L436.285 104.672 L404.641 104.335 L325.514 104.335 M302.544 126.445 L135.017 126.426 L135.017 122.677 L216.844 122.76 L216.642 60.626 C206.556 61.515 197.329 65.714 189.209 71.668 C186.607 73.575 184.121 75.694 181.753 77.884 C180.672 78.883 179.615 80.401 178.285 81.063 C177.316 81.546 175.997 81.624 174.958 81.843 C175.124 80.738 175.099 79.234 175.635 78.211 C177.138 75.344 185.984 68.657 188.939 66.697 C207.025 54.705 223.85 52.833 243.212 63.295 C247.448 65.585 259.902 74.243 261.982 78.277 C262.451 79.187 262.271 80.383 262.173 81.357 C261.233 81.356 260.11 81.099 259.252 80.636 C257.928 79.921 256.89 78.848 255.788 77.839 C253.415 75.665 250.934 73.517 248.327 71.625 C240.217 65.737 231.018 61.453 220.952 60.646 L220.952 100.295 C220.952 107.753 220.739 122.76 220.739 122.76 L302.544 122.68";
+const ESTOP_VECTOR_LABEL_PATHS = ["M24.428 13.28 L24.428 54.953 L19.338 54.916 L19.338 20.221 C15.707 21.332 12.019 22.597 8.589 24.242 L8.589 19.408 Z", "M40.976 19.248 L56.625 13.414 L56.554 54.894 L51.66 54.966 L51.675 20.287 C48.063 21.412 44.562 22.857 40.865 23.672 Z", "M378.293 19.337 C383.633 17.923 389.07 15.759 394.082 13.451 L394.082 55.123 L389.065 55.152 L388.925 20.481 L378.178 24.315 Z", "M415.64 50.821 L436.285 50.857 L436.232 55.124 L409.274 55.129 C409.225 53.945 408.975 52.496 409.44 51.356 C409.941 50.13 411.364 49.215 412.19 48.196 C416.557 42.809 428.948 32.002 429.031 25.19 C429.128 17.231 418.675 15.033 414.747 21.571 C413.908 22.968 413.746 24.736 413.462 26.301 L408.463 26.301 C408.652 23.257 409.203 20.488 411.185 18.045 C416.755 11.179 430.916 11.786 433.893 20.954 C437.216 31.193 421.765 43.972 415.64 50.821 Z"];
+const ESTOP_VECTOR_RINGS = [[302.544, 102.225], [135.017, 102.301]] as const;
+
+const ESTOP_VECTOR_OPEN_SCALE = 0.290296;
+const ESTOP_VECTOR_OPEN_TRANSFORM = `translate(-0.353 6.103) scale(${ESTOP_VECTOR_OPEN_SCALE})`;
+const ESTOP_VECTOR_OPEN_STROKE_WIDTH = 2 / ESTOP_VECTOR_OPEN_SCALE;
+const ESTOP_VECTOR_OPEN_RING_STROKE_WIDTH = 3.2 / ESTOP_VECTOR_OPEN_SCALE;
+const ESTOP_VECTOR_OPEN_SYMBOL_PATH = "M112.548 105.05 L9.09 105.087 L9.09 100.888 C9.09 100.888 18.589 100.776 23.327 100.776 L46.08 100.776 C68.224 100.776 90.39 100.49 112.531 100.809 M323.576 100.58 C323.669 100.977 376.392 100.549 402.789 100.549 L434.27 100.89 L434.27 105.197 L402.626 104.86 L323.499 104.86 M301.876 145.867 L134.349 145.848 L134.349 142.099 L216.176 142.182 L215.974 80.048 C205.888 80.937 196.661 85.136 188.541 91.09 C185.939 92.997 183.453 95.116 181.085 97.306 C180.004 98.305 178.947 99.823 177.617 100.485 C176.648 100.968 175.329 101.046 174.29 101.265 C174.456 100.16 174.431 98.656 174.967 97.633 C176.47 94.766 185.316 88.079 188.271 86.119 C206.357 74.127 223.182 72.255 242.544 82.717 C246.78 85.007 259.234 93.665 261.314 97.699 C261.783 98.609 261.603 99.805 261.505 100.779 C260.565 100.778 259.442 100.521 258.584 100.058 C257.26 99.343 256.222 98.27 255.12 97.261 C252.747 95.087 250.266 92.939 247.659 91.047 C239.549 85.159 230.35 80.875 220.284 80.068 L220.284 119.717 C220.284 127.175 220.071 142.182 220.071 142.182 L301.876 142.102";
+const ESTOP_VECTOR_OPEN_LABEL_PATHS = ["M24.929 13.461 L24.929 55.134 L19.839 55.097 L19.839 20.402 C16.208 21.513 12.52 22.778 9.09 24.423 L9.09 19.589 Z", "M41.477 19.429 L57.126 13.595 L57.055 55.075 L52.161 55.147 L52.176 20.468 C48.564 21.593 45.063 23.038 41.366 23.853 Z", "M378.999 19.384 C384.339 17.97 389.776 15.806 394.788 13.498 L394.788 55.17 L389.771 55.199 L389.631 20.528 L378.884 24.362 Z", "M416.346 50.868 L436.991 50.904 L436.938 55.171 L409.98 55.176 C409.931 53.992 409.681 52.543 410.146 51.403 C410.647 50.177 412.07 49.262 412.896 48.243 C417.263 42.856 429.654 32.049 429.737 25.237 C429.834 17.278 419.381 15.08 415.453 21.618 C414.614 23.015 414.452 24.783 414.168 26.348 L409.169 26.348 C409.358 23.304 409.909 20.535 411.891 18.092 C417.461 11.226 431.622 11.833 434.599 21.001 C437.922 31.24 422.471 44.019 416.346 50.868 Z"];
+const ESTOP_VECTOR_OPEN_RINGS = [[302.603, 102.873], [134.947, 102.873]] as const;
+
 function renderSymbolGraphic(
   type: BuilderComponentType,
   options: {
@@ -1277,6 +1424,8 @@ function renderSymbolGraphic(
     contactActuated?: boolean;
     contactClosed?: boolean;
     energized?: boolean;
+    estopPressed?: boolean;
+    label?: string;
     pushButtonPressed?: boolean;
     switchClosed?: boolean;
     terminalLabels?: Partial<Record<string, string>>;
@@ -1311,6 +1460,8 @@ function renderSymbolGraphic(
     "diagram-symbol",
     type === "PUSH_BUTTON_NO" ? "diagram-symbol--pushbutton-no" : "",
     type === "PUSH_BUTTON_NC" ? "diagram-symbol--pushbutton-nc" : "",
+    type === "ESTOP" ? "diagram-symbol--estop" : "",
+    type === "OL_CONTACT" ? "diagram-symbol--ol" : "",
     options.energized ? "diagram-symbol--energized" : "",
     options.coilActive ? "diagram-symbol--coil-active" : "",
     options.contactClosed ? "diagram-symbol--contact-closed" : "",
@@ -1320,13 +1471,20 @@ function renderSymbolGraphic(
   switch (type) {
     case "POWER_SOURCE":
       return (
-        <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
+        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
           <text x="8" y="14" className="diagram-symbol__text">{getTerminalLabelText("left", "L1")}</text>
           <text x="100" y="14" className="diagram-symbol__text">{getTerminalLabelText("right", "L2")}</text>
-          <line x1="6" y1="30" x2="42" y2="30" className="diagram-symbol__line" />
-          <line x1="86" y1="30" x2="122" y2="30" className="diagram-symbol__line" />
-          <circle cx="64" cy="30" r="20" className="diagram-symbol__shape" />
-          <path d="M50 30 Q55 16 60 30 Q65 44 70 30 Q75 16 78 30" className="diagram-symbol__line" />
+          <g transform={AC_SOURCE_VECTOR_TRANSFORM}>
+            {/* El arte dibuja los anillos como huecos transparentes y el cable
+                pasa por detras: se tapa con un disco blanco bajo el anillo para
+                que el cable termine limpio en el borde del borne. */}
+            <circle cx="112.624" cy="488.707" r="45" fill="rgba(255, 255, 255, 0.98)" />
+            <circle cx="870.167" cy="492.374" r="45" fill="rgba(255, 255, 255, 0.98)" />
+          </g>
+          <g transform={AC_SOURCE_VECTOR_TRANSFORM} className="diagram-symbol__vector" fillRule="evenodd">
+            <path d={AC_SOURCE_VECTOR_SYMBOL_PATH} />
+            <path d={AC_SOURCE_VECTOR_WAVE_PATH} />
+          </g>
         </svg>
       );
     case "DC_SOURCE":
@@ -1344,56 +1502,116 @@ function renderSymbolGraphic(
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
           <text x="34" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in", "1")}</text>
           <text x="94" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out", "2")}</text>
-          <line x1="6" y1="34" x2="28" y2="34" className="diagram-symbol__line" />
-          <line x1="100" y1="34" x2="122" y2="34" className="diagram-symbol__line" />
-          <circle cx="34" cy="34" r="5.5" className="diagram-symbol__terminal" />
-          <circle cx="94" cy="34" r="5.5" className="diagram-symbol__terminal" />
-          <path d="M41 28 C50 10 78 10 87 28" className="diagram-symbol__line" fill="none" />
+          <line x1="6" y1="32" x2="28" y2="32" className="diagram-symbol__line" />
+          <line x1="100" y1="32" x2="122" y2="32" className="diagram-symbol__line" />
+          <circle cx="34" cy="32" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="94" cy="32" r="5.5" className="diagram-symbol__terminal" />
+          <path d="M41 26 C50 8 78 8 87 26" className="diagram-symbol__line" fill="none" />
         </svg>
       );
     case "BREAKER_2P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="6.4" y1="10.4" x2="28.4" y2="10.4" className="diagram-symbol__line diagram-symbol__breaker-lead" />
-          <line x1="99.6" y1="10.4" x2="121.6" y2="10.4" className="diagram-symbol__line diagram-symbol__breaker-lead" />
-          <circle cx="34.4" cy="10.4" r="5.5" className="diagram-symbol__terminal" />
-          <circle cx="93.6" cy="10.4" r="5.5" className="diagram-symbol__terminal" />
-          <line x1="6.4" y1="53.6" x2="28.4" y2="53.6" className="diagram-symbol__line diagram-symbol__breaker-lead" />
-          <line x1="99.6" y1="53.6" x2="121.6" y2="53.6" className="diagram-symbol__line diagram-symbol__breaker-lead" />
-          <circle cx="34.4" cy="53.6" r="5.5" className="diagram-symbol__terminal" />
-          <circle cx="93.6" cy="53.6" r="5.5" className="diagram-symbol__terminal" />
-          <path d="M41.4 4.4 C50 -8.9 78 -8.9 86.6 4.4" className="diagram-symbol__line" fill="none" />
-          <path d="M41.4 47.6 C50 34.3 78 34.3 86.6 47.6" className="diagram-symbol__line" fill="none" />
-          <line x1="64" y1="0.8" x2="64" y2="38" className="diagram-symbol__linkage" />
-          <text x="18" y="7.1" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in-top", "1")}</text>
-          <text x="110" y="7.1" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out-top", "2")}</text>
-          <text x="18" y="63.9" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in-bottom", "3")}</text>
-          <text x="110" y="63.9" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out-bottom", "4")}</text>
+          <line x1="6.4" y1="3.2" x2="28.4" y2="3.2" className="diagram-symbol__line diagram-symbol__breaker-lead" />
+          <line x1="99.6" y1="3.2" x2="121.6" y2="3.2" className="diagram-symbol__line diagram-symbol__breaker-lead" />
+          <circle cx="34.4" cy="3.2" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="93.6" cy="3.2" r="5.5" className="diagram-symbol__terminal" />
+          <line x1="6.4" y1="46.4" x2="28.4" y2="46.4" className="diagram-symbol__line diagram-symbol__breaker-lead" />
+          <line x1="99.6" y1="46.4" x2="121.6" y2="46.4" className="diagram-symbol__line diagram-symbol__breaker-lead" />
+          <circle cx="34.4" cy="46.4" r="5.5" className="diagram-symbol__terminal" />
+          <circle cx="93.6" cy="46.4" r="5.5" className="diagram-symbol__terminal" />
+          <path d="M41.4 -2.8 C50 -16.1 78 -16.1 86.6 -2.8" className="diagram-symbol__line" fill="none" />
+          <path d="M41.4 40.4 C50 27.1 78 27.1 86.6 40.4" className="diagram-symbol__line" fill="none" />
+          <line x1="64" y1="-6.4" x2="64" y2="30.8" className="diagram-symbol__linkage" />
+          <text x="18" y="-0.1" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in-top", "1")}</text>
+          <text x="110" y="-0.1" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out-top", "2")}</text>
+          <text x="18" y="56.7" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in-bottom", "3")}</text>
+          <text x="110" y="56.7" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out-bottom", "4")}</text>
         </svg>
       );
     case "SWITCH_1P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="3.2" y1="32" x2="20.1" y2="32" className="diagram-symbol__line" />
-          <line x1="107.9" y1="32" x2="124.8" y2="32" className="diagram-symbol__line" />
-          <circle cx="25.6" cy="32" r="5.5" className="diagram-symbol__terminal" />
-          <circle cx="102.4" cy="32" r="5.5" className="diagram-symbol__terminal" />
-          <line
-            x1="32.6"
-            y1="32"
-            x2={options.switchClosed ? "95.4" : "89.4"}
-            y2={options.switchClosed ? "28" : "16"}
-            className="diagram-symbol__line diagram-symbol__contact-arm"
-          />
+          <g transform={SPST_SWITCH_VECTOR_TRANSFORM}>
+            <path
+              d={SPST_SWITCH_VECTOR_RING_LEFT_PATH}
+              className="diagram-symbol__vector-ring"
+              strokeWidth={SPST_SWITCH_VECTOR_STROKE_WIDTH}
+            />
+            <path
+              d={options.switchClosed ? SPST_SWITCH_VECTOR_CLOSED_LEVER_PATH : SPST_SWITCH_VECTOR_OPEN_LEVER_PATH}
+              transform={options.switchClosed ? undefined : "translate(-9 -155)"}
+              className="diagram-symbol__vector--outline"
+              fillRule="evenodd"
+              strokeWidth={SPST_SWITCH_VECTOR_STROKE_WIDTH}
+            />
+            <path
+              d={SPST_SWITCH_VECTOR_RING_RIGHT_PATH}
+              className="diagram-symbol__vector-ring"
+              strokeWidth={SPST_SWITCH_VECTOR_STROKE_WIDTH}
+            />
+          </g>
         </svg>
       );
-    case "LAMP":
+    case "LIMIT_SWITCH_NO":
+    case "LIMIT_SWITCH_NC": {
+      // Ambos estados usan los SVG del usuario tal cual, con fill-rule="evenodd"
+      // (los anillos y el interior de la cuchilla son subpaths huecos).
+      // Abierto: NO limit switch.svg (cuchilla + bornes 13/14).
+      // Cerrado: NC limit switch.svg (barra + cuna + anillos).
+      // El NC accionado usa el dibujo abierto del NO, asi que se ve igual que el NO.
+      const isNormallyClosed = type === "LIMIT_SWITCH_NC";
+      const switchClosed = options.switchClosed ?? isNormallyClosed;
+
+      const labelPaths = isNormallyClosed
+        ? LIMIT_SWITCH_NC_VECTOR_LABEL_PATHS
+        : LIMIT_SWITCH_VECTOR_LABEL_PATHS;
+      const labelTransform = isNormallyClosed
+        ? LIMIT_SWITCH_NC_VECTOR_TRANSFORM
+        : LIMIT_SWITCH_VECTOR_TRANSFORM;
+
+      const symbolPaths = switchClosed
+        ? [LIMIT_SWITCH_NC_VECTOR_SYMBOL_PATH]
+        : [LIMIT_SWITCH_VECTOR_LEFT_TERMINAL_PATH, LIMIT_SWITCH_VECTOR_RIGHT_TERMINAL_PATH];
+      const outlinePaths = switchClosed
+        ? LIMIT_SWITCH_NC_VECTOR_OUTLINE_PATHS
+        : LIMIT_SWITCH_VECTOR_OUTLINE_PATHS;
+      const symbolTransform = switchClosed
+        ? LIMIT_SWITCH_NC_VECTOR_TRANSFORM
+        : LIMIT_SWITCH_VECTOR_TRANSFORM;
+      const outlineStrokeWidth = switchClosed
+        ? LIMIT_SWITCH_NC_VECTOR_STROKE_WIDTH
+        : LIMIT_SWITCH_VECTOR_STROKE_WIDTH;
+
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
-          <line x1="6.4" y1="32" x2="38" y2="32" className="diagram-symbol__line" />
-          <line x1="90" y1="32" x2="121.6" y2="32" className="diagram-symbol__line" />
-          <circle cx="64" cy="32" r="22" className="diagram-symbol__shape" />
-          <path d="M48 16 L80 48 M80 16 L48 48" className="diagram-symbol__line" />
+          <g transform={symbolTransform} className="diagram-symbol__vector" fillRule="evenodd">
+            {symbolPaths.map((pathData) => <path key={pathData} d={pathData} />)}
+          </g>
+          <g
+            transform={symbolTransform}
+            className="diagram-symbol__vector--outline"
+            fillRule="evenodd"
+            strokeWidth={outlineStrokeWidth}
+          >
+            {outlinePaths.map((pathData) => <path key={pathData} d={pathData} />)}
+          </g>
+          <g transform={labelTransform} className="diagram-symbol__vector" fillRule="evenodd">
+            {labelPaths.map((pathData) => <path key={pathData} d={pathData} />)}
+          </g>
+        </svg>
+      );
+    }
+    case "LAMP":
+      // Proporciones del Lamp_symbol.svg del usuario (280x120) mapeadas al
+      // viewBox 128x64: patas 6.4/121.6, circulo r=17.28 y X inscrita.
+      return (
+        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
+          <line x1="6.4" y1="32" x2="46.72" y2="32" className="diagram-symbol__line" />
+          <line x1="81.28" y1="32" x2="121.6" y2="32" className="diagram-symbol__line" />
+          <circle cx="64" cy="32" r="17.28" className="diagram-symbol__shape" />
+          <line x1="52" y1="20" x2="76" y2="44" className="diagram-symbol__line" />
+          <line x1="76" y1="20" x2="52" y2="44" className="diagram-symbol__line" />
         </svg>
       );
     case "MOTOR":
@@ -1449,6 +1667,68 @@ function renderSymbolGraphic(
             y2={String(contactBarY)}
             className="diagram-symbol__line diagram-symbol__contact-arm"
           />
+        </svg>
+      );
+    }
+    case "ESTOP": {
+      // Reposo: seta arriba y barra cerrada. Accionado (isPressed): seta hundida
+      // y barra suelta. Cada traza tiene su propio mapeo (ver constantes).
+      const isPressed = options.estopPressed === true;
+      const transform = isPressed ? ESTOP_VECTOR_OPEN_TRANSFORM : ESTOP_VECTOR_TRANSFORM;
+      const symbolPath = isPressed ? ESTOP_VECTOR_OPEN_SYMBOL_PATH : ESTOP_VECTOR_SYMBOL_PATH;
+      const strokeWidth = isPressed ? ESTOP_VECTOR_OPEN_STROKE_WIDTH : ESTOP_VECTOR_STROKE_WIDTH;
+      const ringStrokeWidth = isPressed ? ESTOP_VECTOR_OPEN_RING_STROKE_WIDTH : ESTOP_RING_STROKE_WIDTH;
+      const rings = isPressed ? ESTOP_VECTOR_OPEN_RINGS : ESTOP_VECTOR_RINGS;
+      const labelPaths = isPressed ? ESTOP_VECTOR_OPEN_LABEL_PATHS : ESTOP_VECTOR_LABEL_PATHS;
+
+      return (
+        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
+          <g transform={transform} className="diagram-symbol__vector" fillRule="evenodd">
+            <path d={symbolPath} />
+          </g>
+          <g
+            transform={transform}
+            className="diagram-symbol__vector--outline"
+            fillRule="evenodd"
+            strokeWidth={strokeWidth}
+          >
+            <path d={symbolPath} />
+          </g>
+          <g transform={transform}>
+            {rings.map(([cx, cy]) => (
+              <circle
+                key={cx}
+                cx={cx}
+                cy={cy}
+                r="22.97"
+                className="diagram-symbol__vector-ring"
+                strokeWidth={ringStrokeWidth}
+              />
+            ))}
+          </g>
+          <g transform={transform} className="diagram-symbol__vector" fillRule="evenodd">
+            {labelPaths.map((pathData) => <path key={pathData} d={pathData} />)}
+          </g>
+        </svg>
+      );
+    }
+    case "OL_CONTACT": {
+      // Exactamente el contacto NC (XIO: platinas + cuchilla diagonal) con el
+      // rotulo "OL" + numero encima. El numero sale de la etiqueta del
+      // componente (si no tiene digitos, 1): renombrar a "OL2" muestra OL2.
+      const contactClosed = options.switchClosed ?? true;
+      const overloadNumber = options.label?.match(/\d+/)?.[0] ?? "1";
+
+      return (
+        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
+          <text x="64" y="12" textAnchor="middle" className="diagram-symbol__text">{`OL${overloadNumber}`}</text>
+          <line x1="2.3" y1="36" x2="54" y2="36" className="diagram-symbol__line" />
+          <line x1="74" y1="36" x2="125.7" y2="36" className="diagram-symbol__line" />
+          <line x1="56" y1="16" x2="56" y2="56" className="diagram-symbol__line" />
+          <line x1="72" y1="16" x2="72" y2="56" className="diagram-symbol__line" />
+          {contactClosed ? (
+            <line x1="46" y1="20" x2="82" y2="52" className="diagram-symbol__line diagram-symbol__contact-slash" />
+          ) : null}
         </svg>
       );
     }
@@ -1585,235 +1865,16 @@ function createId(nextId: { current: number }, prefix: string): string {
   return `${prefix}-${nextId.current++}`;
 }
 
-function getPortId(componentId: string, terminalId: string): string {
+export function getPortId(componentId: string, terminalId: string): string {
   return `${componentId}:${terminalId}`;
 }
 
-function clamp(value: number, min: number, max: number): number {
+export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function clampPointToPlane(point: Point, planeSettings: BuilderPlaneSettings, padding = 0): Point {
-  return {
-    x: clamp(point.x, padding, planeSettings.width - padding),
-    y: clamp(point.y, padding, planeSettings.height - padding)
-  };
-}
-
-function snapPointToGrid(point: Point, planeSettings: BuilderPlaneSettings): Point {
-  const gridSpacing = planeSettings.gridSpacing;
-
-  return clampPointToPlane(
-    {
-      x: Math.round(point.x / gridSpacing) * gridSpacing,
-      y: Math.round(point.y / gridSpacing) * gridSpacing
-    },
-    planeSettings
-  );
-}
-
-function getCanonicalWirePoint(point: Point, planeSettings?: BuilderPlaneSettings): Point {
-  return planeSettings ? snapPointToGrid(point, planeSettings) : roundPoint(point);
-}
-
-function requantizeCoordinateToGrid(value: number, previousSpacing: number, nextSpacing: number): number {
-  if (previousSpacing === nextSpacing) {
-    return value;
-  }
-
-  return Math.round(value / previousSpacing) * nextSpacing;
-}
-
-function requantizePointToPlaneGrid(
-  point: Point,
-  previousPlaneSettings: BuilderPlaneSettings,
-  nextPlaneSettings: BuilderPlaneSettings
-): Point {
-  return clampPointToPlane(
-    {
-      x: requantizeCoordinateToGrid(point.x, previousPlaneSettings.gridSpacing, nextPlaneSettings.gridSpacing),
-      y: requantizeCoordinateToGrid(point.y, previousPlaneSettings.gridSpacing, nextPlaneSettings.gridSpacing)
-    },
-    nextPlaneSettings
-  );
-}
-
-function getComponentPlanePadding(planeSettings: BuilderPlaneSettings): number {
-  return Math.max(planeSettings.gridSpacing, 16);
-}
-
-function getComponentPlaneSnapOffset(component: BuilderComponent): Point {
-  const anchorTerminal = getTerminalDefinition(component.type, getDefaultEntryTerminalId(component.type));
-
-  if (!anchorTerminal) {
-    return {
-      x: ROTATION_CENTER_X,
-      y: ROTATION_CENTER_Y
-    };
-  }
-
-  return rotatePoint({ x: anchorTerminal.x, y: anchorTerminal.y }, component.rotation);
-}
-
-function requantizeComponentToPlaneGrid(
-  component: BuilderComponent,
-  previousPlaneSettings: BuilderPlaneSettings,
-  nextPlaneSettings: BuilderPlaneSettings
-): BuilderComponent {
-  const padding = getComponentPlanePadding(nextPlaneSettings);
-  const snapOffset = getComponentPlaneSnapOffset(component);
-  const nextAnchorX = requantizeCoordinateToGrid(
-    component.x + snapOffset.x,
-    previousPlaneSettings.gridSpacing,
-    nextPlaneSettings.gridSpacing
-  );
-  const nextAnchorY = requantizeCoordinateToGrid(
-    component.y + snapOffset.y,
-    previousPlaneSettings.gridSpacing,
-    nextPlaneSettings.gridSpacing
-  );
-
-  return {
-    ...component,
-    x: clamp(
-      nextAnchorX - snapOffset.x,
-      padding,
-      nextPlaneSettings.width - COMPONENT_WIDTH - padding
-    ),
-    y: clamp(
-      nextAnchorY - snapOffset.y,
-      padding,
-      nextPlaneSettings.height - COMPONENT_HEIGHT - padding
-    )
-  };
-}
-
-function snapComponentToPlaneGrid(component: BuilderComponent, planeSettings: BuilderPlaneSettings): BuilderComponent {
-  const padding = getComponentPlanePadding(planeSettings);
-  const snapOffset = getComponentPlaneSnapOffset(component);
-  const anchorX = Math.round((component.x + snapOffset.x) / planeSettings.gridSpacing) * planeSettings.gridSpacing;
-  const anchorY = Math.round((component.y + snapOffset.y) / planeSettings.gridSpacing) * planeSettings.gridSpacing;
-
-  return {
-    ...component,
-    x: clamp(
-      anchorX - snapOffset.x,
-      padding,
-      planeSettings.width - COMPONENT_WIDTH - padding
-    ),
-    y: clamp(
-      anchorY - snapOffset.y,
-      padding,
-      planeSettings.height - COMPONENT_HEIGHT - padding
-    )
-  };
-}
-
-function clampComponentToPlane(component: BuilderComponent, planeSettings: BuilderPlaneSettings): BuilderComponent {
-  const padding = getComponentPlanePadding(planeSettings);
-
-  return {
-    ...component,
-    x: clamp(component.x, padding, planeSettings.width - COMPONENT_WIDTH - padding),
-    y: clamp(component.y, padding, planeSettings.height - COMPONENT_HEIGHT - padding)
-  };
-}
-
-function clampWireToPlane(wire: BuilderWire, planeSettings: BuilderPlaneSettings): BuilderWire {
-  return {
-    ...wire,
-    points: normalizeWirePoints(wire.points.map((point) => clampPointToPlane(point, planeSettings)), planeSettings)
-  };
-}
-
-function clampSceneToPlane(scene: BuilderScene, planeSettings: BuilderPlaneSettings): BuilderScene {
-  const nextComponents = scene.components.map((component) => ({ ...component }));
-  let nextWires = scene.wires.map((wire) => ({
-    ...wire,
-    points: wire.points.map((point) => ({ ...point }))
-  }));
-
-  for (let index = 0; index < nextComponents.length; index += 1) {
-    const currentComponent = nextComponents[index];
-
-    if (!currentComponent) {
-      continue;
-    }
-
-    const nextComponent = snapComponentToPlaneGrid(clampComponentToPlane(currentComponent, planeSettings), planeSettings);
-
-    if (nextComponent.x === currentComponent.x && nextComponent.y === currentComponent.y) {
-      continue;
-    }
-
-    nextComponents[index] = nextComponent;
-    nextWires = moveAttachedWireEndpoints(nextWires, currentComponent, nextComponent);
-  }
-
-  return {
-    components: nextComponents,
-    wires: nextWires.map((wire) => clampWireToPlane(wire, planeSettings))
-  };
-}
-
-function requantizeSceneToPlaneGrid(
-  scene: BuilderScene,
-  previousPlaneSettings: BuilderPlaneSettings,
-  nextPlaneSettings: BuilderPlaneSettings
-): BuilderScene {
-  const nextScene: BuilderScene = {
-    components: scene.components.map((component) =>
-      requantizeComponentToPlaneGrid(component, previousPlaneSettings, nextPlaneSettings)
-    ),
-    wires: scene.wires.map((wire) => ({
-      ...wire,
-      points: normalizeWirePoints(
-        wire.points.map((point) => requantizePointToPlaneGrid(point, previousPlaneSettings, nextPlaneSettings)),
-        nextPlaneSettings
-      )
-    }))
-  };
-
-  return clampSceneToPlane(nextScene, nextPlaneSettings);
-}
-
-function createOrthogonalPath(currentPoints: Point[], targetPoint: Point, planeSettings: BuilderPlaneSettings): Point[] {
-  if (currentPoints.length === 0) {
-    return [targetPoint];
-  }
-
-  const previousPoint = currentPoints[currentPoints.length - 1];
-
-  if (!previousPoint) {
-    return [targetPoint];
-  }
-
-  if (pointsAreClose(previousPoint, targetPoint)) {
-    return currentPoints;
-  }
-
-  if (previousPoint.x === targetPoint.x || previousPoint.y === targetPoint.y) {
-    return [...currentPoints, targetPoint];
-  }
-
-  const beforePreviousPoint = currentPoints[currentPoints.length - 2] ?? null;
-  const prefersVerticalFirst = beforePreviousPoint !== null && beforePreviousPoint.x === previousPoint.x;
-  const elbow = prefersVerticalFirst
-    ? { x: previousPoint.x, y: targetPoint.y }
-    : { x: targetPoint.x, y: previousPoint.y };
-  const snappedElbow = clampPointToPlane(elbow, planeSettings);
-
-  return normalizeWirePoints([...currentPoints, snappedElbow, targetPoint], planeSettings);
 }
 
 function normalizeQuarterTurns(value: number): number {
   return ((value % 4) + 4) % 4;
-}
-
-function distanceBetween(left: Point, right: Point): number {
-  const dx = left.x - right.x;
-  const dy = left.y - right.y;
-  return Math.hypot(dx, dy);
 }
 
 function snapCoordinateToLattice(value: number, spacing: number, offset: number): number {
@@ -1827,158 +1888,7 @@ function snapPointToTerminalLattice(point: Point): Point {
   });
 }
 
-function pointsShareCanonicalCoordinates(left: Point, right: Point, planeSettings?: BuilderPlaneSettings): boolean {
-  const normalizedLeft = getCanonicalWirePoint(left, planeSettings);
-  const normalizedRight = getCanonicalWirePoint(right, planeSettings);
-
-  return normalizedLeft.x === normalizedRight.x && normalizedLeft.y === normalizedRight.y;
-}
-
-function pointsAreClose(left: Point, right: Point): boolean {
-  return distanceBetween(left, right) < 3;
-}
-
-function normalizeWirePoints(points: Point[], planeSettings?: BuilderPlaneSettings): Point[] {
-  const normalized: Point[] = [];
-
-  for (const point of points) {
-    const canonicalPoint = getCanonicalWirePoint(point, planeSettings);
-    const previousPoint = normalized[normalized.length - 1];
-
-    if (!previousPoint || !pointsShareCanonicalCoordinates(previousPoint, canonicalPoint, planeSettings)) {
-      normalized.push(canonicalPoint);
-    }
-  }
-
-  return normalized;
-}
-
-function arePointsCollinear(left: Point, middle: Point, right: Point): boolean {
-  const crossProduct = (middle.x - left.x) * (right.y - left.y) - (middle.y - left.y) * (right.x - left.x);
-  return Math.abs(crossProduct) < 0.5;
-}
-
-function simplifyWirePoints(points: Point[]): Point[] {
-  const normalized = normalizeWirePoints(points);
-
-  if (normalized.length <= 2) {
-    return normalized;
-  }
-
-  const firstPoint = normalized[0];
-
-  if (!firstPoint) {
-    return normalized;
-  }
-
-  const simplified: Point[] = [firstPoint];
-
-  for (let index = 1; index < normalized.length - 1; index += 1) {
-    const previousPoint = simplified[simplified.length - 1];
-    const currentPoint = normalized[index];
-    const nextPoint = normalized[index + 1];
-
-    if (!previousPoint || !currentPoint || !nextPoint) {
-      continue;
-    }
-
-    if (arePointsCollinear(previousPoint, currentPoint, nextPoint)) {
-      continue;
-    }
-
-    simplified.push(currentPoint);
-  }
-
-  const lastPoint = normalized[normalized.length - 1];
-
-  if (lastPoint && !pointsAreClose(simplified[simplified.length - 1] ?? lastPoint, lastPoint)) {
-    simplified.push(lastPoint);
-  }
-
-  return simplified.length >= 2 ? simplified : normalized;
-}
-
-function getSegmentAxis(start: Point, end: Point): "horizontal" | "vertical" | null {
-  if (Math.abs(start.x - end.x) < 1) {
-    return "vertical";
-  }
-
-  if (Math.abs(start.y - end.y) < 1) {
-    return "horizontal";
-  }
-
-  return null;
-}
-
-function buildEndpointElbow(fromPoint: Point, endpointPoint: Point, preferredAxis: "horizontal" | "vertical"): Point {
-  return preferredAxis === "horizontal"
-    ? { x: fromPoint.x, y: endpointPoint.y }
-    : { x: endpointPoint.x, y: fromPoint.y };
-}
-
-function repositionWireEndpointOrthogonally(
-  points: Point[],
-  endpointIndex: number,
-  endpointPoint: Point,
-  preferredAxis: "horizontal" | "vertical"
-): Point[] {
-  if (points.length < 2 || !isWireEndpointIndex(endpointIndex, points.length)) {
-    return points;
-  }
-
-  const nextPoints = [...points];
-  nextPoints[endpointIndex] = endpointPoint;
-
-  const adjacentIndex = endpointIndex === 0 ? 1 : nextPoints.length - 2;
-  const adjacentPoint = nextPoints[adjacentIndex];
-
-  if (!adjacentPoint) {
-    return nextPoints;
-  }
-
-  if (getSegmentAxis(adjacentPoint, endpointPoint) !== null) {
-    return normalizeWirePoints(nextPoints);
-  }
-
-  const outerIndex = endpointIndex === 0 ? 2 : nextPoints.length - 3;
-  const outerPoint = nextPoints[outerIndex];
-
-  if (!outerPoint) {
-    const elbowPoint = buildEndpointElbow(adjacentPoint, endpointPoint, preferredAxis);
-
-    return endpointIndex === 0
-      ? normalizeWirePoints([endpointPoint, elbowPoint, ...nextPoints.slice(1)])
-      : normalizeWirePoints([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
-  }
-
-  const outerAxis = getSegmentAxis(adjacentPoint, outerPoint);
-  const canAdjustAdjacent = (preferredAxis === "horizontal" && outerAxis === "vertical")
-    || (preferredAxis === "vertical" && outerAxis === "horizontal");
-
-  if (canAdjustAdjacent) {
-    nextPoints[adjacentIndex] = buildEndpointElbow(adjacentPoint, endpointPoint, preferredAxis);
-    return normalizeWirePoints(nextPoints);
-  }
-
-  const elbowPoint = buildEndpointElbow(adjacentPoint, endpointPoint, preferredAxis);
-
-  return endpointIndex === 0
-    ? normalizeWirePoints([endpointPoint, elbowPoint, ...nextPoints.slice(1)])
-    : normalizeWirePoints([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
-}
-
-function isWireEndpointIndex(index: number, pointCount: number): boolean {
-  return index === 0 || index === pointCount - 1;
-}
-
-function getWireSegmentMidpoint(left: Point, right: Point): Point {
-  return {
-    x: Math.round((left.x + right.x) / 2),
-    y: Math.round((left.y + right.y) / 2)
-  };
-}
-
-function roundPoint(point: Point): Point {
+export function roundPoint(point: Point): Point {
   return {
     x: Math.round(point.x),
     y: Math.round(point.y)
@@ -1996,68 +1906,6 @@ function getElectricalPointNodeId(point: Point): string {
 
 function getElectricalPortNodeId(portId: string): string {
   return `port:${portId}`;
-}
-
-function slugifyFileName(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "plc-sim-circuit";
-}
-
-function formatSnapshotTimestamp(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-
-  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
-}
-
-function createCircuitSnapshot(
-  components: BuilderComponent[],
-  wires: BuilderWire[],
-  program: Program,
-  tags: TagDefinition[],
-  scanIntervalMs: number,
-	planeSettings: BuilderPlaneSettings
-): CircuitSnapshot {
-  const savedAt = new Date().toISOString();
-  const nextPlaneSettings = sanitizePlaneSettings(planeSettings);
-
-  return {
-    components: components.map((component) => ({
-      ...component,
-      ...(component.terminalLabels ? { terminalLabels: { ...component.terminalLabels } } : {})
-    })),
-    name: "PLC Sim circuit",
-    program,
-    savedAt,
-    settings: {
-      gridSpacing: nextPlaneSettings.gridSpacing,
-      height: nextPlaneSettings.height,
-      scanIntervalMs,
-      width: nextPlaneSettings.width
-    },
-    tags: tags.map((tag) => ({ ...tag })),
-    version: CIRCUIT_SNAPSHOT_VERSION,
-    wires: wires.map((wire) => ({ ...wire, points: wire.points.map((point) => ({ ...point })) }))
-  };
-}
-
-function downloadCircuitSnapshot(snapshot: CircuitSnapshot): void {
-  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
-  const url = window.URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = `${slugifyFileName(snapshot.name)}-${formatSnapshotTimestamp(new Date(snapshot.savedAt))}.circuit.json`;
-  anchor.click();
-
-  window.URL.revokeObjectURL(url);
 }
 
 function cloneScene(scene: BuilderScene): BuilderScene {
@@ -2089,318 +1937,6 @@ function getNextIdValueFromScene(scene: BuilderScene): number {
   return maxId + 1;
 }
 
-function expectCircuitSnapshotObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${label} must be an object.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function expectCircuitSnapshotArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${label} must be an array.`);
-  }
-
-  return value;
-}
-
-function expectCircuitSnapshotString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`${label} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function expectCircuitSnapshotNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`${label} must be a finite number.`);
-  }
-
-  return value;
-}
-
-function expectCircuitSnapshotBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean.`);
-  }
-
-  return value;
-}
-
-function expectCircuitSnapshotOptionalString(value: unknown, label: string): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return expectCircuitSnapshotString(value, label);
-}
-
-function expectCircuitSnapshotOptionalNullableString(value: unknown, label: string): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (value === null) {
-    return null;
-  }
-
-  return expectCircuitSnapshotString(value, label);
-}
-
-function expectCircuitSnapshotOptionalBoolean(value: unknown, label: string): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return expectCircuitSnapshotBoolean(value, label);
-}
-
-function expectCircuitSnapshotOptionalNumber(value: unknown, label: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return expectCircuitSnapshotNumber(value, label);
-}
-
-function parseCircuitSnapshotTerminalLabels(
-  value: unknown,
-  label: string
-): Partial<Record<string, string>> | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const terminalLabels = expectCircuitSnapshotObject(value, label);
-  const nextTerminalLabels = Object.entries(terminalLabels).reduce<Partial<Record<string, string>>>((labels, [key, entry]) => {
-    labels[key] = expectCircuitSnapshotString(entry, `${label} ${key}`).trim();
-    return labels;
-  }, {});
-
-  return Object.keys(nextTerminalLabels).length > 0 ? nextTerminalLabels : undefined;
-}
-
-function parseCircuitSnapshotPoint(value: unknown, label: string): Point {
-  const point = expectCircuitSnapshotObject(value, label);
-
-  return {
-    x: expectCircuitSnapshotNumber(point.x, `${label} x`),
-    y: expectCircuitSnapshotNumber(point.y, `${label} y`)
-  };
-}
-
-function findSnapshotTerminalPortId(point: Point, components: BuilderComponent[]): string | null {
-  for (const component of components) {
-    for (const terminal of getComponentTerminals(component)) {
-      if (pointsAreClose(point, terminal)) {
-        return terminal.portId;
-      }
-    }
-  }
-
-  return null;
-}
-
-function restoreLegacyCircuitSnapshotWireEndpoints(
-  wire: BuilderWire,
-  components: BuilderComponent[],
-  options: { inferEndPortId: boolean; inferStartPortId: boolean }
-): BuilderWire {
-  if (!options.inferStartPortId && !options.inferEndPortId) {
-    return wire;
-  }
-
-  const nextPoints = [...wire.points];
-  let startPortId = wire.startPortId;
-  let endPortId = wire.endPortId;
-
-  if (options.inferStartPortId) {
-    const startPoint = nextPoints[0];
-    const inferredStartPortId = startPoint ? findSnapshotTerminalPortId(startPoint, components) : null;
-
-    if (inferredStartPortId) {
-      startPortId = inferredStartPortId;
-    }
-  }
-
-  if (options.inferEndPortId) {
-    const endPointIndex = nextPoints.length - 1;
-    const endPoint = nextPoints[endPointIndex];
-    const inferredEndPortId = endPoint ? findSnapshotTerminalPortId(endPoint, components) : null;
-
-    if (inferredEndPortId) {
-      endPortId = inferredEndPortId;
-    }
-  }
-
-  if (startPortId === wire.startPortId && endPortId === wire.endPortId) {
-    return wire;
-  }
-
-  return {
-    ...wire,
-    endPortId,
-    startPortId
-  };
-}
-
-function parseCircuitSnapshotWire(value: unknown, index: number, components: BuilderComponent[]): BuilderWire {
-  const wire = expectCircuitSnapshotObject(value, `Circuit wire ${index}`);
-  const hasSavedStartPortId = Object.prototype.hasOwnProperty.call(wire, "startPortId");
-  const hasSavedEndPortId = Object.prototype.hasOwnProperty.call(wire, "endPortId");
-  const startPortId = expectCircuitSnapshotOptionalNullableString(wire.startPortId, `Circuit wire ${index} startPortId`);
-  const endPortId = expectCircuitSnapshotOptionalNullableString(wire.endPortId, `Circuit wire ${index} endPortId`);
-
-  const parsedWire: BuilderWire = {
-    color: expectCircuitSnapshotString(wire.color, `Circuit wire ${index} color`),
-    endPortId: endPortId ?? null,
-    id: expectCircuitSnapshotString(wire.id, `Circuit wire ${index} id`),
-    points: expectCircuitSnapshotArray(wire.points, `Circuit wire ${index} points`).map((point, pointIndex) =>
-      parseCircuitSnapshotPoint(point, `Circuit wire ${index} point ${pointIndex}`)
-    ),
-    startPortId: startPortId ?? null,
-    thickness: expectCircuitSnapshotNumber(wire.thickness, `Circuit wire ${index} thickness`)
-  };
-
-  return restoreLegacyCircuitSnapshotWireEndpoints(parsedWire, components, {
-    inferEndPortId: !hasSavedEndPortId,
-    inferStartPortId: !hasSavedStartPortId
-  });
-}
-
-function parseCircuitSnapshotLampGlowColor(value: unknown, index: number): LampGlowColorOption | undefined {
-  const lampGlowColor = expectCircuitSnapshotOptionalString(value, `Circuit component ${index} lampGlowColor`);
-
-  if (lampGlowColor === undefined) {
-    return undefined;
-  }
-
-  if (LAMP_GLOW_COLOR_OPTIONS.some((option) => option.value === lampGlowColor)) {
-    return lampGlowColor as LampGlowColorOption;
-  }
-
-  throw new Error(`Circuit component ${index} lampGlowColor "${lampGlowColor}" is not supported.`);
-}
-
-function parseCircuitSnapshotComponent(value: unknown, index: number): BuilderComponent {
-  const component = expectCircuitSnapshotObject(value, `Circuit component ${index}`);
-  const type = expectCircuitSnapshotString(component.type, `Circuit component ${index} type`);
-
-  if (!circuitSnapshotComponentTypes.has(type as BuilderComponentType)) {
-    throw new Error(`Circuit component ${index} type "${type}" is not supported.`);
-  }
-
-  const tagValue = component.tag;
-  const isClosed = expectCircuitSnapshotOptionalBoolean(component.isClosed, `Circuit component ${index} isClosed`);
-  const isPressed = expectCircuitSnapshotOptionalBoolean(component.isPressed, `Circuit component ${index} isPressed`);
-  const delayMs = component.delayMs !== undefined
-    ? expectCircuitSnapshotNumber(component.delayMs, `Circuit component ${index} delayMs`)
-    : undefined;
-  const sourceVoltage = component.sourceVoltage !== undefined
-    ? expectCircuitSnapshotNumber(component.sourceVoltage, `Circuit component ${index} sourceVoltage`)
-    : undefined;
-  const lampGlowColor = parseCircuitSnapshotLampGlowColor(component.lampGlowColor, index);
-  const terminalLabels = parseCircuitSnapshotTerminalLabels(
-    component.terminalLabels,
-    `Circuit component ${index} terminalLabels`
-  );
-
-  return syncInstructionComponentTag({
-    id: expectCircuitSnapshotString(component.id, `Circuit component ${index} id`),
-    label: expectCircuitSnapshotString(component.label, `Circuit component ${index} label`),
-    rotation: expectCircuitSnapshotNumber(component.rotation, `Circuit component ${index} rotation`),
-    tag: tagValue === null ? null : expectCircuitSnapshotString(tagValue, `Circuit component ${index} tag`),
-    type: type as BuilderComponentType,
-    usesCustomLabel: expectCircuitSnapshotBoolean(component.usesCustomLabel, `Circuit component ${index} usesCustomLabel`),
-    x: expectCircuitSnapshotNumber(component.x, `Circuit component ${index} x`),
-    y: expectCircuitSnapshotNumber(component.y, `Circuit component ${index} y`),
-    ...(isTimedContactType(type as BuilderComponentType)
-      ? { delayMs: clampTimedContactDelayMs(delayMs ?? DEFAULT_TIMED_CONTACT_DELAY_MS) }
-      : {}),
-    ...(terminalLabels ? { terminalLabels } : {}),
-    ...(isClosed !== undefined ? { isClosed } : {}),
-    ...(isPressed !== undefined ? { isPressed } : {}),
-    ...(type === "LAMP" && lampGlowColor !== undefined ? { lampGlowColor } : {}),
-    ...(sourceVoltage !== undefined ? { sourceVoltage } : {})
-  });
-}
-
-function parseCircuitSnapshotTags(value: unknown): TagDefinition[] {
-  return expectCircuitSnapshotArray(value, "Circuit tags").map((tag, index) => {
-    const parsedTag = expectCircuitSnapshotObject(tag, `Circuit tag ${index}`);
-    const kind = expectCircuitSnapshotString(parsedTag.kind, `Circuit tag ${index} kind`);
-    const label = expectCircuitSnapshotOptionalString(parsedTag.label, `Circuit tag ${index} label`);
-    const description = expectCircuitSnapshotOptionalString(parsedTag.description, `Circuit tag ${index} description`);
-    const initialValue = expectCircuitSnapshotOptionalBoolean(parsedTag.initialValue, `Circuit tag ${index} initialValue`);
-
-    if (!circuitSnapshotTagKinds.has(kind as TagDefinition["kind"])) {
-      throw new Error(`Circuit tag ${index} kind "${kind}" is not supported.`);
-    }
-
-    return {
-      name: expectCircuitSnapshotString(parsedTag.name, `Circuit tag ${index} name`),
-      kind: kind as TagDefinition["kind"],
-      ...(label !== undefined ? { label } : {}),
-      ...(description !== undefined ? { description } : {}),
-      ...(initialValue !== undefined ? { initialValue } : {})
-    };
-  });
-}
-
-function parseCircuitSnapshotProgram(value: unknown): Program {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { rungs: [] };
-  }
-
-  return Array.isArray((value as { rungs?: unknown }).rungs) ? (value as Program) : { rungs: [] };
-}
-
-function parseCircuitSnapshot(value: unknown): CircuitSnapshot {
-  const snapshot = expectCircuitSnapshotObject(value, "Circuit snapshot");
-  const settings = expectCircuitSnapshotObject(snapshot.settings, "Circuit snapshot settings");
-  const scanIntervalMs = expectCircuitSnapshotNumber(settings.scanIntervalMs, "Circuit snapshot settings scanIntervalMs");
-  const width = expectCircuitSnapshotOptionalNumber(settings.width, "Circuit snapshot settings width");
-  const height = expectCircuitSnapshotOptionalNumber(settings.height, "Circuit snapshot settings height");
-  const gridSpacing = expectCircuitSnapshotOptionalNumber(settings.gridSpacing, "Circuit snapshot settings gridSpacing");
-
-  if (!Number.isInteger(scanIntervalMs) || scanIntervalMs < 25) {
-    throw new Error("Circuit snapshot scanIntervalMs must be an integer >= 25.");
-  }
-
-  const planeSettings = sanitizePlaneSettings({
-    ...(gridSpacing !== undefined ? { gridSpacing } : {}),
-    ...(height !== undefined ? { height } : {}),
-    ...(width !== undefined ? { width } : {})
-  });
-  const components = expectCircuitSnapshotArray(snapshot.components, "Circuit snapshot components").map((component, index) =>
-    parseCircuitSnapshotComponent(component, index)
-  );
-
-  return {
-    components,
-    name: expectCircuitSnapshotString(snapshot.name, "Circuit snapshot name"),
-    program: parseCircuitSnapshotProgram(snapshot.program),
-    savedAt: expectCircuitSnapshotString(snapshot.savedAt, "Circuit snapshot savedAt"),
-    settings: {
-      gridSpacing: planeSettings.gridSpacing,
-      height: planeSettings.height,
-      scanIntervalMs,
-      width: planeSettings.width
-    },
-    tags: parseCircuitSnapshotTags(snapshot.tags),
-    version: expectCircuitSnapshotNumber(snapshot.version, "Circuit snapshot version"),
-    wires: expectCircuitSnapshotArray(snapshot.wires, "Circuit snapshot wires").map((wire, index) =>
-      parseCircuitSnapshotWire(wire, index, components)
-    )
-  };
-}
-
-async function readCircuitSnapshotFile(file: File): Promise<CircuitSnapshot> {
-  return parseCircuitSnapshot(JSON.parse(await file.text()));
-}
-
 function formatTerminalLabel(terminalId: string): string {
   return terminalId
     .split("-")
@@ -2408,7 +1944,7 @@ function formatTerminalLabel(terminalId: string): string {
     .join(" ");
 }
 
-function getTerminalDefinition(type: BuilderComponentType, terminalId: string): TerminalDefinition | undefined {
+export function getTerminalDefinition(type: BuilderComponentType, terminalId: string): TerminalDefinition | undefined {
   return getTerminalDefinitions(type).find((terminal) => terminal.id === terminalId);
 }
 
@@ -2456,7 +1992,7 @@ function getWireStatusMeta(status: WireConnectionStatus): {
   }
 }
 
-function rotatePoint(point: Point, quarterTurns: number): Point {
+export function rotatePoint(point: Point, quarterTurns: number): Point {
   const turns = normalizeQuarterTurns(quarterTurns);
   const dx = point.x - ROTATION_CENTER_X;
   const dy = point.y - ROTATION_CENTER_Y;
@@ -2482,7 +2018,7 @@ function rotatePoint(point: Point, quarterTurns: number): Point {
   }
 }
 
-function getTerminalPoint(component: BuilderComponent, terminalId: string): Point {
+export function getTerminalPoint(component: BuilderComponent, terminalId: string): Point {
   const terminal = getTerminalDefinition(component.type, terminalId);
 
   if (!terminal) {
@@ -2495,20 +2031,6 @@ function getTerminalPoint(component: BuilderComponent, terminalId: string): Poin
     x: component.x + rotatedPoint.x,
     y: component.y + rotatedPoint.y
   };
-}
-
-function getTerminalApproachAxis(component: BuilderComponent, terminalId: string): "horizontal" | "vertical" {
-  const terminal = getTerminalDefinition(component.type, terminalId);
-
-  if (!terminal) {
-    return "horizontal";
-  }
-
-  const rotatedPoint = rotatePoint({ x: terminal.x, y: terminal.y }, component.rotation);
-  const horizontalDistance = Math.abs(rotatedPoint.x - ROTATION_CENTER_X);
-  const verticalDistance = Math.abs(rotatedPoint.y - ROTATION_CENTER_Y);
-
-  return horizontalDistance >= verticalDistance ? "horizontal" : "vertical";
 }
 
 function getWireEndpointPreferredAxis(
@@ -2542,7 +2064,7 @@ function getWireEndpointPreferredAxis(
   return "horizontal";
 }
 
-function getComponentTerminals(component: BuilderComponent): BuilderTerminal[] {
+export function getComponentTerminals(component: BuilderComponent): BuilderTerminal[] {
   return getTerminalDefinitions(component.type).map((terminal) => {
     const point = getTerminalPoint(component, terminal.id);
 
@@ -2557,50 +2079,6 @@ function getComponentTerminals(component: BuilderComponent): BuilderTerminal[] {
       x: point.x,
       y: point.y
     };
-  });
-}
-
-function moveAttachedWireEndpoints(
-  wires: BuilderWire[],
-  previousComponent: BuilderComponent,
-  nextComponent: BuilderComponent
-): BuilderWire[] {
-  const movedTerminalPoints = new Map(
-    getTerminalDefinitions(previousComponent.type).map((terminal) => [
-      getPortId(previousComponent.id, terminal.id),
-      {
-        axis: getTerminalApproachAxis(nextComponent, terminal.id),
-        point: getTerminalPoint(nextComponent, terminal.id)
-      }
-    ])
-  );
-
-  return wires.map((wire) => {
-    if (wire.points.length === 0) {
-      return wire;
-    }
-
-    let nextPoints = wire.points;
-    let didMove = false;
-    const startTerminal = wire.startPortId ? movedTerminalPoints.get(wire.startPortId) : undefined;
-    const endTerminal = wire.endPortId ? movedTerminalPoints.get(wire.endPortId) : undefined;
-
-    if (startTerminal && !pointsAreClose(wire.points[0] ?? startTerminal.point, startTerminal.point)) {
-      nextPoints = repositionWireEndpointOrthogonally(nextPoints, 0, startTerminal.point, startTerminal.axis);
-      didMove = true;
-    }
-
-    if (endTerminal && !pointsAreClose(wire.points[wire.points.length - 1] ?? endTerminal.point, endTerminal.point)) {
-      nextPoints = repositionWireEndpointOrthogonally(
-        nextPoints,
-        nextPoints.length - 1,
-        endTerminal.point,
-        endTerminal.axis
-      );
-      didMove = true;
-    }
-
-    return didMove ? { ...wire, points: normalizeWirePoints(nextPoints) } : wire;
   });
 }
 
@@ -3215,7 +2693,7 @@ function createCanvasComponent(
     y,
     ...(isTimedContactType(type) ? { delayMs: clampTimedContactDelayMs(delayMsOverride ?? DEFAULT_TIMED_CONTACT_DELAY_MS) } : {}),
     ...(type === "LAMP" ? { lampGlowColor: DEFAULT_LAMP_GLOW_COLOR } : {}),
-    ...(isMaintainedSwitchType(type) ? { isClosed: false } : {}),
+    ...(isMaintainedSwitchType(type) ? { isClosed: type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT" } : {}),
     ...(isMomentaryPushButtonType(type) ? { isPressed: false } : {}),
     ...(isSourceType(type) ? { sourceVoltage: getDefaultSourceVoltage(type) } : {})
   };
@@ -4008,6 +3486,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [draggingComponentId, setDraggingComponentId] = useState<string | null>(null);
   const [wires, setWires] = useState<BuilderWire[]>([]);
   const [planeSettings, setPlaneSettings] = useState<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
+  const [sheetMetadata, setSheetMetadata] = useState<SheetMetadata>(() =>
+    createDefaultSheetMetadata("PLC Sim circuit", new Date().toISOString())
+  );
   const [draftWirePoints, setDraftWirePoints] = useState<Point[]>([]);
   const [wireColor, setWireColor] = useState(DEFAULT_WIRE_COLOR);
   const [wireThickness, setWireThickness] = useState(DEFAULT_WIRE_THICKNESS);
@@ -4018,6 +3499,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [isWireAuthoringEnabled, setIsWireAuthoringEnabled] = useState(true);
   const [isPanModeEnabled, setIsPanModeEnabled] = useState(true);
   const [selection, setSelection] = useState<BuilderSelection>(null);
+  const [componentMenu, setComponentMenu] = useState<ComponentMenuState>(null);
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -4067,6 +3549,28 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       window.clearTimeout(pendingSwitchToggleRef.current.timeoutId);
       pendingSwitchToggleRef.current = null;
     }
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      if (
+        event.target instanceof HTMLInputElement
+        || event.target instanceof HTMLTextAreaElement
+        || event.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "escape"));
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   function getCanvasPointFromClient(clientX: number, clientY: number): Point | null {
@@ -4575,7 +4079,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             if (releasedWirePointDragState.pointIndex === 0) {
               return {
                 ...wire,
-                points: normalizeWirePoints(nextPoints),
+                points: simplifyWirePoints(nextPoints),
                 startPortId: snapTarget.portId
               };
             }
@@ -4583,7 +4087,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             return {
               ...wire,
               endPortId: snapTarget.portId,
-              points: normalizeWirePoints(nextPoints)
+              points: simplifyWirePoints(nextPoints)
             };
           });
         });
@@ -4650,8 +4154,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     width: scaledCanvasWidth
   };
   const canvasStyle: CSSProperties = {
-    ["--grid-spacing" as "--grid-spacing"]: `${planeSettings.gridSpacing}px`,
-    ["--major-grid-spacing" as "--major-grid-spacing"]: `${planeSettings.gridSpacing * MAJOR_GRID_MULTIPLIER}px`,
     height: planeSettings.height,
     transform: `scale(${canvasZoom})`,
     width: planeSettings.width
@@ -5007,6 +4509,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function appendDraftPoint(point: Point) {
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "wire-start"));
     setDraftWirePoints((currentPoints) => buildNextDraftPoints(currentPoints, point));
   }
 
@@ -5219,6 +4722,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     wirePointDragState.current = null;
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "wire-start"));
     setWireReconnectTarget((currentTarget) =>
       currentTarget?.wireId === selectedWire.id && currentTarget.endpoint === endpoint
         ? null
@@ -5264,7 +4768,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         if (wireReconnectTarget.endpoint === "start") {
           return {
             ...wire,
-            points: normalizeWirePoints(nextPoints, planeSettingsRef.current),
+            points: simplifyWirePoints(nextPoints),
             startPortId: snapTarget.portId
           };
         }
@@ -5272,7 +4776,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         return {
           ...wire,
           endPortId: snapTarget.portId,
-          points: normalizeWirePoints(nextPoints, planeSettingsRef.current)
+          points: simplifyWirePoints(nextPoints)
         };
       });
     });
@@ -5387,6 +4891,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleCanvasClick(event: ReactMouseEvent<HTMLDivElement>) {
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+
     if (performance.now() < suppressCanvasClickUntilRef.current) {
       return;
     }
@@ -5413,6 +4919,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    if (isWireOriginHit(draftWirePoints, point)) {
+      clearWireInteraction();
+      return;
+    }
+
     const snapTarget = resolveSnapTarget(point, components, wires, planeSettings, {
       allowWireAnchor: true
     });
@@ -5423,6 +4934,23 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     appendDraftPoint(point);
+  }
+
+  function handleCanvasContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+
+    const action = resolveCanvasContextMenuAction({
+      draftPointCount: draftWirePoints.length,
+      hasReconnectTarget: wireReconnectTarget !== null
+    });
+
+    if (action !== "cancel-wire") {
+      return;
+    }
+
+    event.preventDefault();
+    clearWireInteraction();
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "wire-start"));
   }
 
   function handleCanvasMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
@@ -5447,13 +4975,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     commitWireFromPoints(draftWirePoints);
   }
 
+  function deleteComponentById(componentId: string) {
+    setComponents((currentComponents) => currentComponents.filter((component) => component.id !== componentId));
+  }
+
   function handleDeleteSelection() {
     if (running || !selection) {
       return;
     }
 
     if (selection.kind === "component") {
-      setComponents((currentComponents) => currentComponents.filter((component) => component.id !== selection.id));
+      deleteComponentById(selection.id);
     } else {
       setWires((currentWires) => currentWires.filter((wire) => wire.id !== selection.id));
     }
@@ -5461,6 +4993,32 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setWireReconnectTarget(null);
     setSelection(null);
     setHasCustomLayout(true);
+  }
+
+  function duplicateComponent(componentId: string) {
+    const sourceComponent = componentsRef.current.find((component) => component.id === componentId);
+
+    if (!sourceComponent) {
+      return;
+    }
+
+    const duplicated = buildDuplicatedComponent(sourceComponent, nextId.current, planeSettingsRef.current);
+    nextId.current += 1;
+
+    componentsRef.current = [...componentsRef.current, duplicated];
+    setComponents(componentsRef.current);
+    setSelection({ kind: "component", id: duplicated.id });
+    setHasCustomLayout(true);
+  }
+
+  function startComponentLabelEdit(componentId: string) {
+    setComponentMenu((menu) => (menu && menu.componentId === componentId ? { ...menu, editingLabel: true } : null));
+  }
+
+  function applyComponentLabelEdit(componentId: string, nextLabel: string) {
+    handlePlaneLabelChange(componentId, nextLabel);
+    handlePlaneLabelBlur(componentId);
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
   }
 
   function handleResetCanvas() {
@@ -5492,7 +5050,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       derivedState.program,
       builderTags,
       scanIntervalMs,
-		planeSettingsRef.current
+		planeSettingsRef.current,
+      sheetMetadata
     );
 
     downloadCircuitSnapshot(snapshot);
@@ -5532,6 +5091,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       };
 
       applySceneState(nextScene, nextProgramSignature, true, nextPlaneSettings);
+      setSheetMetadata(snapshot.sheet);
       setCircuitSnapshotStatus(`Loaded ${snapshot.name}.`);
 
       if (onCircuitLoad) {
@@ -5590,6 +5150,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event.preventDefault();
     event.stopPropagation();
     componentDragMovedRef.current = false;
+    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "drag-start"));
 
     const component = components.find((entry) => entry.id === componentId);
     const point = getCanvasPointFromClient(event.clientX, event.clientY);
@@ -5857,24 +5418,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function pressMomentaryPushButton(componentId: string) {
-    setComponents((currentComponents) =>
-      currentComponents.map((component) =>
-        component.id === componentId && isMomentaryPushButtonType(component.type)
-          ? { ...component, isPressed: true }
-          : component
-      )
-    );
+    setComponents((currentComponents) => applyMomentaryPress(currentComponents, componentId));
     setSelection({ kind: "component", id: componentId });
   }
 
   function releaseMomentaryPushButton(componentId: string) {
-    setComponents((currentComponents) =>
-      currentComponents.map((component) =>
-        component.id === componentId && isMomentaryPushButtonType(component.type) && component.isPressed
-          ? { ...component, isPressed: false }
-          : component
-      )
-    );
+    setComponents((currentComponents) => applyMomentaryRelease(currentComponents, componentId));
   }
 
   function handlePushButtonPointerDown(event: ReactPointerEvent<HTMLButtonElement>, componentId: string) {
@@ -6164,6 +5713,51 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             {circuitSnapshotStatus ? <p className="builder-card__copy">{circuitSnapshotStatus}</p> : null}
           </section>
 
+          <section className="builder-card builder-card--sheet">
+            <div className="builder-card__title">Hoja</div>
+
+            <label className="builder-slider-field">
+              <span className="field__label">Proyecto</span>
+              <input
+                type="text"
+                className="builder-number-input"
+                value={sheetMetadata.projectName}
+                onChange={(event) => setSheetMetadata((current) => ({ ...current, projectName: event.target.value }))}
+              />
+            </label>
+
+            <label className="builder-slider-field">
+              <span className="field__label">Fecha</span>
+              <input
+                type="text"
+                className="builder-number-input"
+                placeholder="AAAA-MM-DD"
+                value={sheetMetadata.date}
+                onChange={(event) => setSheetMetadata((current) => ({ ...current, date: event.target.value }))}
+              />
+            </label>
+
+            <label className="builder-slider-field">
+              <span className="field__label">Escala</span>
+              <input
+                type="text"
+                className="builder-number-input"
+                value={sheetMetadata.scale}
+                onChange={(event) => setSheetMetadata((current) => ({ ...current, scale: event.target.value }))}
+              />
+            </label>
+
+            <label className="builder-slider-field">
+              <span className="field__label">Página</span>
+              <input
+                type="text"
+                className="builder-number-input"
+                value={sheetMetadata.page}
+                onChange={(event) => setSheetMetadata((current) => ({ ...current, page: event.target.value }))}
+              />
+            </label>
+          </section>
+
           <div className="builder-right-rail">
             {builderStageStatePanel}
 
@@ -6351,7 +5945,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   </p>
                 ) : isMomentaryPushButtonType(selectedComponent.type) ? (
                   <p className="builder-card__copy">
-                    {selectedComponent.type === "PUSH_BUTTON_NC"
+                    {selectedComponent.type === "PUSH_BUTTON_NC" || selectedComponent.type === "ESTOP"
                       ? "Hold the push button cap on the sheet to open it momentarily. Releasing it closes the path again."
                       : "Hold the push button cap on the sheet to close it momentarily. Releasing it opens the path again."}
                   </p>
@@ -6495,6 +6089,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 className={`freeplay-canvas ${isWirePointerPreviewVisible ? "freeplay-canvas--wire" : ""} ${isPanModeEnabled ? "freeplay-canvas--pan" : ""} ${isPanning ? "freeplay-canvas--panning" : ""}`.trim()}
                 style={canvasStyle}
                 onClick={handleCanvasClick}
+                onContextMenu={handleCanvasContextMenu}
                 onMouseLeave={() => setCursorPoint(null)}
                 onMouseMove={handleCanvasMouseMove}
               >
@@ -6509,6 +6104,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 </div>
 
                 <svg className="freeplay-svg" viewBox={`0 0 ${planeSettings.width} ${planeSettings.height}`} aria-hidden="true">
+                  <SheetLayer planeSettings={planeSettings} sheet={sheetMetadata} />
                   {wires.map((wire) => {
                   const pointString = wire.points.map((point) => `${point.x},${point.y}`).join(" ");
                   const isSelected = selection?.kind === "wire" && selection.id === wire.id;
@@ -6698,6 +6294,25 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           ["--lamp-symbol-color" as "--lamp-symbol-color"]: lampGlowColor.symbol
                         } : {})
                       }}
+                      onContextMenu={(event) => {
+                        if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
+                          return;
+                        }
+
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        if (running || layoutEditingLocked) {
+                          return;
+                        }
+
+                        setSelection({ kind: "component", id: component.id });
+                        setComponentMenu({
+                          anchor: { x: component.x + COMPONENT_WIDTH, y: component.y },
+                          componentId: component.id,
+                          editingLabel: false
+                        });
+                      }}
                     >
                       {componentBadge ? (
                         <div className={`freeplay-component__badge ${energized ? "freeplay-component__badge--live" : ""}`.trim()}>
@@ -6714,6 +6329,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         style={{ left: terminal.x - component.x, top: terminal.y - component.y }}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
 
                           if (wireReconnectTarget) {
                             finishWireReconnect({ x: terminal.x, y: terminal.y });
@@ -6731,6 +6347,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                             return;
                           }
 
+                          if (isWireOriginHit(draftWirePoints, { x: terminal.x, y: terminal.y })) {
+                            clearWireInteraction();
+                            return;
+                          }
+
                           commitWireFromPoints(buildNextDraftPoints(draftWirePoints, { x: terminal.x, y: terminal.y }));
                         }}
                       />
@@ -6745,6 +6366,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         onLostPointerCapture={() => handleComponentHandleLostCapture(component.id)}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
 
                           if (componentDragMovedRef.current) {
                             componentDragMovedRef.current = false;
@@ -6809,6 +6431,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           contactActuated,
                           contactClosed,
                           energized: visualEnergized,
+                          estopPressed: component.type === "ESTOP" && component.isPressed === true,
+                          label: component.label,
                           pushButtonPressed,
                           terminalLabels: component.terminalLabels,
                           ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {}),
@@ -6822,6 +6446,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         style={getComponentLabelRowStyle(component.rotation)}
                         onClick={(event) => {
                           event.stopPropagation();
+                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
 
                           if (selected) {
                             return;
@@ -6836,6 +6461,85 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     </div>
                   );
                 })}
+
+                {componentMenu && !layoutEditingLocked ? (() => {
+                  const menuComponent = components.find((entry) => entry.id === componentMenu.componentId);
+
+                  if (!menuComponent) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      className="freeplay-component-menu"
+                      style={{ left: componentMenu.anchor.x, top: componentMenu.anchor.y }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                      onContextMenu={(event) => event.stopPropagation()}
+                    >
+                      {componentMenu.editingLabel ? (
+                        <input
+                          type="text"
+                          className="freeplay-component__label-input freeplay-component-menu__input"
+                          spellCheck={false}
+                          autoFocus
+                          defaultValue={menuComponent.label}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              applyComponentLabelEdit(menuComponent.id, event.currentTarget.value);
+                            }
+                          }}
+                          onBlur={(event) => applyComponentLabelEdit(menuComponent.id, event.currentTarget.value)}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="freeplay-component-menu__action"
+                            onClick={() => {
+                              setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
+                              duplicateComponent(menuComponent.id);
+                            }}
+                          >
+                            Duplicar
+                          </button>
+                          <button
+                            type="button"
+                            className="freeplay-component-menu__action"
+                            onClick={() => {
+                              setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
+                              rotateComponent(menuComponent.id, 1);
+                            }}
+                          >
+                            Rotar
+                          </button>
+                          <button
+                            type="button"
+                            className="freeplay-component-menu__action"
+                            onClick={() => {
+                              setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
+                              deleteComponentById(menuComponent.id);
+                              setWireReconnectTarget(null);
+                              setSelection(null);
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                          <button
+                            type="button"
+                            className="freeplay-component-menu__action"
+                            onClick={() => startComponentLabelEdit(menuComponent.id)}
+                          >
+                            Editar etiqueta
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })() : null}
               </div>
             </div>
           </div>
