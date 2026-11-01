@@ -120,10 +120,10 @@ interface TitleBlockField {
 
 function getTitleBlockFields(sheet: SheetMetadata | undefined): TitleBlockField[] {
   return [
-    { key: "projectName", label: "Proyecto", value: sheet?.projectName ?? "" },
-    { key: "date", label: "Fecha", value: sheet?.date ?? "" },
-    { key: "scale", label: "Escala", value: sheet?.scale ?? "" },
-    { key: "page", label: "Página", value: sheet?.page ?? "" }
+    { key: "projectName", label: "Project", value: sheet?.projectName ?? "" },
+    { key: "date", label: "Date", value: sheet?.date ?? "" },
+    { key: "scale", label: "Scale", value: sheet?.scale ?? "" },
+    { key: "page", label: "Page", value: sheet?.page ?? "" }
   ];
 }
 
@@ -171,6 +171,17 @@ function SheetLayerBase({ planeSettings, sheet }: { planeSettings: BuilderPlaneS
 
       <rect className="sheet-frame" data-testid="sheet-frame" height={frame.height} width={frame.width} x={frame.x} y={frame.y} />
 
+      <defs>
+        <clipPath id="sheet-title-block-clip">
+          <rect
+            height={titleBlock.height - 4}
+            width={titleBlock.width - 4}
+            x={titleBlock.x + 2}
+            y={titleBlock.y + 2}
+          />
+        </clipPath>
+      </defs>
+
       {zoneMarks.columns.map((column) => (
         <text className="sheet-zone-label" data-zone="column" key={`zone-column-${column.index}`} x={column.x + 4} y={SHEET_FRAME_INSET + 11}>
           {column.index}
@@ -184,20 +195,22 @@ function SheetLayerBase({ planeSettings, sheet }: { planeSettings: BuilderPlaneS
 
       <g className="sheet-title-block" data-testid="sheet-title-block">
         <rect className="sheet-title-block__frame" height={titleBlock.height} width={titleBlock.width} x={titleBlock.x} y={titleBlock.y} />
-        {fields.map((field, index) => {
-          const rowY = titleBlock.y + TITLE_BLOCK_PADDING + TITLE_BLOCK_ROW_HEIGHT * index + 14;
+        <g clipPath="url(#sheet-title-block-clip)">
+          {fields.map((field, index) => {
+            const rowY = titleBlock.y + TITLE_BLOCK_PADDING + TITLE_BLOCK_ROW_HEIGHT * index + 14;
 
-          return (
-            <g key={`title-block-${field.key}`}>
-              <text className="sheet-title-block__label" x={titleBlock.x + TITLE_BLOCK_PADDING} y={rowY}>
-                {field.label}
-              </text>
-              <text className="sheet-title-block__value" data-field={field.key} x={titleBlock.x + 110} y={rowY}>
-                {field.value}
-              </text>
-            </g>
-          );
-        })}
+            return (
+              <g key={`title-block-${field.key}`}>
+                <text className="sheet-title-block__label" x={titleBlock.x + TITLE_BLOCK_PADDING} y={rowY}>
+                  {field.label}
+                </text>
+                <text className="sheet-title-block__value" data-field={field.key} x={titleBlock.x + 110} y={rowY}>
+                  {field.value}
+                </text>
+              </g>
+            );
+          })}
+        </g>
       </g>
     </g>
   );

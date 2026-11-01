@@ -1,0 +1,316 @@
+{
+  "components": [
+    {
+      "id": "builder-component-3",
+      "label": "L1-L2",
+      "rotation": 0,
+      "tag": null,
+      "type": "POWER_SOURCE",
+      "usesCustomLabel": false,
+      "x": 730,
+      "y": 39,
+      "sourceVoltage": 120
+    },
+    {
+      "id": "builder-component-4",
+      "label": "PB-NO",
+      "rotation": 0,
+      "tag": null,
+      "type": "PUSH_BUTTON_NO",
+      "usesCustomLabel": false,
+      "x": 509.6666666666667,
+      "y": 399,
+      "isPressed": false
+    },
+    {
+      "id": "builder-component-5",
+      "label": "CB-1",
+      "rotation": 3,
+      "tag": null,
+      "type": "BREAKER_1P",
+      "usesCustomLabel": false,
+      "x": 100,
+      "y": 110.5
+    },
+    {
+      "id": "builder-component-7",
+      "label": "SW-1",
+      "rotation": 3,
+      "tag": null,
+      "type": "SWITCH_1P",
+      "usesCustomLabel": false,
+      "x": 100,
+      "y": 327,
+      "isClosed": true
+    },
+    {
+      "id": "builder-component-9",
+      "label": "PB-NC",
+      "rotation": 0,
+      "tag": null,
+      "type": "PUSH_BUTTON_NC",
+      "usesCustomLabel": false,
+      "x": 257.6666666666667,
+      "y": 399,
+      "isPressed": false
+    },
+    {
+      "id": "builder-component-12",
+      "label": "CR",
+      "rotation": 0,
+      "tag": "__builder_label__:CR",
+      "type": "OTE",
+      "usesCustomLabel": true,
+      "x": 1378,
+      "y": 399
+    },
+    {
+      "id": "builder-component-14",
+      "label": "CB-1",
+      "rotation": 0,
+      "tag": null,
+      "type": "BREAKER_1P",
+      "usesCustomLabel": false,
+      "x": 1072.5,
+      "y": 39
+    },
+    {
+      "id": "builder-component-18",
+      "label": "XIC",
+      "rotation": 0,
+      "tag": "__builder_label__:XIC",
+      "type": "XIC",
+      "usesCustomLabel": false,
+      "x": 514,
+      "y": 579
+    }
+  ],
+  "name": "PLC Sim circuit",
+  "program": {
+    "rungs": [
+      {
+        "id": "builder-rung-1",
+        "instructions": [
+          {
+            "id": "builder-rung-1-instruction-1",
+            "tag": "__builder_label__:XIC",
+            "type": "XIC"
+          },
+          {
+            "id": "builder-rung-1-instruction-2",
+            "tag": "__builder_label__:CR",
+            "type": "OTE"
+          }
+        ]
+      }
+    ]
+  },
+  "savedAt": "2026-11-01T04:56:30.945Z",
+  "sheet": {
+    "date": "2026-11-01",
+    "page": "1",
+    "projectName": "PLC Sim circuit",
+    "scale": "1:1"
+  },
+  "settings": {
+    "gridSpacing": 18,
+    "height": 1080,
+    "scanIntervalMs": 150,
+    "width": 1720
+  },
+  "tags": [
+    {
+      "name": "I:0/0",
+      "kind": "input",
+      "label": "Input"
+    },
+    {
+      "name": "O:0/0",
+      "kind": "output",
+      "label": "Output"
+    },
+    {
+      "name": "B3:0/0",
+      "kind": "internal",
+      "label": "Internal bit"
+    },
+    {
+      "kind": "internal",
+      "label": "CR",
+      "name": "__builder_label__:CR"
+    },
+    {
+      "kind": "internal",
+      "label": "XIC",
+      "name": "__builder_label__:XIC"
+    }
+  ],
+  "version": 2,
+  "wires": [
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-5:out",
+      "id": "builder-wire-6",
+      "points": [
+        {
+          "x": 738,
+          "y": 90
+        },
+        {
+          "x": 180,
+          "y": 90
+        },
+        {
+          "x": 180,
+          "y": 89
+        }
+      ],
+      "startPortId": "builder-component-3:left",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-5:in",
+      "id": "builder-wire-8",
+      "points": [
+        {
+          "x": 180,
+          "y": 306
+        },
+        {
+          "x": 180,
+          "y": 234
+        }
+      ],
+      "startPortId": "builder-component-7:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-4:in",
+      "id": "builder-wire-10",
+      "points": [
+        {
+          "x": 405.33333333333337,
+          "y": 450
+        },
+        {
+          "x": 522,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-9:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-7:in",
+      "id": "builder-wire-11",
+      "points": [
+        {
+          "x": 270,
+          "y": 450
+        },
+        {
+          "x": 180,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-9:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-4:out",
+      "id": "builder-wire-13",
+      "points": [
+        {
+          "x": 1386,
+          "y": 450
+        },
+        {
+          "x": 657.3333333333334,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-12:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-3:right",
+      "id": "builder-wire-15",
+      "points": [
+        {
+          "x": 1080,
+          "y": 90
+        },
+        {
+          "x": 882,
+          "y": 90
+        }
+      ],
+      "startPortId": "builder-component-14:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-14:out",
+      "id": "builder-wire-17",
+      "points": [
+        {
+          "x": 1530,
+          "y": 450
+        },
+        {
+          "x": 1530,
+          "y": 90
+        },
+        {
+          "x": 1225,
+          "y": 90
+        }
+      ],
+      "startPortId": "builder-component-12:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-4:in",
+      "id": "builder-wire-19",
+      "points": [
+        {
+          "x": 522,
+          "y": 630
+        },
+        {
+          "x": 522,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-18:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-4:out",
+      "id": "builder-wire-22",
+      "points": [
+        {
+          "x": 666,
+          "y": 630
+        },
+        {
+          "x": 657.3333333333334,
+          "y": 630
+        },
+        {
+          "x": 657.3333333333334,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-18:out",
+      "thickness": 3.5
+    }
+  ]
+}

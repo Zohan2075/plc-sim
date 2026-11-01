@@ -14,36 +14,44 @@ function wire(id: string, points: Array<[number, number]>): BuilderWire {
 }
 
 describe("findWireCrossings", () => {
-  it("detecta un cruce y solo puentea el cable posterior", () => {
-    const horizontal = wire("a", [[0, 0], [100, 0]]);
-    const vertical = wire("b", [[50, -50], [50, 50]]);
+  it("detecta un cruce y solo puentea el cable mas nuevo", () => {
+    const horizontal = wire("wire-1", [[0, 0], [100, 0]]);
+    const vertical = wire("wire-2", [[50, -50], [50, 50]]);
     const wires = [horizontal, vertical];
 
-    expect(findWireCrossings(vertical, 1, wires)).toEqual([{ point: { x: 50, y: 0 }, segmentIndex: 0 }]);
-    expect(findWireCrossings(horizontal, 0, wires)).toEqual([]);
-  });
-
-  it("no marca puente en un nodo compartido", () => {
-    const horizontal = wire("a", [[0, 0], [50, 0], [100, 0]]);
-    const vertical = wire("b", [[50, -50], [50, 0], [50, 50]]);
-
-    expect(findWireCrossings(vertical, 1, [horizontal, vertical])).toEqual([]);
-  });
-
-  it("marca puente al cruzar el extremo de otro cable sin nodo compartido", () => {
-    const horizontal = wire("a", [[0, 0], [100, 0]]);
-    const vertical = wire("b", [[0, -50], [0, 50]]);
-
-    expect(findWireCrossings(vertical, 1, [horizontal, vertical])).toEqual([
-      { point: { x: 0, y: 0 }, segmentIndex: 0 }
+    expect(findWireCrossings(vertical, wires)).toEqual([{ point: { x: 50, y: 0 }, segmentIndex: 0 }]);
+    expect(findWireCrossings(horizontal, wires)).toEqual([]);
+    expect(findWireCrossings(vertical, [...wires].reverse())).toEqual([
+      { point: { x: 50, y: 0 }, segmentIndex: 0 }
     ]);
   });
 
-  it("ignora cables paralelos", () => {
-    const first = wire("a", [[0, 0], [100, 0]]);
-    const second = wire("b", [[0, 20], [100, 20]]);
+  it("no marca puente en un nodo compartido", () => {
+    const horizontal = wire("wire-1", [[0, 0], [50, 0], [100, 0]]);
+    const vertical = wire("wire-2", [[50, -50], [50, 0], [50, 50]]);
 
-    expect(findWireCrossings(second, 1, [first, second])).toEqual([]);
+    expect(findWireCrossings(vertical, [horizontal, vertical])).toEqual([]);
+  });
+
+  it("no marca puente en una union en T", () => {
+    const horizontal = wire("wire-1", [[0, 0], [100, 0]]);
+    const vertical = wire("wire-2", [[50, 50], [50, 0]]);
+
+    expect(findWireCrossings(vertical, [horizontal, vertical])).toEqual([]);
+  });
+
+  it("no marca puente en una esquina", () => {
+    const horizontal = wire("wire-1", [[0, 0], [100, 0]]);
+    const vertical = wire("wire-2", [[0, -50], [0, 0], [0, 50]]);
+
+    expect(findWireCrossings(vertical, [horizontal, vertical])).toEqual([]);
+  });
+
+  it("ignora cables paralelos", () => {
+    const first = wire("wire-1", [[0, 0], [100, 0]]);
+    const second = wire("wire-2", [[0, 20], [100, 20]]);
+
+    expect(findWireCrossings(second, [first, second])).toEqual([]);
   });
 });
 

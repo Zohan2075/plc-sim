@@ -171,9 +171,56 @@ export function clampComponentToPlane(component: BuilderComponent, planeSettings
 }
 
 export function clampWireToPlane(wire: BuilderWire, planeSettings: BuilderPlaneSettings): BuilderWire {
-  return {
+  const points: Point[] = [];
+
+  for (const point of wire.points) {
+    const clampedPoint = clampPointToPlane(point, planeSettings);
+    const previousPoint = points[points.length - 1];
+
+    if (
+      previousPoint
+      && Math.abs(previousPoint.x - clampedPoint.x) < 0.001
+      && Math.abs(previousPoint.y - clampedPoint.y) < 0.001
+    ) {
+      continue;
+    }
+
+    points.push(clampedPoint);
+  }
+
+  // No se limpian quiebres ni vertices de union aqui: un clamp de tamano no
+  // debe borrar el nodo de una T. Solo se deduplican puntos identicos.
+  return { ...wire, points };
+}
+
+/** Clamp-only: no snapea ni mueve nada que ya quepa en el plano. */
+export function clampSceneBounds(scene: BuilderScene, planeSettings: BuilderPlaneSettings): BuilderScene {
+  const nextComponents = scene.components.map((component) => ({ ...component }));
+  let nextWires = scene.wires.map((wire) => ({
     ...wire,
-    points: normalizeWirePoints(wire.points.map((point) => clampPointToPlane(point, planeSettings)), planeSettings)
+    points: wire.points.map((point) => ({ ...point }))
+  }));
+
+  for (let index = 0; index < nextComponents.length; index += 1) {
+    const currentComponent = nextComponents[index];
+
+    if (!currentComponent) {
+      continue;
+    }
+
+    const clampedComponent = clampComponentToPlane(currentComponent, planeSettings);
+
+    if (clampedComponent.x === currentComponent.x && clampedComponent.y === currentComponent.y) {
+      continue;
+    }
+
+    nextComponents[index] = clampedComponent;
+    nextWires = moveAttachedWireEndpoints(nextWires, currentComponent, clampedComponent);
+  }
+
+  return {
+    components: nextComponents,
+    wires: nextWires.map((wire) => clampWireToPlane(wire, planeSettings))
   };
 }
 
@@ -254,7 +301,7 @@ export function createOrthogonalPath(currentPoints: Point[], targetPoint: Point,
     : { x: targetPoint.x, y: previousPoint.y };
   const snappedElbow = clampPointToPlane(elbow, planeSettings);
 
-  return normalizeWirePoints([...currentPoints, snappedElbow, targetPoint], planeSettings);
+  return cleanWirePath([...currentPoints, snappedElbow, targetPoint]);
 }
 
 export function distanceBetween(left: Point, right: Point): number {
@@ -289,13 +336,100 @@ export function normalizeWirePoints(points: Point[], planeSettings?: BuilderPlan
   return normalized;
 }
 
+/**
+ * Limpieza de un trazado ya existente: NO cuantiza a la rejilla. Solo elimina
+ * puntos duplicados y quiebres menores que `tolerance` px (los escalones de
+ * 1-2 px que dejan los cambios de geometria). Los extremos se conservan tal
+ * cual, que es lo que permite clavarlos en un borne o en una union.
+ */
+export function cleanWirePath(points: Point[], tolerance = 3): Point[] {
+  const deduped: Point[] = [];
+
+  for (const point of points) {
+    const previousPoint = deduped[deduped.length - 1];
+
+    if (
+      previousPoint
+      && Math.abs(previousPoint.x - point.x) < 0.001
+      && Math.abs(previousPoint.y - point.y) < 0.001
+    ) {
+      continue;
+    }
+
+    deduped.push(point);
+  }
+
+  if (deduped.length <= 2) {
+    return deduped;
+  }
+
+  const cleaned: Point[] = [deduped[0]!];
+
+  for (let index = 1; index < deduped.length - 1; index += 1) {
+    const previousPoint = cleaned[cleaned.length - 1];
+    const currentPoint = deduped[index];
+    const nextPoint = deduped[index + 1];
+
+    if (!previousPoint || !currentPoint || !nextPoint) {
+      continue;
+    }
+
+    const area = Math.abs(
+      (currentPoint.x - previousPoint.x) * (nextPoint.y - previousPoint.y)
+      - (currentPoint.y - previousPoint.y) * (nextPoint.x - previousPoint.x)
+    );
+    const base = Math.hypot(nextPoint.x - previousPoint.x, nextPoint.y - previousPoint.y);
+    const distanceToLine = base > 0
+      ? area / base
+      : Math.hypot(currentPoint.x - previousPoint.x, currentPoint.y - previousPoint.y);
+    // Solo se puede eliminar el quiebre si los vecinos quedan alineados en un
+    // eje; si no, eliminarlo convertiria el tramo en diagonal.
+    const neighborsAligned = Math.abs(previousPoint.x - nextPoint.x) < 0.001
+      || Math.abs(previousPoint.y - nextPoint.y) < 0.001;
+
+    if (neighborsAligned && distanceToLine <= tolerance) {
+      continue;
+    }
+
+    cleaned.push(currentPoint);
+  }
+
+  const lastPoint = deduped[deduped.length - 1];
+
+  if (lastPoint) {
+    cleaned.push(lastPoint);
+  }
+
+  return cleanDuplicateTail(cleaned);
+}
+
+function cleanDuplicateTail(points: Point[]): Point[] {
+  const result: Point[] = [];
+
+  for (const point of points) {
+    const previousPoint = result[result.length - 1];
+
+    if (
+      previousPoint
+      && Math.abs(previousPoint.x - point.x) < 0.001
+      && Math.abs(previousPoint.y - point.y) < 0.001
+    ) {
+      continue;
+    }
+
+    result.push(point);
+  }
+
+  return result;
+}
+
 function arePointsCollinear(left: Point, middle: Point, right: Point): boolean {
   const crossProduct = (middle.x - left.x) * (right.y - left.y) - (middle.y - left.y) * (right.x - left.x);
   return Math.abs(crossProduct) < 0.5;
 }
 
 export function simplifyWirePoints(points: Point[]): Point[] {
-  const normalized = normalizeWirePoints(points);
+  const normalized = cleanWirePath(points);
 
   if (normalized.length <= 2) {
     return normalized;
@@ -326,8 +460,14 @@ export function simplifyWirePoints(points: Point[]): Point[] {
   }
 
   const lastPoint = normalized[normalized.length - 1];
+  const previousPoint = simplified[simplified.length - 1];
 
-  if (lastPoint && !pointsAreClose(simplified[simplified.length - 1] ?? lastPoint, lastPoint)) {
+  if (
+    lastPoint
+    && (!previousPoint
+      || Math.abs(previousPoint.x - lastPoint.x) >= 0.001
+      || Math.abs(previousPoint.y - lastPoint.y) >= 0.001)
+  ) {
     simplified.push(lastPoint);
   }
 
@@ -373,7 +513,7 @@ export function repositionWireEndpointOrthogonally(
   }
 
   if (getSegmentAxis(adjacentPoint, endpointPoint) !== null) {
-    return normalizeWirePoints(nextPoints);
+    return cleanWirePath(nextPoints);
   }
 
   const outerIndex = endpointIndex === 0 ? 2 : nextPoints.length - 3;
@@ -383,8 +523,8 @@ export function repositionWireEndpointOrthogonally(
     const elbowPoint = buildEndpointElbow(adjacentPoint, endpointPoint, preferredAxis);
 
     return endpointIndex === 0
-      ? normalizeWirePoints([endpointPoint, elbowPoint, ...nextPoints.slice(1)])
-      : normalizeWirePoints([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
+      ? cleanWirePath([endpointPoint, elbowPoint, ...nextPoints.slice(1)])
+      : cleanWirePath([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
   }
 
   const outerAxis = getSegmentAxis(adjacentPoint, outerPoint);
@@ -393,14 +533,14 @@ export function repositionWireEndpointOrthogonally(
 
   if (canAdjustAdjacent) {
     nextPoints[adjacentIndex] = buildEndpointElbow(adjacentPoint, endpointPoint, preferredAxis);
-    return normalizeWirePoints(nextPoints);
+    return cleanWirePath(nextPoints);
   }
 
   const elbowPoint = buildEndpointElbow(adjacentPoint, endpointPoint, preferredAxis);
 
   return endpointIndex === 0
-    ? normalizeWirePoints([endpointPoint, elbowPoint, ...nextPoints.slice(1)])
-    : normalizeWirePoints([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
+    ? cleanWirePath([endpointPoint, elbowPoint, ...nextPoints.slice(1)])
+    : cleanWirePath([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
 }
 
 export function isWireEndpointIndex(index: number, pointCount: number): boolean {
@@ -453,12 +593,12 @@ export function moveAttachedWireEndpoints(
     const startTerminal = wire.startPortId ? movedTerminalPoints.get(wire.startPortId) : undefined;
     const endTerminal = wire.endPortId ? movedTerminalPoints.get(wire.endPortId) : undefined;
 
-    if (startTerminal && !pointsAreClose(wire.points[0] ?? startTerminal.point, startTerminal.point)) {
+    if (startTerminal) {
       nextPoints = repositionWireEndpointOrthogonally(nextPoints, 0, startTerminal.point, startTerminal.axis);
       didMove = true;
     }
 
-    if (endTerminal && !pointsAreClose(wire.points[wire.points.length - 1] ?? endTerminal.point, endTerminal.point)) {
+    if (endTerminal) {
       nextPoints = repositionWireEndpointOrthogonally(
         nextPoints,
         nextPoints.length - 1,

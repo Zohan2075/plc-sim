@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -27,8 +28,10 @@ import {
   clampPlaneHeight,
   clampPlaneWidth,
   clampPointToPlane,
+  clampSceneBounds,
   clampSceneToPlane,
   clampWireToPlane,
+  cleanWirePath,
   createOrthogonalPath,
   distanceBetween,
   getCanonicalWirePoint,
@@ -52,6 +55,7 @@ import {
   snapPointToGrid,
   repositionWireEndpointOrthogonally
 } from "./diagram/grid";
+import { reconcileWireTopology } from "./diagram/wireTopology";
 import {
   createCircuitSnapshot,
   createGeneratedInstructionTag,
@@ -124,7 +128,7 @@ interface TerminalDefinition {
   y: number;
 }
 
-interface BuilderTerminal {
+export interface BuilderTerminal {
   componentId: string;
   defaultLabel: string;
   label: string;
@@ -273,9 +277,18 @@ export const COMPONENT_HEIGHT = 136;
 const COMPONENT_GLYPH_HEIGHT = 102;
 const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
 const SYMBOL_VIEWPORT_HEIGHT = 84;
-// Top efectivo del glifo: centrado (9) menos 1 px (CSS .freeplay-component__glyph .diagram-symbol),
-// para que las patas de 64/60/72 de alto caigan en y=50 (retícula de terminales).
-const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2 - 1;
+// Vano comun de los simbolos horizontales de dos bornes. El alto del glifo de
+// los viewBox 72 (6..122) se escala uniformemente para que 6->8 y 122->152:
+// scale = 144 / 116; height = 72 * scale; el borne queda en y=51 al centrarlo.
+const HORIZONTAL_TERMINAL_LEFT_X = 8;
+const HORIZONTAL_TERMINAL_RIGHT_X = 152;
+const HORIZONTAL_TERMINAL_Y = 51;
+const PUSH_BUTTON_SYMBOL_HEIGHT = 72 * (144 / 116);
+const BREAKER_1P_SYMBOL_HEIGHT = 64 * (144 / 116);
+// El glifo se centra en el contenedor de 102 px. Con top=9 las patas de todos
+// los viewBox (64/60/72) caen en y=51, que con componentes sobre la rejilla
+// (y % 18 = 3) da terminales en multiplos de 18. No desplazar por CSS.
+const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2;
 const SYMBOL_VIEWBOX_WIDTH = 128;
 const DEFAULT_PLANE_WIDTH = 1720;
 const DEFAULT_PLANE_HEIGHT = 940;
@@ -315,7 +328,7 @@ export const TERMINAL_LATTICE_X_OFFSET = ((ROTATION_CENTER_X % DEFAULT_GRID_SPAC
 export const TERMINAL_LATTICE_Y_OFFSET = ((ROTATION_CENTER_Y % DEFAULT_GRID_SPACING) + DEFAULT_GRID_SPACING) % DEFAULT_GRID_SPACING;
 export const MAJOR_GRID_MULTIPLIER = 5;
 export const SHEET_FRAME_INSET = 10;
-export const TITLE_BLOCK_WIDTH = 360;
+export const TITLE_BLOCK_WIDTH = 420;
 export const TITLE_BLOCK_HEIGHT = 110;
 export const TITLE_BLOCK_PADDING = 12;
 export const TITLE_BLOCK_ROW_HEIGHT = 22;
@@ -518,7 +531,9 @@ function normalizeWheelDeltaValue(delta: number, deltaMode: number): number {
 }
 
 function clampCanvasZoom(value: number): number {
-  return clamp(Math.round(value * 100) / 100, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM);
+  // Pasos de 0.05: menos escalas fraccionarias y menos riesgo de que el SVG y
+  // la capa HTML de componentes redondeen distinto al hacer scroll.
+  return clamp(Math.round(value * 20) / 20, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM);
 }
 
 export function clampTimedContactDelayMs(value: number): number {
@@ -1168,8 +1183,7 @@ function getDefaultComponentLabel(
 function projectSymbolPoint(
   x: number,
   y: number,
-  viewBoxHeight: number,
-  options: { snapToLattice?: boolean } = {}
+  viewBoxHeight: number
 ): Point {
   const scale = Math.min(
     SYMBOL_VIEWPORT_WIDTH / SYMBOL_VIEWBOX_WIDTH,
@@ -1182,9 +1196,9 @@ function projectSymbolPoint(
     y: offsetY + y * scale
   };
 
-  return options.snapToLattice === false
-    ? roundPoint(projectedPoint)
-    : snapPointToTerminalLattice(projectedPoint);
+  // El terminal local es la proyeccion EXACTA del arte; no se snapea a la
+  // retícula (eso movia los bornes de viewBox 72 ~4.3 px respecto al glifo).
+  return projectedPoint;
 }
 
 export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[] {
@@ -1201,13 +1215,10 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
     }
     case "BREAKER_1P":
       {
-        const inputTerminal = projectSymbolPoint(6, 32, 64);
-        const outputTerminal = projectSymbolPoint(122, 32, 64);
-
-      return [
-          { id: "in", label: "1", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
-          { id: "out", label: "2", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
-      ];
+        return [
+          { id: "in", label: "1", pairId: "main", role: "input", x: HORIZONTAL_TERMINAL_LEFT_X, y: HORIZONTAL_TERMINAL_Y },
+          { id: "out", label: "2", pairId: "main", role: "output", x: HORIZONTAL_TERMINAL_RIGHT_X, y: HORIZONTAL_TERMINAL_Y }
+        ];
       }
     case "SWITCH_1P":
     case "LIMIT_SWITCH_NO":
@@ -1248,12 +1259,12 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
     case "PUSH_BUTTON_NC":
     case "ESTOP":
     case "OL_CONTACT": {
-      const inputTerminal = projectSymbolPoint(6, 36, 72);
-      const outputTerminal = projectSymbolPoint(122, 36, 72);
-
+      // Todos los simbolos horizontales de dos bornes comparten el mismo vano
+      // de terminales (8..152) para que dos componentes alineados en X tengan
+      // sus bornes superior/inferior en la misma vertical.
       return [
-        { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
-        { id: "out", label: "Out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
+        { id: "in", label: "In", pairId: "main", role: "input", x: HORIZONTAL_TERMINAL_LEFT_X, y: HORIZONTAL_TERMINAL_Y },
+        { id: "out", label: "Out", pairId: "main", role: "output", x: HORIZONTAL_TERMINAL_RIGHT_X, y: HORIZONTAL_TERMINAL_Y }
       ];
     }
     case "XIC":
@@ -1529,7 +1540,12 @@ function renderSymbolGraphic(
       );
     case "BREAKER_1P":
       return (
-        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
+        <svg
+          viewBox="0 0 128 64"
+          className={symbolClassName}
+          style={{ height: BREAKER_1P_SYMBOL_HEIGHT }}
+          aria-hidden="true"
+        >
           <text x="34" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in", "1")}</text>
           <text x="94" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out", "2")}</text>
           <line x1="6" y1="32" x2="28" y2="32" className="diagram-symbol__line" />
@@ -1664,7 +1680,12 @@ function renderSymbolGraphic(
       const contactBarY = options.pushButtonPressed ? 36 : 20;
 
       return (
-        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
+        <svg
+          viewBox="0 0 128 72"
+          className={symbolClassName}
+          style={{ height: PUSH_BUTTON_SYMBOL_HEIGHT }}
+          aria-hidden="true"
+        >
           <line x1="6" y1="36" x2="28" y2="36" className="diagram-symbol__line" />
           <line x1="100" y1="36" x2="122" y2="36" className="diagram-symbol__line" />
           <circle cx="34" cy="36" r="5.5" className="diagram-symbol__terminal" />
@@ -1684,7 +1705,12 @@ function renderSymbolGraphic(
       const contactBarY = options.pushButtonPressed ? 44 : 36;
 
       return (
-        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
+        <svg
+          viewBox="0 0 128 72"
+          className={symbolClassName}
+          style={{ height: PUSH_BUTTON_SYMBOL_HEIGHT }}
+          aria-hidden="true"
+        >
           <line x1="6" y1="36" x2="28" y2="36" className="diagram-symbol__line" />
           <line x1="100" y1="36" x2="122" y2="36" className="diagram-symbol__line" />
           <circle cx="34" cy="30" r="5.5" className="diagram-symbol__terminal" />
@@ -1712,7 +1738,12 @@ function renderSymbolGraphic(
       const labelPaths = isPressed ? ESTOP_VECTOR_OPEN_LABEL_PATHS : ESTOP_VECTOR_LABEL_PATHS;
 
       return (
-        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
+        <svg
+          viewBox="0 0 128 72"
+          className={symbolClassName}
+          style={{ height: PUSH_BUTTON_SYMBOL_HEIGHT }}
+          aria-hidden="true"
+        >
           <g transform={transform} className="diagram-symbol__vector" fillRule="evenodd">
             <path d={symbolPath} />
           </g>
@@ -1907,17 +1938,6 @@ function normalizeQuarterTurns(value: number): number {
   return ((value % 4) + 4) % 4;
 }
 
-function snapCoordinateToLattice(value: number, spacing: number, offset: number): number {
-  return offset + Math.round((value - offset) / spacing) * spacing;
-}
-
-function snapPointToTerminalLattice(point: Point): Point {
-  return roundPoint({
-    x: snapCoordinateToLattice(point.x, DEFAULT_GRID_SPACING, TERMINAL_LATTICE_X_OFFSET),
-    y: snapCoordinateToLattice(point.y, DEFAULT_GRID_SPACING, TERMINAL_LATTICE_Y_OFFSET)
-  });
-}
-
 export function roundPoint(point: Point): Point {
   return {
     x: Math.round(point.x),
@@ -1992,7 +2012,7 @@ function getWireStatusMeta(status: WireConnectionStatus): {
     case "connected":
       return {
         className: "status-pill--on",
-        description: "Both ends are snapped to different terminals, so the solver can read this wire.",
+        description: "Both ends are attached to terminals or wire junctions, so the solver can read this wire.",
         label: "Connected"
       };
     case "loose-start":
@@ -2112,6 +2132,59 @@ export function getComponentTerminals(component: BuilderComponent): BuilderTermi
   });
 }
 
+export function buildTerminalPortMap(components: readonly BuilderComponent[]): Map<string, BuilderTerminal> {
+  const terminalsByPort = new Map<string, BuilderTerminal>();
+
+  for (const component of components) {
+    for (const terminal of getComponentTerminals(component)) {
+      terminalsByPort.set(terminal.portId, terminal);
+    }
+  }
+
+  return terminalsByPort;
+}
+
+/**
+ * Los extremos de un cable son REFERENCIAS (portId), no coordenadas. Cada
+ * render se recalculan desde el terminal del componente; `points` guarda solo
+ * el recorrido (quiebres) y los extremos sueltos.
+ */
+export function resolveWirePointsWithMap(
+  wire: BuilderWire,
+  terminalsByPort: ReadonlyMap<string, BuilderTerminal>
+): Point[] {
+  const points = wire.points.map((point) => ({ x: point.x, y: point.y }));
+
+  if (points.length === 0) {
+    return points;
+  }
+
+  if (wire.startPortId) {
+    const terminal = terminalsByPort.get(wire.startPortId);
+
+    if (terminal) {
+      points[0] = { x: terminal.x, y: terminal.y };
+    }
+  }
+
+  if (wire.endPortId) {
+    const terminal = terminalsByPort.get(wire.endPortId);
+
+    if (terminal) {
+      points[points.length - 1] = { x: terminal.x, y: terminal.y };
+    }
+  }
+
+  return points;
+}
+
+export function resolveWirePoints(
+  wire: BuilderWire,
+  components: readonly BuilderComponent[]
+): Point[] {
+  return resolveWirePointsWithMap(wire, buildTerminalPortMap(components));
+}
+
 function getAttachedWireIds(component: BuilderComponent, wires: BuilderWire[]): Set<string> {
   const terminalPointKeys = new Set(getComponentTerminals(component).map((terminal) => getPointKey(terminal)));
 
@@ -2171,21 +2244,60 @@ function resolveWireEndpoint(
   };
 }
 
-function inspectWire(wire: BuilderWire, components: BuilderComponent[]): WireInspection {
-  const startPoint = wire.points[0] ?? { x: 0, y: 0 };
-  const endPoint = wire.points[wire.points.length - 1] ?? startPoint;
+function isPointAttachedToWire(
+  point: Point,
+  wireId: string,
+  wires: readonly BuilderWire[],
+  components: readonly BuilderComponent[]
+): boolean {
+  for (const other of wires) {
+    if (other.id === wireId) {
+      continue;
+    }
+
+    const otherPoints = resolveWirePoints(other, components);
+
+    for (const otherPoint of otherPoints) {
+      if (distanceBetween(point, otherPoint) < 1.5) {
+        return true;
+      }
+    }
+
+    for (let index = 0; index < otherPoints.length - 1; index += 1) {
+      const start = otherPoints[index];
+      const end = otherPoints[index + 1];
+
+      if (!start || !end) {
+        continue;
+      }
+
+      const projection = projectPointOntoSegment(point, start, end);
+
+      if (projection && projection.distance < 1.5) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function inspectWire(wire: BuilderWire, components: BuilderComponent[], wires: readonly BuilderWire[]): WireInspection {
+  const resolvedPoints = resolveWirePoints(wire, components);
+  const startPoint = resolvedPoints[0] ?? { x: 0, y: 0 };
+  const endPoint = resolvedPoints[resolvedPoints.length - 1] ?? startPoint;
   const ports = components.flatMap((component) => getComponentTerminals(component));
   const portsById = new Map(ports.map((port) => [port.portId, port]));
   const componentsById = new Map(components.map((component) => [component.id, component]));
   const start = resolveWireEndpoint(startPoint, wire.startPortId, componentsById, portsById);
   const end = resolveWireEndpoint(endPoint, wire.endPortId, componentsById, portsById);
-  const segments = Math.max(wire.points.length - 1, 0);
-  const bends = Math.max(wire.points.length - 2, 0);
+  const segments = Math.max(resolvedPoints.length - 1, 0);
+  const bends = Math.max(resolvedPoints.length - 2, 0);
   let length = 0;
 
-  for (let index = 0; index < wire.points.length - 1; index += 1) {
-    const currentPoint = wire.points[index];
-    const nextPoint = wire.points[index + 1];
+  for (let index = 0; index < resolvedPoints.length - 1; index += 1) {
+    const currentPoint = resolvedPoints[index];
+    const nextPoint = resolvedPoints[index + 1];
 
     if (!currentPoint || !nextPoint) {
       continue;
@@ -2194,13 +2306,17 @@ function inspectWire(wire: BuilderWire, components: BuilderComponent[]): WireIns
     length += distanceBetween(currentPoint, nextPoint);
   }
 
+  const startAttached = start.port !== null || isPointAttachedToWire(startPoint, wire.id, wires, components);
+  const endAttached = end.port !== null || isPointAttachedToWire(endPoint, wire.id, wires, components);
   let status: WireConnectionStatus;
 
-  if (start.port && end.port) {
-    status = start.port.portId === end.port.portId ? "invalid-loop" : "connected";
-  } else if (start.port) {
+  if (start.port && end.port && start.port.portId === end.port.portId) {
+    status = "invalid-loop";
+  } else if (startAttached && endAttached) {
+    status = "connected";
+  } else if (startAttached) {
     status = "loose-end";
-  } else if (end.port) {
+  } else if (endAttached) {
     status = "loose-start";
   } else {
     status = "loose-both";
@@ -2463,24 +2579,28 @@ function insertPointIntoWire(
   points: Point[],
   insertIndex: number,
   point: Point,
-  planeSettings?: BuilderPlaneSettings
+  _planeSettings?: BuilderPlaneSettings
 ): Point[] {
-  const roundedPoint = getCanonicalWirePoint(point, planeSettings);
+  // El punto de union debe insertarse EXACTO: si se cuantiza a la rejilla
+  // deja de estar sobre el cable y el nodo se rompe por 1 px.
+  const exactPoint = { x: point.x, y: point.y };
   const previousPoint = points[insertIndex - 1];
   const nextPoint = points[insertIndex];
+  const isSamePoint = (left: Point, right: Point) =>
+    Math.abs(left.x - right.x) < 0.001 && Math.abs(left.y - right.y) < 0.001;
 
   if (
-    (previousPoint && pointsShareCanonicalCoordinates(previousPoint, roundedPoint, planeSettings))
-    || (nextPoint && pointsShareCanonicalCoordinates(nextPoint, roundedPoint, planeSettings))
+    (previousPoint && isSamePoint(previousPoint, exactPoint))
+    || (nextPoint && isSamePoint(nextPoint, exactPoint))
   ) {
     return points;
   }
 
-  return normalizeWirePoints([
+  return cleanWirePath([
     ...points.slice(0, insertIndex),
-    roundedPoint,
+    exactPoint,
     ...points.slice(insertIndex)
-  ], planeSettings);
+  ]);
 }
 
 function applyWireAnchor(
@@ -2587,7 +2707,7 @@ function anchorWireEndpoints(
   return {
     anchors,
     endpointPortIds,
-    points: normalizeWirePoints(nextPoints, planeSettings)
+    points: cleanWirePath(nextPoints)
   };
 }
 
@@ -2770,7 +2890,12 @@ function createWire(
 }
 
 function buildStarterScene(nextId: { current: number }, availableTags: TagDefinition[]): BuilderScene {
-  const source = createCanvasComponent(nextId, availableTags, "POWER_SOURCE", 96, 144);
+  // Arranque con una fuente AC visible y alineada a la retícula: su borne de
+  // entrada (izquierdo) queda en una intersección de 18 px.
+  const source = snapComponentToPlaneGrid(
+    createCanvasComponent(nextId, availableTags, "POWER_SOURCE", 96, 96),
+    DEFAULT_PLANE_SETTINGS
+  );
 
   return {
     components: [source],
@@ -3006,23 +3131,119 @@ function collectCurrentFlowPathNodeIds(
   ]);
 }
 
-function buildResolvedPortGraph(components: BuilderComponent[], wires: BuilderWire[]): ResolvedPortGraph {
+export function buildResolvedPortGraph(components: BuilderComponent[], wires: BuilderWire[]): ResolvedPortGraph {
   const ports = components.flatMap((component) => getComponentTerminals(component));
   const portsById = new Map(ports.map((port) => [port.portId, port]));
   const componentsById = new Map(components.map((component) => [component.id, component]));
+  const electrical = buildElectricalNodeGraph(components, wires);
+  const parent = new Map<string, string>();
+
+  const addNode = (nodeId: string) => {
+    if (!parent.has(nodeId)) {
+      parent.set(nodeId, nodeId);
+    }
+  };
+  const findRoot = (nodeId: string): string => {
+    addNode(nodeId);
+    let root = nodeId;
+
+    while (parent.get(root) !== root) {
+      root = parent.get(root) ?? root;
+    }
+
+    let current = nodeId;
+
+    while (parent.get(current) !== root) {
+      const next = parent.get(current) ?? root;
+      parent.set(current, root);
+      current = next;
+    }
+
+    return root;
+  };
+  const unionNodes = (left: string, right: string) => {
+    const leftRoot = findRoot(left);
+    const rightRoot = findRoot(right);
+
+    if (leftRoot !== rightRoot) {
+      parent.set(rightRoot, leftRoot);
+    }
+  };
+
+  for (const port of ports) {
+    addNode(getElectricalPortNodeId(port.portId));
+  }
+
+  for (const [fromNodeId, toNodeIds] of electrical.connections.entries()) {
+    addNode(fromNodeId);
+
+    for (const toNodeId of toNodeIds) {
+      addNode(toNodeId);
+      unionNodes(fromNodeId, toNodeId);
+    }
+  }
+
+  const portsByRoot = new Map<string, BuilderTerminal[]>();
+
+  for (const port of ports) {
+    const root = findRoot(getElectricalPortNodeId(port.portId));
+    const rootPorts = portsByRoot.get(root);
+
+    if (rootPorts) {
+      rootPorts.push(port);
+    } else {
+      portsByRoot.set(root, [port]);
+    }
+  }
+
   const connections = new Map<string, Set<string>>();
+
+  for (const rootPorts of portsByRoot.values()) {
+    const sortedPorts = [...rootPorts].sort(sortPortsByPosition);
+
+    // Clique, no cadena: en una union puede haber varias ramas (por ejemplo
+    // PB.in comparte red con NC.out y XIC.in). Con una cadena, collectRungPaths
+    // solo veria un vecino y perderia la rama del contacto de enclavamiento.
+    for (let leftIndex = 0; leftIndex < sortedPorts.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < sortedPorts.length; rightIndex += 1) {
+        const leftPort = sortedPorts[leftIndex];
+        const rightPort = sortedPorts[rightIndex];
+
+        if (leftPort && rightPort) {
+          connectGraphNodes(connections, leftPort.portId, rightPort.portId);
+        }
+      }
+    }
+  }
+
   const wireConnections: ResolvedPortGraph["wireConnections"] = [];
 
   for (const wire of wires) {
-    const startPort = wire.startPortId ? portsById.get(wire.startPortId) ?? null : null;
-    const endPort = wire.endPortId ? portsById.get(wire.endPortId) ?? null : null;
+    const startPoint = wire.points[0];
+    const endPoint = wire.points[wire.points.length - 1];
+    const roots = new Set<string>();
 
-    if (!startPort || !endPort || startPort.portId === endPort.portId) {
+    if (startPoint) {
+      roots.add(findRoot(getElectricalPointNodeId(startPoint)));
+    }
+
+    if (endPoint) {
+      roots.add(findRoot(getElectricalPointNodeId(endPoint)));
+    }
+
+    const netPorts = [...roots].flatMap((root) => portsByRoot.get(root) ?? []);
+
+    if (netPorts.length === 0) {
       continue;
     }
 
-    connectGraphNodes(connections, startPort.portId, endPort.portId);
-    wireConnections.push({ endPortId: endPort.portId, startPortId: startPort.portId, wireId: wire.id });
+    const sortedPorts = [...netPorts].sort(sortPortsByPosition);
+
+    wireConnections.push({
+      endPortId: wire.endPortId ?? sortedPorts[sortedPorts.length - 1]?.portId ?? "",
+      startPortId: wire.startPortId ?? sortedPorts[0]?.portId ?? "",
+      wireId: wire.id
+    });
   }
 
   return { componentsById, connections, ports, portsById, wireConnections };
@@ -3045,8 +3266,15 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
     }
   }
 
+  const resolvedPointsByWire = new Map<string, Point[]>();
+
   for (const wire of wires) {
-    const pointNodeIds = wire.points.map((point) => getElectricalPointNodeId(point));
+    // Los extremos se resuelven SIEMPRE desde el portId/terminal, aunque los
+    // points guardados esten desactualizados.
+    const resolvedPoints = resolveWirePointsWithMap(wire, portsById);
+    resolvedPointsByWire.set(wire.id, resolvedPoints);
+
+    const pointNodeIds = resolvedPoints.map((point) => getElectricalPointNodeId(point));
 
     wireNodeIdsByWire.set(wire.id, pointNodeIds);
 
@@ -3072,8 +3300,8 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
       connectGraphNodes(connections, getElectricalPortNodeId(wire.endPortId), endPointNodeId);
     }
 
-    const startPoint = wire.points[0];
-    const endPoint = wire.points[wire.points.length - 1];
+    const startPoint = resolvedPoints[0];
+    const endPoint = resolvedPoints[resolvedPoints.length - 1];
     const startTerminalPortId = startPoint ? terminalPortIdsByPointKey.get(getPointKey(startPoint)) : undefined;
     const endTerminalPortId = endPoint ? terminalPortIdsByPointKey.get(getPointKey(endPoint)) : undefined;
 
@@ -3083,6 +3311,68 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
 
     if (endTerminalPortId && endPointNodeId) {
       connectGraphNodes(connections, getElectricalPortNodeId(endTerminalPortId), endPointNodeId);
+    }
+  }
+
+  // Red de seguridad geometrica: un extremo que cae sobre otro cable (vertice
+  // o segmento) es una union, aunque el punto no se haya insertado todavia.
+  // La tolerancia es pequena (1.5 px) para no unir cables paralelos.
+  for (const wire of wires) {
+    const wirePoints = resolvedPointsByWire.get(wire.id) ?? [];
+
+    if (wirePoints.length === 0) {
+      continue;
+    }
+
+    for (const endpointIndex of [0, wirePoints.length - 1]) {
+      const endpoint = wirePoints[endpointIndex];
+      const endpointPortId = endpointIndex === 0 ? wire.startPortId : wire.endPortId;
+
+      if (!endpoint) {
+        continue;
+      }
+
+      // Los extremos con puerto ya estan conectados por identidad. La red de
+      // seguridad es solo para uniones cable-cable con extremo sin puerto; si
+      // se aplicara a los puertos, un cable largo que pasa por debajo de otros
+      // bornes los uniria todos (falso corto).
+      if (endpointPortId) {
+        continue;
+      }
+
+      const endpointNodeId = getElectricalPointNodeId(endpoint);
+
+      for (const other of wires) {
+        if (other.id === wire.id) {
+          continue;
+        }
+
+        const otherPoints = resolvedPointsByWire.get(other.id) ?? [];
+
+        for (const otherPoint of otherPoints) {
+          if (pointsAreClose(endpoint, otherPoint) && distanceBetween(endpoint, otherPoint) < 1.5) {
+            connectGraphNodes(connections, endpointNodeId, getElectricalPointNodeId(otherPoint));
+          }
+        }
+
+        for (let index = 0; index < otherPoints.length - 1; index += 1) {
+          const start = otherPoints[index];
+          const end = otherPoints[index + 1];
+
+          if (!start || !end) {
+            continue;
+          }
+
+          const projection = projectPointOntoSegment(endpoint, start, end);
+
+          if (!projection || projection.distance >= 1.5) {
+            continue;
+          }
+
+          connectGraphNodes(connections, endpointNodeId, getElectricalPointNodeId(start));
+          connectGraphNodes(connections, endpointNodeId, getElectricalPointNodeId(end));
+        }
+      }
     }
   }
 
@@ -3115,7 +3405,7 @@ function collectRungPaths(
     }
 
     if (isCoilType(component.type)) {
-      if (connectedPort.role !== "input" || !component.tag) {
+      if (!component.tag) {
         continue;
       }
 
@@ -3123,11 +3413,32 @@ function collectRungPaths(
       continue;
     }
 
-    if (
-      !isPassThroughType(component.type)
-      || connectedPort.role !== "input"
-      || getConductiveTerminalPairs(component).length === 0
-    ) {
+    if (!isPassThroughType(component.type)) {
+      continue;
+    }
+
+    const conductivePairs = getConductiveTerminalPairs(component);
+
+    if (conductivePairs.length === 0) {
+      continue;
+    }
+
+    // La logica de escalera es no dirigida: la alimentacion puede entrar por
+    // cualquiera de los dos bornes del contacto. Se sale por el otro borne del
+    // mismo par (importante en BREAKER_2P, que tiene dos polos).
+    const pair = conductivePairs.find(
+      ([leftTerminalId, rightTerminalId]) =>
+        leftTerminalId === connectedPort.terminalId || rightTerminalId === connectedPort.terminalId
+    );
+
+    if (!pair) {
+      continue;
+    }
+
+    const exitTerminalId = pair[0] === connectedPort.terminalId ? pair[1] : pair[0];
+    const exitPort = portsById.get(getPortId(component.id, exitTerminalId));
+
+    if (!exitPort) {
       continue;
     }
 
@@ -3141,35 +3452,105 @@ function collectRungPaths(
         }
       ]
       : instructionPath;
-    const outputPorts = getComponentTerminals(component)
-      .filter((port) => port.role === "output" && port.pairId === connectedPort.pairId)
-      .sort(sortPortsByPosition);
 
-    for (const outputPort of outputPorts) {
-      results.push(
-        ...collectRungPaths(
-          outputPort.portId,
-          nextInstructionPath,
-          new Set([...visitedComponents, component.id]),
-          connections,
-          portsById,
-          componentsById
-        )
-      );
-    }
+    results.push(
+      ...collectRungPaths(
+        exitPort.portId,
+        nextInstructionPath,
+        new Set([...visitedComponents, component.id]),
+        connections,
+        portsById,
+        componentsById
+      )
+    );
   }
 
   return results;
 }
 
-function deriveProgram(components: BuilderComponent[], wires: BuilderWire[]): DerivedBuilderState {
+function instructionPathKey(instruction: { tag: string; type: InstructionType }): string {
+  return `${instruction.type}:${instruction.tag}`;
+}
+
+function isInstructionSubsequence(
+  candidate: ReadonlyArray<{ tag: string; type: InstructionType }>,
+  other: ReadonlyArray<{ tag: string; type: InstructionType }>
+): boolean {
+  if (candidate.length >= other.length) {
+    return false;
+  }
+
+  let candidateIndex = 0;
+
+  for (const instruction of other) {
+    if (candidateIndex >= candidate.length) {
+      break;
+    }
+
+    if (instructionPathKey(candidate[candidateIndex]!) === instructionPathKey(instruction)) {
+      candidateIndex += 1;
+    }
+  }
+
+  return candidateIndex === candidate.length;
+}
+
+function dedupeMaximalRungPaths(
+  paths: Array<Array<{ delayMs?: number; tag: string; type: InstructionType }>>
+): Array<Array<{ delayMs?: number; tag: string; type: InstructionType }>> {
+  const unique: Array<{
+    key: string;
+    path: Array<{ delayMs?: number; tag: string; type: InstructionType }>;
+  }> = [];
+
+  for (const path of paths) {
+    const key = path.map(instructionPathKey).join("|");
+
+    if (unique.some((entry) => entry.key === key)) {
+      continue;
+    }
+
+    unique.push({ key, path });
+  }
+
+  return unique
+    .filter((entry, entryIndex) => {
+      if (entry.path.length === 0) {
+        return false;
+      }
+
+      const lastInstruction = entry.path[entry.path.length - 1]!;
+      const coilKey = instructionPathKey(lastInstruction);
+
+      return !unique.some((other, otherIndex) => {
+        if (otherIndex === entryIndex || other.path.length === 0) {
+          return false;
+        }
+
+        const otherLastInstruction = other.path[other.path.length - 1]!;
+
+        return instructionPathKey(otherLastInstruction) === coilKey
+          && isInstructionSubsequence(entry.path, other.path);
+      });
+    })
+    .map((entry) => entry.path);
+}
+
+export function deriveProgram(components: BuilderComponent[], wires: BuilderWire[]): DerivedBuilderState {
   const { componentsById, connections, ports, portsById, wireConnections } = buildResolvedPortGraph(components, wires);
   const resolvedWires = wireConnections.length;
 
   const sourcePorts = ports
     .filter((port) => {
       const component = componentsById.get(port.componentId);
-      return component !== undefined && isSourceType(component.type) && port.role === "source";
+
+      if (!component || !isSourceType(component.type) || port.role !== "source") {
+        return false;
+      }
+
+      // Solo desde el borne de alimentacion. Arrancar tambien desde el retorno
+      // produce rungs invertidos que entran a la bobina por su salida.
+      return port.terminalId === getSourceTraversalTerminalIds(component).feedTerminalId;
     })
     .sort(sortPortsByPosition);
   const rungInstructionLists: Array<Array<{ delayMs?: number; tag: string; type: InstructionType }>> = [];
@@ -3187,9 +3568,11 @@ function deriveProgram(components: BuilderComponent[], wires: BuilderWire[]): De
     );
   }
 
+  const resolvedRungInstructionLists = dedupeMaximalRungPaths(rungInstructionLists);
+
   return {
     program: {
-      rungs: rungInstructionLists.map((instructions, rungIndex) => ({
+      rungs: (resolvedRungInstructionLists.map((instructions, rungIndex) => ({
         id: `builder-rung-${rungIndex + 1}`,
         instructions: instructions.map((instruction, instructionIndex) => ({
           id: `builder-rung-${rungIndex + 1}-instruction-${instructionIndex + 1}`,
@@ -3199,15 +3582,15 @@ function deriveProgram(components: BuilderComponent[], wires: BuilderWire[]): De
             ? { delayMs: clampTimedContactDelayMs(instruction.delayMs ?? DEFAULT_TIMED_CONTACT_DELAY_MS) }
             : {})
         }))
-      }))
+      })) as Program["rungs"])
     },
     resolvedWires,
-    runnableRungs: rungInstructionLists.length,
+    runnableRungs: resolvedRungInstructionLists.length,
     unresolvedWires: wires.length - resolvedWires
   };
 }
 
-function computeElectricalState(
+export function computeElectricalState(
   components: BuilderComponent[],
   wires: BuilderWire[],
   running: boolean,
@@ -3550,6 +3933,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [draggingComponentId, setDraggingComponentId] = useState<string | null>(null);
   const [wires, setWires] = useState<BuilderWire[]>([]);
   const [planeSettings, setPlaneSettings] = useState<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
+  const [planeDraft, setPlaneDraft] = useState({
+    gridSpacing: String(DEFAULT_PLANE_SETTINGS.gridSpacing),
+    height: String(DEFAULT_PLANE_SETTINGS.height),
+    width: String(DEFAULT_PLANE_SETTINGS.width)
+  });
   const [sheetMetadata, setSheetMetadata] = useState<SheetMetadata>(() =>
     createDefaultSheetMetadata("PLC Sim circuit", new Date().toISOString())
   );
@@ -3590,6 +3978,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   useEffect(() => {
     planeSettingsRef.current = planeSettings;
+    setPlaneDraft({
+      gridSpacing: String(planeSettings.gridSpacing),
+      height: String(planeSettings.height),
+      width: String(planeSettings.width)
+    });
   }, [planeSettings]);
 
   useEffect(() => {
@@ -3648,10 +4041,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     const bounds = canvas.getBoundingClientRect();
     const zoom = canvasZoomRef.current;
+    // El origen del modelo es el content-box, no el border-box. clientLeft/Top
+    // es el borde sin escalar; se multiplica por el zoom del canvas.
+    const contentLeft = bounds.left + canvas.clientLeft * zoom;
+    const contentTop = bounds.top + canvas.clientTop * zoom;
 
     return {
-      x: clamp((clientX - bounds.left) / zoom, 0, planeSettingsRef.current.width),
-      y: clamp((clientY - bounds.top) / zoom, 0, planeSettingsRef.current.height)
+      x: clamp((clientX - contentLeft) / zoom, 0, planeSettingsRef.current.width),
+      y: clamp((clientY - contentTop) / zoom, 0, planeSettingsRef.current.height)
     };
   }
 
@@ -3729,16 +4126,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         return;
       }
 
-      updatedStageScroll.scrollLeft = clamp(
+      updatedStageScroll.scrollLeft = Math.round(clamp(
         nextScrollLeft,
         0,
         Math.max(planeSettingsRef.current.width * resolvedZoom - updatedStageScroll.clientWidth, 0)
-      );
-      updatedStageScroll.scrollTop = clamp(
+      ));
+      updatedStageScroll.scrollTop = Math.round(clamp(
         nextScrollTop,
         0,
         Math.max(planeSettingsRef.current.height * resolvedZoom - updatedStageScroll.clientHeight, 0)
-      );
+      ));
     });
   }
 
@@ -3788,38 +4185,53 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }, []);
 
   function commitWireFromPoints(nextPointsInput: Point[]) {
-    const nextPoints = normalizeWirePoints(nextPointsInput, planeSettingsRef.current);
+    const nextPoints = cleanWirePath(nextPointsInput);
 
     if (nextPoints.length < 2) {
       return;
     }
 
     const wireId = createId(nextId, "builder-wire");
+    const currentWires = wiresRef.current;
+    const { anchors, endpointPortIds, points } = anchorWireEndpoints(
+      nextPoints,
+      componentsRef.current,
+      currentWires,
+      planeSettingsRef.current,
+      undefined,
+      true
+    );
+    const anchoredWires = applyWireAnchors(currentWires, anchors, planeSettingsRef.current);
+    const candidateWires = [
+      ...anchoredWires,
+      {
+        color: wireColor,
+        endPortId: endpointPortIds.end ?? null,
+        id: wireId,
+        points,
+        startPortId: endpointPortIds.start ?? null,
+        thickness: wireThickness
+      }
+    ];
+    const reconciled = reconcileWireTopology(
+      { components: componentsRef.current, wires: candidateWires },
+      planeSettingsRef.current
+    );
 
-    setWires((currentWires) => {
-      const { anchors, endpointPortIds, points } = anchorWireEndpoints(
-        nextPoints,
-        componentsRef.current,
-        currentWires,
-        planeSettingsRef.current,
-        undefined,
-        true
+    wiresRef.current = reconciled.scene.wires;
+    setWires(reconciled.scene.wires);
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
       );
-      const nextWires = applyWireAnchors(currentWires, anchors, planeSettingsRef.current);
+    }
 
-      return [
-        ...nextWires,
-        {
-          color: wireColor,
-          endPortId: endpointPortIds.end ?? null,
-          id: wireId,
-          points,
-          startPortId: endpointPortIds.start ?? null,
-          thickness: wireThickness
-        }
-      ];
-    });
-    setSelection({ kind: "wire", id: wireId });
+    setSelection(
+      reconciled.scene.wires.some((wire) => wire.id === wireId)
+        ? { kind: "wire", id: wireId }
+        : null
+    );
     setDraftWirePoints([]);
     setCursorPoint(null);
     setHasCustomLayout(true);
@@ -3832,7 +4244,18 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     nextPlaneSettings: BuilderPlaneSettings = planeSettingsRef.current
   ) {
     const resolvedPlaneSettings = sanitizePlaneSettings(nextPlaneSettings);
-    const resolvedScene = clampSceneToPlane(cloneScene(nextScene), resolvedPlaneSettings);
+    // Migracion de geometria: alinea cada componente a la reticula de su borne
+    // de entrada y mueve los cables con el. Es idempotente y hace que los
+    // bornes izquierdo/derecho de dos simbolos alineados coincidan en vertical.
+    const clampedScene = clampSceneToPlane(cloneScene(nextScene), resolvedPlaneSettings);
+    const reconciled = reconcileWireTopology(clampedScene, resolvedPlaneSettings);
+    const resolvedScene = reconciled.scene;
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+      );
+    }
 
     nextId.current = getNextIdValueFromScene(resolvedScene);
     planeSettingsRef.current = resolvedPlaneSettings;
@@ -3844,7 +4267,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     clearWireInteraction();
     setSelection(null);
     setIsWireAuthoringEnabled(true);
-    setIsPanModeEnabled(true);
     paletteDragState.current = null;
     paletteDragMovedRef.current = false;
     panState.current = null;
@@ -3861,24 +4283,40 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   useEffect(() => {
-    nextId.current = 0;
     const pendingLoadedScene = pendingLoadedSceneRef.current;
     const nextProgramSignature = JSON.stringify(program ?? { rungs: [] });
     const shouldUsePendingScene = pendingLoadedScene !== null && pendingLoadedScene.signature === nextProgramSignature;
+    // Si el usuario ya tiene un layout propio y el programa no cambio, no se
+    // reconstruye la escena: mover/borrar el componente por defecto debe
+    // persistir. Solo se reconstruye al cargar o cuando cambia el programa.
+    const shouldKeepCurrentScene = !shouldUsePendingScene
+      && hasCustomLayout
+      && nextProgramSignature === lastProgramSignature.current;
     const nextPlaneSettings = shouldUsePendingScene
       ? pendingLoadedScene.planeSettings
       : planeSettingsRef.current;
     const nextAvailableTags = mergeInstructionBindingTags(availableTags, componentsRef.current);
     const nextScene = shouldUsePendingScene
       ? cloneScene(pendingLoadedScene.scene)
-      : buildSceneFromProgram(nextId, nextAvailableTags, program);
+      : shouldKeepCurrentScene
+        ? { components: componentsRef.current, wires: wiresRef.current }
+        : buildSceneFromProgram(nextId, nextAvailableTags, program);
     const nextDerivedState = deriveProgram(nextScene.components, nextScene.wires);
+
+    if (!shouldKeepCurrentScene) {
+      nextId.current = 0;
+    }
 
     if (shouldUsePendingScene) {
       pendingLoadedSceneRef.current = null;
     }
 
-    applySceneState(nextScene, JSON.stringify(nextDerivedState.program), shouldUsePendingScene, nextPlaneSettings);
+    applySceneState(
+      nextScene,
+      JSON.stringify(nextDerivedState.program),
+      shouldUsePendingScene || shouldKeepCurrentScene,
+      nextPlaneSettings
+    );
   }, [availableTags, program]);
 
   function dragComponentToClientPoint(componentId: string, clientX: number, clientY: number): boolean {
@@ -3899,24 +4337,45 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return false;
     }
 
+    const padding = getComponentPlanePadding(planeSettingsRef.current);
     const nextX = clamp(
       point.x - drag.offsetX,
-      16,
-      planeSettingsRef.current.width - COMPONENT_WIDTH - 16
+      padding,
+      MAX_PLANE_WIDTH - COMPONENT_WIDTH - padding
     );
     const nextY = clamp(
       point.y - drag.offsetY,
-      16,
-      planeSettingsRef.current.height - COMPONENT_HEIGHT - 16
+      padding,
+      MAX_PLANE_HEIGHT - COMPONENT_HEIGHT - padding
     );
 
     if (nextX === movedComponent.x && nextY === movedComponent.y) {
       return false;
     }
 
+    // Si el componente se acerca al borde inferior/derecho, el plano crece en
+    // vez de aplastarlo contra el limite. Antes las filas de abajo se apilaban
+    // unas sobre otras al no caber.
+    const requiredWidth = nextX + COMPONENT_WIDTH + padding;
+    const requiredHeight = nextY + COMPONENT_HEIGHT + padding;
+    let currentPlaneSettings = planeSettingsRef.current;
+
+    if (
+      requiredWidth > currentPlaneSettings.width
+      || requiredHeight > currentPlaneSettings.height
+    ) {
+      currentPlaneSettings = sanitizePlaneSettings({
+        ...currentPlaneSettings,
+        height: Math.max(currentPlaneSettings.height, requiredHeight),
+        width: Math.max(currentPlaneSettings.width, requiredWidth)
+      });
+      planeSettingsRef.current = currentPlaneSettings;
+      setPlaneSettings(currentPlaneSettings);
+    }
+
     const nextComponent = clampComponentToPlane(
       { ...movedComponent, x: nextX, y: nextY },
-      planeSettingsRef.current
+      currentPlaneSettings
     );
     const nextComponents = componentsRef.current.map((component) =>
       component.id === nextComponent.id ? nextComponent : component
@@ -3952,25 +4411,35 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    if (!componentDragMovedRef.current) {
+      return;
+    }
+
     const snappedComponent = snapComponentToPlaneGrid(
       clampComponentToPlane(releasedComponent, planeSettingsRef.current),
       planeSettingsRef.current
     );
 
-    if (snappedComponent.x === releasedComponent.x && snappedComponent.y === releasedComponent.y) {
-      return;
-    }
-
     const nextComponents = componentsRef.current.map((component) =>
       component.id === snappedComponent.id ? snappedComponent : component
     );
-    const nextWires = moveAttachedWireEndpoints(wiresRef.current, releasedComponent, snappedComponent);
+    const movedWires = moveAttachedWireEndpoints(wiresRef.current, releasedComponent, snappedComponent);
+    const reconciled = reconcileWireTopology(
+      { components: nextComponents, wires: movedWires },
+      planeSettingsRef.current
+    );
 
-    componentsRef.current = nextComponents;
-    wiresRef.current = nextWires;
-    setComponents(nextComponents);
-    setWires(nextWires);
+    componentsRef.current = reconciled.scene.components;
+    wiresRef.current = reconciled.scene.wires;
+    setComponents(reconciled.scene.components);
+    setWires(reconciled.scene.wires);
     setHasCustomLayout(true);
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+      );
+    }
   }
 
   useEffect(() => {
@@ -4003,16 +4472,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       }
 
       if (panState.current && stageScrollRef.current) {
-        const nextScrollLeft = panState.current.scrollLeft - (event.clientX - panState.current.startX);
-        const nextScrollTop = panState.current.scrollTop - (event.clientY - panState.current.startY);
+        const deltaX = event.clientX - panState.current.startX;
+        const deltaY = event.clientY - panState.current.startY;
 
-        if (
-          nextScrollLeft !== stageScrollRef.current.scrollLeft
-          || nextScrollTop !== stageScrollRef.current.scrollTop
-        ) {
-          didPanDuringMouseDownRef.current = true;
+        // Un click con temblor de 1 px no debe mover el plano. Solo se empieza
+        // a panear tras superar el umbral.
+        if (!didPanDuringMouseDownRef.current && Math.hypot(deltaX, deltaY) < 4) {
+          return;
         }
 
+        const nextScrollLeft = Math.round(panState.current.scrollLeft - deltaX);
+        const nextScrollTop = Math.round(panState.current.scrollTop - deltaY);
+
+        didPanDuringMouseDownRef.current = true;
         stageScrollRef.current.scrollLeft = nextScrollLeft;
         stageScrollRef.current.scrollTop = nextScrollTop;
         return;
@@ -4027,44 +4499,44 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
         let didMove = false;
 
-        setWires((currentWires) =>
-          currentWires.map((wire) => {
-            if (wire.id !== wirePointDragState.current?.wireId) {
-              return wire;
-            }
+        const nextWires = wiresRef.current.map((wire) => {
+          if (wire.id !== wirePointDragState.current?.wireId) {
+            return wire;
+          }
 
-            const pointIndex = wirePointDragState.current.pointIndex;
-            const currentPoint = wire.points[pointIndex];
+          const pointIndex = wirePointDragState.current.pointIndex;
+          const currentPoint = wire.points[pointIndex];
 
-            if (!currentPoint) {
-              return wire;
-            }
+          if (!currentPoint) {
+            return wire;
+          }
 
-            const nextPoint = snapPointToGrid(point, planeSettingsRef.current);
+          const nextPoint = snapPointToGrid(point, planeSettingsRef.current);
 
-            if (pointsAreClose(currentPoint, nextPoint)) {
-              return wire;
-            }
+          if (pointsAreClose(currentPoint, nextPoint)) {
+            return wire;
+          }
 
-            const nextPoints = isWireEndpointIndex(pointIndex, wire.points.length)
-              ? repositionWireEndpointOrthogonally(
-                wire.points,
-                pointIndex,
-                nextPoint,
-                getWireEndpointPreferredAxis(wire, pointIndex, componentsRef.current, nextPoint)
-              )
-              : (() => {
-                const updatedPoints = [...wire.points];
-                updatedPoints[pointIndex] = nextPoint;
-                return updatedPoints;
-              })();
-            didMove = true;
+          const nextPoints = isWireEndpointIndex(pointIndex, wire.points.length)
+            ? repositionWireEndpointOrthogonally(
+              wire.points,
+              pointIndex,
+              nextPoint,
+              getWireEndpointPreferredAxis(wire, pointIndex, componentsRef.current, nextPoint)
+            )
+            : (() => {
+              const updatedPoints = [...wire.points];
+              updatedPoints[pointIndex] = nextPoint;
+              return updatedPoints;
+            })();
+          didMove = true;
 
-            return { ...wire, points: nextPoints };
-          })
-        );
+          return { ...wire, points: cleanWirePath(nextPoints) };
+        });
 
         if (didMove) {
+          wiresRef.current = nextWires;
+          setWires(nextWires);
           setSelection({ kind: "wire", id: wirePointDragState.current.wireId });
           setHasCustomLayout(true);
         }
@@ -4107,56 +4579,76 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
       if (releasedWirePointDragState) {
         const droppedPoint = getCanvasPointFromClient(event.clientX, event.clientY);
+        const currentWires = wiresRef.current;
+        const releasedWire = currentWires.find((wire) => wire.id === releasedWirePointDragState.wireId);
 
-        setWires((currentWires) => {
-          const releasedWire = currentWires.find((wire) => wire.id === releasedWirePointDragState.wireId);
-
-          if (!releasedWire || !isWireEndpointIndex(releasedWirePointDragState.pointIndex, releasedWire.points.length)) {
-            return currentWires;
-          }
-
+        if (
+          releasedWire
+          && isWireEndpointIndex(releasedWirePointDragState.pointIndex, releasedWire.points.length)
+        ) {
           const currentPoint = releasedWire.points[releasedWirePointDragState.pointIndex];
 
-          if (!currentPoint) {
-            return currentWires;
-          }
-
-          const snapTarget = resolveSnapTarget(
-            droppedPoint ?? currentPoint,
-            componentsRef.current,
-            currentWires,
-            planeSettingsRef.current,
-            { excludeWireId: releasedWire.id }
-          );
-          const nextWires = snapTarget.wireAnchor ? applyWireAnchors(currentWires, [snapTarget.wireAnchor]) : currentWires;
-
-          return nextWires.map((wire) => {
-            if (wire.id !== releasedWire.id) {
-              return wire;
-            }
-
-            const nextPoints = repositionWireEndpointOrthogonally(
-              wire.points,
-              releasedWirePointDragState.pointIndex,
-              snapTarget.point,
-              getWireEndpointPreferredAxis(wire, releasedWirePointDragState.pointIndex, componentsRef.current, snapTarget.point)
+          if (currentPoint) {
+            const snapTarget = resolveSnapTarget(
+              droppedPoint ?? currentPoint,
+              componentsRef.current,
+              currentWires,
+              planeSettingsRef.current,
+              { excludeWireId: releasedWire.id }
             );
+            const anchoredWires = snapTarget.wireAnchor
+              ? applyWireAnchors(currentWires, [snapTarget.wireAnchor])
+              : currentWires;
+            const nextWires = anchoredWires.map((wire) => {
+              if (wire.id !== releasedWire.id) {
+                return wire;
+              }
 
-            if (releasedWirePointDragState.pointIndex === 0) {
+              const nextPoints = repositionWireEndpointOrthogonally(
+                wire.points,
+                releasedWirePointDragState.pointIndex,
+                snapTarget.point,
+                getWireEndpointPreferredAxis(
+                  wire,
+                  releasedWirePointDragState.pointIndex,
+                  componentsRef.current,
+                  snapTarget.point
+                )
+              );
+
+              if (releasedWirePointDragState.pointIndex === 0) {
+                return {
+                  ...wire,
+                  points: simplifyWirePoints(nextPoints),
+                  startPortId: snapTarget.portId
+                };
+              }
+
               return {
                 ...wire,
-                points: simplifyWirePoints(nextPoints),
-                startPortId: snapTarget.portId
+                endPortId: snapTarget.portId,
+                points: simplifyWirePoints(nextPoints)
               };
+            });
+            const reconciled = reconcileWireTopology(
+              { components: componentsRef.current, wires: nextWires },
+              planeSettingsRef.current
+            );
+
+            wiresRef.current = reconciled.scene.wires;
+            setWires(reconciled.scene.wires);
+
+            if (!reconciled.scene.wires.some((wire) => wire.id === releasedWire.id)) {
+              setSelection(null);
             }
 
-            return {
-              ...wire,
-              endPortId: snapTarget.portId,
-              points: simplifyWirePoints(nextPoints)
-            };
-          });
-        });
+            if (reconciled.removedWireIds.length > 0) {
+              setCircuitSnapshotStatus(
+                `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+              );
+            }
+          }
+        }
       }
 
       if (releasedDragState) {
@@ -4191,7 +4683,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const connectivityComponents = draggingComponentId
     ? components.filter((component) => component.id !== draggingComponentId)
     : components;
-  const derivedState = deriveProgram(connectivityComponents, wires);
+  const derivedState = useMemo(
+    () => deriveProgram(connectivityComponents, wires),
+    [connectivityComponents, wires]
+  );
   const electricalState = computeElectricalState(
     connectivityComponents,
     wires,
@@ -4202,13 +4697,26 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     electricalElapsedMs
   );
   const derivedProgramSignature = JSON.stringify(derivedState.program);
+  const terminalByPortMap = useMemo(() => buildTerminalPortMap(components), [components]);
+  const resolvedWires = useMemo(
+    () => wires.map((wire) => ({
+      ...wire,
+      points: resolveWirePointsWithMap(wire, terminalByPortMap)
+    })),
+    [terminalByPortMap, wires]
+  );
+  const showTerminalDebug = typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("debugTerminals") === "1";
+  const terminalDebugNodes = showTerminalDebug
+    ? components.flatMap((component) => getComponentTerminals(component))
+    : [];
   const selectedComponent = selection?.kind === "component"
     ? components.find((component) => component.id === selection.id) ?? null
     : null;
   const selectedWire = selection?.kind === "wire"
-    ? wires.find((wire) => wire.id === selection.id) ?? null
+    ? resolvedWires.find((wire) => wire.id === selection.id) ?? null
     : null;
-  const selectedWireInspection = selectedWire ? inspectWire(selectedWire, components) : null;
+  const selectedWireInspection = selectedWire ? inspectWire(selectedWire, components, resolvedWires) : null;
   const selectedWireStatus = selectedWireInspection ? getWireStatusMeta(selectedWireInspection.status) : null;
   const hasActiveWireDraft = draftWirePoints.length > 0;
   const wireTerminalsEnabled = isWireAuthoringEnabled || wireReconnectTarget !== null;
@@ -4216,8 +4724,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const scaledCanvasWidth = planeSettings.width * canvasZoom;
   const scaledCanvasHeight = planeSettings.height * canvasZoom;
   const canvasViewportStyle: CSSProperties = {
-    height: scaledCanvasHeight,
-    width: scaledCanvasWidth
+    height: Math.ceil(scaledCanvasHeight),
+    width: Math.ceil(scaledCanvasWidth)
   };
   const canvasStyle: CSSProperties = {
     height: planeSettings.height,
@@ -4229,7 +4737,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     ? [...draftWirePoints, cursorPoint]
     : draftWirePoints;
   const wireDisplayNodes = Array.from(
-    wires.reduce((nodesByPointKey, wire) => {
+    resolvedWires.reduce((nodesByPointKey, wire) => {
       const isSelected = selection?.kind === "wire" && selection.id === wire.id;
 
       wire.points.forEach((point, index) => {
@@ -4599,6 +5107,25 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setIsPanModeEnabled((currentValue) => !currentValue);
   }
 
+  function resetPlaneDraftField(field: keyof typeof planeDraft) {
+    setPlaneDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: String(planeSettingsRef.current[field])
+    }));
+  }
+
+  function commitPlaneDraft(field: keyof typeof planeDraft, rawInput = planeDraft[field]) {
+    const rawValue = rawInput.trim();
+    const numericValue = Number(rawValue);
+
+    if (rawValue === "" || !Number.isFinite(numericValue)) {
+      resetPlaneDraftField(field);
+      return;
+    }
+
+    updatePlaneDimensions({ [field]: numericValue });
+  }
+
   function updatePlaneDimensions(nextPartialSettings: Partial<BuilderPlaneSettings>) {
     if (running) {
       return;
@@ -4619,7 +5146,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     const nextScene = nextPlaneSettings.gridSpacing === previousPlaneSettings.gridSpacing
-      ? clampSceneToPlane(
+      ? clampSceneBounds(
         { components: componentsRef.current, wires: wiresRef.current },
         nextPlaneSettings
       )
@@ -4628,13 +5155,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         previousPlaneSettings,
         nextPlaneSettings
       );
+    const resolvedScene = nextPlaneSettings.gridSpacing === previousPlaneSettings.gridSpacing
+      ? nextScene
+      : reconcileWireTopology(nextScene, nextPlaneSettings).scene;
 
     planeSettingsRef.current = nextPlaneSettings;
-    componentsRef.current = nextScene.components;
-    wiresRef.current = nextScene.wires;
+    componentsRef.current = resolvedScene.components;
+    wiresRef.current = resolvedScene.wires;
     setPlaneSettings(nextPlaneSettings);
-    setComponents(nextScene.components);
-    setWires(nextScene.wires);
+    setComponents(resolvedScene.components);
+    setWires(resolvedScene.wires);
     clearWireInteraction();
     setHasCustomLayout(true);
   }
@@ -4649,7 +5179,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         const nextPoints = updatePoints(wire.points);
         return {
           ...wire,
-          points: nextPoints.length >= 2 ? normalizeWirePoints(nextPoints, planeSettingsRef.current) : wire.points
+          points: nextPoints.length >= 2 ? cleanWirePath(nextPoints) : wire.points
         };
       })
     );
@@ -4806,49 +5336,64 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
-    setWires((currentWires) => {
-      const snapTarget = resolveSnapTarget(
-        point,
-        componentsRef.current,
-        currentWires,
-        planeSettingsRef.current,
-        { excludeWireId: wireReconnectTarget.wireId }
+    const currentWires = wiresRef.current;
+    const snapTarget = resolveSnapTarget(
+      point,
+      componentsRef.current,
+      currentWires,
+      planeSettingsRef.current,
+      { excludeWireId: wireReconnectTarget.wireId }
+    );
+    const anchoredWires = snapTarget.wireAnchor
+      ? applyWireAnchors(currentWires, [snapTarget.wireAnchor], planeSettingsRef.current)
+      : currentWires;
+    const nextWires = anchoredWires.map((wire) => {
+      if (wire.id !== wireReconnectTarget.wireId || wire.points.length === 0) {
+        return wire;
+      }
+
+      const endpointIndex = wireReconnectTarget.endpoint === "start" ? 0 : wire.points.length - 1;
+      const nextPoints = repositionWireEndpointOrthogonally(
+        wire.points,
+        endpointIndex,
+        snapTarget.point,
+        getWireEndpointPreferredAxis(wire, endpointIndex, componentsRef.current, snapTarget.point)
       );
-      const nextWires = snapTarget.wireAnchor
-        ? applyWireAnchors(currentWires, [snapTarget.wireAnchor], planeSettingsRef.current)
-        : currentWires;
 
-      return nextWires.map((wire) => {
-        if (wire.id !== wireReconnectTarget.wireId || wire.points.length === 0) {
-          return wire;
-        }
-
-        const endpointIndex = wireReconnectTarget.endpoint === "start" ? 0 : wire.points.length - 1;
-        const nextPoints = repositionWireEndpointOrthogonally(
-          wire.points,
-          endpointIndex,
-          snapTarget.point,
-          getWireEndpointPreferredAxis(wire, endpointIndex, componentsRef.current, snapTarget.point)
-        );
-
-        if (wireReconnectTarget.endpoint === "start") {
-          return {
-            ...wire,
-            points: simplifyWirePoints(nextPoints),
-            startPortId: snapTarget.portId
-          };
-        }
-
+      if (wireReconnectTarget.endpoint === "start") {
         return {
           ...wire,
-          endPortId: snapTarget.portId,
-          points: simplifyWirePoints(nextPoints)
+          points: simplifyWirePoints(nextPoints),
+          startPortId: snapTarget.portId
         };
-      });
+      }
+
+      return {
+        ...wire,
+        endPortId: snapTarget.portId,
+        points: simplifyWirePoints(nextPoints)
+      };
     });
-    setSelection({ kind: "wire", id: wireReconnectTarget.wireId });
+    const reconciled = reconcileWireTopology(
+      { components: componentsRef.current, wires: nextWires },
+      planeSettingsRef.current
+    );
+
+    wiresRef.current = reconciled.scene.wires;
+    setWires(reconciled.scene.wires);
+    setSelection(
+      reconciled.scene.wires.some((wire) => wire.id === wireReconnectTarget.wireId)
+        ? { kind: "wire", id: wireReconnectTarget.wireId }
+        : null
+    );
     setHasCustomLayout(true);
     setWireReconnectTarget(null);
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+      );
+    }
   }
 
   function disconnectWireEndpoint(wireId: string, endpoint: WireEndpointKey) {
@@ -4873,8 +5418,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         nextPoints[endpointIndex] = detachedPoint;
 
         return endpoint === "start"
-          ? { ...wire, points: normalizeWirePoints(nextPoints, planeSettingsRef.current), startPortId: null }
-          : { ...wire, endPortId: null, points: normalizeWirePoints(nextPoints, planeSettingsRef.current) };
+          ? { ...wire, points: cleanWirePath(nextPoints), startPortId: null }
+          : { ...wire, endPortId: null, points: cleanWirePath(nextPoints) };
       })
     );
     setSelection({ kind: "wire", id: wireId });
@@ -5079,7 +5624,23 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function deleteComponentById(componentId: string) {
-    setComponents((currentComponents) => currentComponents.filter((component) => component.id !== componentId));
+    const nextComponents = componentsRef.current.filter((component) => component.id !== componentId);
+    const reconciled = reconcileWireTopology(
+      { components: nextComponents, wires: wiresRef.current },
+      planeSettingsRef.current
+    );
+
+    componentsRef.current = reconciled.scene.components;
+    wiresRef.current = reconciled.scene.wires;
+    setComponents(reconciled.scene.components);
+    setWires(reconciled.scene.wires);
+    setHasCustomLayout(true);
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+      );
+    }
   }
 
   function handleDeleteSelection() {
@@ -5147,18 +5708,31 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleSaveCircuit() {
+    const reconciled = reconcileWireTopology(
+      { components: componentsRef.current, wires: wiresRef.current },
+      planeSettingsRef.current
+    );
+    const nextDerivedState = deriveProgram(reconciled.scene.components, reconciled.scene.wires);
     const snapshot = createCircuitSnapshot(
-      components,
-      wires,
-      derivedState.program,
+      reconciled.scene.components,
+      reconciled.scene.wires,
+      nextDerivedState.program,
       builderTags,
       scanIntervalMs,
-		planeSettingsRef.current,
+      planeSettingsRef.current,
       sheetMetadata
     );
 
+    componentsRef.current = reconciled.scene.components;
+    wiresRef.current = reconciled.scene.wires;
+    setComponents(reconciled.scene.components);
+    setWires(reconciled.scene.wires);
     downloadCircuitSnapshot(snapshot);
-    setCircuitSnapshotStatus(`Saved ${snapshot.name}.`);
+    setCircuitSnapshotStatus(
+      reconciled.removedWireIds.length > 0
+        ? `Saved ${snapshot.name}. Removed ${reconciled.removedWireIds.length} loose wire(s).`
+        : `Saved ${snapshot.name}.`
+    );
   }
 
   function handleLoadCircuitClick() {
@@ -5181,7 +5755,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         height: snapshot.settings.height,
         width: snapshot.settings.width
       });
-      const nextScene = clampSceneToPlane(cloneScene({ components: snapshot.components, wires: snapshot.wires }), nextPlaneSettings);
+      const clampedScene = clampSceneToPlane(
+        cloneScene({ components: snapshot.components, wires: snapshot.wires }),
+        nextPlaneSettings
+      );
+      const reconciled = reconcileWireTopology(clampedScene, nextPlaneSettings);
+      const nextScene = reconciled.scene;
       const nextDerivedState = deriveProgram(nextScene.components, nextScene.wires);
       const nextProgramSignature = JSON.stringify(nextDerivedState.program);
       const nextTags = mergeInstructionBindingTags(snapshot.tags, nextScene.components);
@@ -5219,7 +5798,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     if (
       eventTarget instanceof Element
       && eventTarget.closest(
-        ".freeplay-port, .freeplay-component__glyph-handle, .freeplay-component__press-target, .freeplay-wire__node, .freeplay-wire__hit, input, textarea, select, option, button"
+        ".freeplay-component, .freeplay-wire, .freeplay-component-menu, .freeplay-wire-menu, .freeplay-port, .freeplay-wire__node, .freeplay-wire__hit, input, textarea, select, option, button"
       )
     ) {
       return;
@@ -5237,7 +5816,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleComponentHandleMouseDown(event: ReactMouseEvent<HTMLDivElement>, componentId: string) {
-    if (running) {
+    if (running || event.button !== 0) {
       componentDragMovedRef.current = false;
       return;
     }
@@ -5476,12 +6055,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       planeSettingsRef.current
     );
 
-    setComponents((currentComponents) =>
-      currentComponents.map((component) => (component.id === componentId ? nextComponent : component))
+    const nextComponents = componentsRef.current.map((component) =>
+      component.id === componentId ? nextComponent : component
     );
     // Al rotar, los cables NO siguen: los que quedarian sueltos se eliminan
     // para no dejar conexiones falsas ni cables desalineados.
-    setWires((currentWires) => removeWiresAttachedToComponent(currentComponent, currentWires));
+    const remainingWires = removeWiresAttachedToComponent(currentComponent, wiresRef.current);
+    const reconciled = reconcileWireTopology(
+      { components: nextComponents, wires: remainingWires },
+      planeSettingsRef.current
+    );
+
+    componentsRef.current = reconciled.scene.components;
+    wiresRef.current = reconciled.scene.wires;
+    setComponents(reconciled.scene.components);
+    setWires(reconciled.scene.wires);
     setHasCustomLayout(true);
   }
 
@@ -5756,9 +6344,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   max={MAX_PLANE_WIDTH}
                   step="40"
                   className="builder-number-input"
-                  value={planeSettings.width}
+                  value={planeDraft.width}
                   disabled={layoutEditingLocked}
-                  onChange={(event) => updatePlaneDimensions({ width: Number(event.target.value) })}
+                  onChange={(event) => setPlaneDraft((current) => ({ ...current, width: event.target.value }))}
+                  onBlur={(event) => commitPlaneDraft("width", event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.currentTarget.value = String(planeSettingsRef.current.width);
+                      resetPlaneDraftField("width");
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
               </label>
 
@@ -5770,9 +6370,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   max={MAX_PLANE_HEIGHT}
                   step="40"
                   className="builder-number-input"
-                  value={planeSettings.height}
+                  value={planeDraft.height}
                   disabled={layoutEditingLocked}
-                  onChange={(event) => updatePlaneDimensions({ height: Number(event.target.value) })}
+                  onChange={(event) => setPlaneDraft((current) => ({ ...current, height: event.target.value }))}
+                  onBlur={(event) => commitPlaneDraft("height", event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.currentTarget.value = String(planeSettingsRef.current.height);
+                      resetPlaneDraftField("height");
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
               </label>
 
@@ -5784,9 +6396,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   max={MAX_GRID_SPACING}
                   step="2"
                   className="builder-number-input"
-                  value={planeSettings.gridSpacing}
+                  value={planeDraft.gridSpacing}
                   disabled={layoutEditingLocked}
-                  onChange={(event) => updatePlaneDimensions({ gridSpacing: Number(event.target.value) })}
+                  onChange={(event) => setPlaneDraft((current) => ({ ...current, gridSpacing: event.target.value }))}
+                  onBlur={(event) => commitPlaneDraft("gridSpacing", event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.currentTarget.value = String(planeSettingsRef.current.gridSpacing);
+                      resetPlaneDraftField("gridSpacing");
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
               </label>
             </div>
@@ -5840,44 +6464,48 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           </section>
 
           <section className="builder-card builder-card--sheet">
-            <div className="builder-card__title">Hoja</div>
+            <div className="builder-card__title">Sheet</div>
 
             <label className="builder-slider-field">
-              <span className="field__label">Proyecto</span>
+              <span className="field__label">Project</span>
               <input
                 type="text"
                 className="builder-number-input"
+                maxLength={44}
                 value={sheetMetadata.projectName}
                 onChange={(event) => setSheetMetadata((current) => ({ ...current, projectName: event.target.value }))}
               />
             </label>
 
             <label className="builder-slider-field">
-              <span className="field__label">Fecha</span>
+              <span className="field__label">Date</span>
               <input
                 type="text"
                 className="builder-number-input"
-                placeholder="AAAA-MM-DD"
+                maxLength={10}
+                placeholder="YYYY-MM-DD"
                 value={sheetMetadata.date}
                 onChange={(event) => setSheetMetadata((current) => ({ ...current, date: event.target.value }))}
               />
             </label>
 
             <label className="builder-slider-field">
-              <span className="field__label">Escala</span>
+              <span className="field__label">Scale</span>
               <input
                 type="text"
                 className="builder-number-input"
+                maxLength={12}
                 value={sheetMetadata.scale}
                 onChange={(event) => setSheetMetadata((current) => ({ ...current, scale: event.target.value }))}
               />
             </label>
 
             <label className="builder-slider-field">
-              <span className="field__label">Página</span>
+              <span className="field__label">Page</span>
               <input
                 type="text"
                 className="builder-number-input"
+                maxLength={6}
                 value={sheetMetadata.page}
                 onChange={(event) => setSheetMetadata((current) => ({ ...current, page: event.target.value }))}
               />
@@ -6229,11 +6857,18 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   <div className="freeplay-plane-origin">0,0</div>
                 </div>
 
-                <svg className="freeplay-svg" viewBox={`0 0 ${planeSettings.width} ${planeSettings.height}`} aria-hidden="true">
+                <svg
+                  className="freeplay-svg"
+                  viewBox={`0 0 ${planeSettings.width} ${planeSettings.height}`}
+                  preserveAspectRatio="none"
+                  shapeRendering="geometricPrecision"
+                  style={{ height: planeSettings.height, width: planeSettings.width }}
+                  aria-hidden="true"
+                >
                   <SheetLayer planeSettings={planeSettings} sheet={sheetMetadata} />
-                  {wires.map((wire, wireIndex) => {
+                  {resolvedWires.map((wire) => {
                   const pointString = wire.points.map((point) => `${point.x},${point.y}`).join(" ");
-                  const wireHops = findWireCrossings(wire, wireIndex, wires);
+                  const wireHops = findWireCrossings(wire, resolvedWires);
                   const wirePathD = buildWirePathD(wire.points, wireHops);
                   const isSelected = selection?.kind === "wire" && selection.id === wire.id;
                   const isEnergized = running && electricalState.energizedWireIds.has(wire.id);
@@ -6458,6 +7093,32 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           ["--lamp-symbol-color" as "--lamp-symbol-color"]: lampGlowColor.symbol
                         } : {})
                       }}
+                      onLostPointerCapture={() => handleComponentHandleLostCapture(component.id)}
+                      onPointerCancel={(event) => handleComponentHandlePointerRelease(event, component.id)}
+                      onPointerDown={(event) => {
+                        const target = event.target;
+
+                        if (
+                          target instanceof Element
+                          && target.closest(
+                            ".freeplay-port, .freeplay-component__press-target, .freeplay-component-menu, .freeplay-wire-menu, input, textarea, select, option, button"
+                          )
+                        ) {
+                          return;
+                        }
+
+                        handleComponentHandlePointerDown(event, component.id);
+                      }}
+                      onPointerMove={(event) => handleComponentHandlePointerMove(event, component.id)}
+                      onPointerUp={(event) => handleComponentHandlePointerRelease(event, component.id)}
+                      onClick={(event) => {
+                        // Un click en la etiqueta/badge tambien selecciona; sin
+                        // esto el click sube al canvas y limpia la seleccion
+                        // inmediatamente (el panel se encendia y apagaba).
+                        event.stopPropagation();
+                        setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+                        setSelection({ kind: "component", id: component.id });
+                      }}
                       onContextMenu={(event) => {
                         if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
                           return;
@@ -6527,7 +7188,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       <div
                         className={`freeplay-component__glyph-handle ${manualControl ? "freeplay-component__glyph-handle--manual" : ""}`.trim()}
                         style={glyphHitboxStyle}
-                        onLostPointerCapture={() => handleComponentHandleLostCapture(component.id)}
                         onClick={(event) => {
                           event.stopPropagation();
                           setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
@@ -6553,10 +7213,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                           rotateComponent(component.id, 1);
                         }}
-                        onPointerCancel={(event) => handleComponentHandlePointerRelease(event, component.id)}
-                        onPointerDown={(event) => handleComponentHandlePointerDown(event, component.id)}
-                        onPointerMove={(event) => handleComponentHandlePointerMove(event, component.id)}
-                        onPointerUp={(event) => handleComponentHandlePointerRelease(event, component.id)}
                       />
                       {isMomentaryPushButtonType(component.type) ? (
                         <button
@@ -6771,6 +7427,26 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     </div>
                   );
                 })() : null}
+                {showTerminalDebug ? (
+                  <svg
+                    className="freeplay-debug-overlay"
+                    viewBox={`0 0 ${planeSettings.width} ${planeSettings.height}`}
+                    preserveAspectRatio="none"
+                    shapeRendering="geometricPrecision"
+                    style={{ height: planeSettings.height, width: planeSettings.width }}
+                    aria-hidden="true"
+                  >
+                    {terminalDebugNodes.map((terminal) => (
+                      <circle
+                        key={`terminal-debug-${terminal.portId}`}
+                        className="freeplay-terminal-debug"
+                        cx={terminal.x}
+                        cy={terminal.y}
+                        r={3}
+                      />
+                    ))}
+                  </svg>
+                ) : null}
               </div>
             </div>
           </div>

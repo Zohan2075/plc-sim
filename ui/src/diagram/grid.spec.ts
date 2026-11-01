@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  clampSceneBounds,
+  cleanWirePath,
   createOrthogonalPath,
   getComponentPlanePadding,
   getComponentPlaneSnapOffset,
@@ -139,6 +141,43 @@ describe("normalizeWirePoints / simplifyWirePoints", () => {
       { x: 180, y: 180 },
       { x: 540, y: 180 }
     ]);
+  });
+});
+
+describe("cleanWirePath", () => {
+  it("removes a 2 px jog without moving the endpoints", () => {
+    expect(cleanWirePath([
+      { x: 756, y: 234 },
+      { x: 756, y: 236 },
+      { x: 666, y: 234 }
+    ])).toEqual([
+      { x: 756, y: 234 },
+      { x: 666, y: 234 }
+    ]);
+  });
+
+  it("keeps real bends", () => {
+    expect(cleanWirePath([
+      { x: 180, y: 180 },
+      { x: 360, y: 180 },
+      { x: 360, y: 360 }
+    ])).toEqual([
+      { x: 180, y: 180 },
+      { x: 360, y: 180 },
+      { x: 360, y: 360 }
+    ]);
+  });
+});
+
+describe("clampSceneBounds", () => {
+  it("does not move a component that already fits, only clamps the out-of-bounds one", () => {
+    const planeSettings = DEFAULT_PLANE_SETTINGS;
+    const inBounds = makeComponent({ id: "in", x: 180, y: 180 });
+    const outside = makeComponent({ id: "out", x: planeSettings.width + 500, y: 180 });
+    const clamped = clampSceneBounds({ components: [inBounds, outside], wires: [] }, planeSettings);
+
+    expect(clamped.components[0]).toEqual(inBounds);
+    expect(clamped.components[1]!.x).toBeLessThanOrEqual(planeSettings.width - 160);
   });
 });
 

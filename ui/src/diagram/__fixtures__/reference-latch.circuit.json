@@ -1,0 +1,811 @@
+{
+  "components": [
+    {
+      "id": "builder-component-0",
+      "label": "L1-L2",
+      "rotation": 0,
+      "tag": null,
+      "type": "POWER_SOURCE",
+      "usesCustomLabel": false,
+      "x": 820,
+      "y": 39,
+      "sourceVoltage": 120
+    },
+    {
+      "id": "builder-component-1",
+      "label": "SW-1",
+      "rotation": 3,
+      "tag": null,
+      "type": "SWITCH_1P",
+      "usesCustomLabel": false,
+      "x": 136,
+      "y": 111,
+      "isClosed": true
+    },
+    {
+      "id": "builder-component-3",
+      "label": "PB-NC",
+      "rotation": 0,
+      "tag": null,
+      "type": "PUSH_BUTTON_NC",
+      "usesCustomLabel": false,
+      "x": 298,
+      "y": 183,
+      "isPressed": false
+    },
+    {
+      "id": "builder-component-5",
+      "label": "PB-NO",
+      "rotation": 0,
+      "tag": null,
+      "type": "PUSH_BUTTON_NO",
+      "usesCustomLabel": false,
+      "x": 514,
+      "y": 183,
+      "isPressed": false
+    },
+    {
+      "id": "builder-component-7",
+      "label": "M",
+      "rotation": 0,
+      "tag": "__builder_label__:M",
+      "type": "XIC",
+      "usesCustomLabel": true,
+      "x": 514,
+      "y": 291
+    },
+    {
+      "id": "builder-component-10",
+      "label": "M",
+      "rotation": 0,
+      "tag": "__builder_label__:M",
+      "type": "OTE",
+      "usesCustomLabel": true,
+      "x": 748,
+      "y": 183
+    },
+    {
+      "id": "builder-component-12",
+      "label": "LAMP",
+      "rotation": 0,
+      "tag": null,
+      "type": "LAMP",
+      "usesCustomLabel": false,
+      "x": 748,
+      "y": 291,
+      "lampGlowColor": "green"
+    },
+    {
+      "id": "builder-component-14",
+      "label": "OL-1",
+      "rotation": 0,
+      "tag": null,
+      "type": "OL_CONTACT",
+      "usesCustomLabel": false,
+      "x": 1090,
+      "y": 183,
+      "isClosed": true
+    },
+    {
+      "id": "builder-component-15",
+      "label": "OL-2",
+      "rotation": 0,
+      "tag": null,
+      "type": "OL_CONTACT",
+      "usesCustomLabel": true,
+      "x": 1288,
+      "y": 183,
+      "isClosed": true
+    },
+    {
+      "id": "builder-component-20",
+      "label": "M",
+      "rotation": 0,
+      "tag": "__builder_label__:M",
+      "type": "XIC",
+      "usesCustomLabel": true,
+      "x": 280,
+      "y": 399
+    },
+    {
+      "id": "builder-component-22",
+      "label": "D",
+      "rotation": 0,
+      "tag": "__builder_label__:D",
+      "type": "XIO",
+      "usesCustomLabel": true,
+      "x": 514,
+      "y": 399
+    },
+    {
+      "id": "builder-component-24",
+      "label": "TR1",
+      "rotation": 0,
+      "tag": "__builder_label__:TR1",
+      "type": "OTE",
+      "usesCustomLabel": true,
+      "x": 748,
+      "y": 399
+    },
+    {
+      "id": "builder-component-28",
+      "label": "M",
+      "rotation": 0,
+      "tag": "__builder_label__:M",
+      "type": "XIC",
+      "usesCustomLabel": true,
+      "x": 280,
+      "y": 525
+    },
+    {
+      "id": "builder-component-31",
+      "label": "Y",
+      "rotation": 0,
+      "tag": "__builder_label__:Y",
+      "type": "OTE",
+      "usesCustomLabel": true,
+      "x": 748,
+      "y": 525
+    },
+    {
+      "id": "builder-component-37",
+      "label": "TR1",
+      "rotation": 0,
+      "tag": "__builder_label__:TR1",
+      "type": "NOTC",
+      "usesCustomLabel": true,
+      "x": 514,
+      "y": 651,
+      "delayMs": 6000
+    },
+    {
+      "id": "builder-component-38",
+      "label": "D",
+      "rotation": 0,
+      "tag": "__builder_label__:D",
+      "type": "OTE",
+      "usesCustomLabel": true,
+      "x": 748,
+      "y": 651
+    },
+    {
+      "id": "builder-component-40",
+      "label": "Y",
+      "rotation": 2,
+      "tag": "__builder_label__:Y",
+      "type": "XIO",
+      "usesCustomLabel": true,
+      "x": 946,
+      "y": 651
+    },
+    {
+      "id": "builder-component-43",
+      "label": "D",
+      "rotation": 2,
+      "tag": "__builder_label__:D",
+      "type": "XIC",
+      "usesCustomLabel": true,
+      "x": 280,
+      "y": 651
+    },
+    {
+      "id": "builder-component-46",
+      "label": "M",
+      "rotation": 0,
+      "tag": "__builder_label__:M",
+      "type": "XIO",
+      "usesCustomLabel": true,
+      "x": 280,
+      "y": 777
+    },
+    {
+      "id": "builder-component-47",
+      "label": "LAMP",
+      "rotation": 0,
+      "tag": null,
+      "type": "LAMP",
+      "usesCustomLabel": false,
+      "x": 622,
+      "y": 777,
+      "lampGlowColor": "red"
+    },
+    {
+      "id": "builder-component-55",
+      "label": "TR1",
+      "rotation": 0,
+      "tag": "__builder_label__:TR1",
+      "type": "NCTO",
+      "usesCustomLabel": true,
+      "x": 514,
+      "y": 525,
+      "delayMs": 6000
+    },
+    {
+      "id": "builder-component-78",
+      "label": "D",
+      "rotation": 0,
+      "tag": "__builder_label__:D",
+      "type": "XIO",
+      "usesCustomLabel": true,
+      "x": 946,
+      "y": 525
+    }
+  ],
+  "name": "PLC Sim circuit",
+  "program": {
+    "rungs": []
+  },
+  "savedAt": "2026-11-01T02:47:21.473Z",
+  "sheet": {
+    "date": "2026-10-31",
+    "page": "1",
+    "projectName": "PLC Sim circuit",
+    "scale": "1:1"
+  },
+  "settings": {
+    "gridSpacing": 18,
+    "height": 940,
+    "scanIntervalMs": 150,
+    "width": 1720
+  },
+  "tags": [
+    {
+      "name": "I:0/0",
+      "kind": "input",
+      "label": "Input"
+    },
+    {
+      "name": "O:0/0",
+      "kind": "output",
+      "label": "Output"
+    },
+    {
+      "name": "B3:0/0",
+      "kind": "internal",
+      "label": "Internal bit"
+    },
+    {
+      "kind": "internal",
+      "label": "M",
+      "name": "__builder_label__:M"
+    },
+    {
+      "kind": "internal",
+      "label": "D",
+      "name": "__builder_label__:D"
+    },
+    {
+      "kind": "internal",
+      "label": "TR1",
+      "name": "__builder_label__:TR1"
+    },
+    {
+      "kind": "internal",
+      "label": "Y",
+      "name": "__builder_label__:Y"
+    }
+  ],
+  "version": 2,
+  "wires": [
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-1:out",
+      "id": "builder-wire-2",
+      "points": [
+        {
+          "x": 828,
+          "y": 90
+        },
+        {
+          "x": 216,
+          "y": 90
+        }
+      ],
+      "startPortId": "builder-component-0:left",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-1:in",
+      "id": "builder-wire-4",
+      "points": [
+        {
+          "x": 305,
+          "y": 236
+        },
+        {
+          "x": 216,
+          "y": 236
+        }
+      ],
+      "startPortId": "builder-component-3:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-3:out",
+      "id": "builder-wire-6",
+      "points": [
+        {
+          "x": 522,
+          "y": 236
+        },
+        {
+          "x": 449,
+          "y": 236
+        }
+      ],
+      "startPortId": "builder-component-5:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-5:in",
+      "id": "builder-wire-8",
+      "points": [
+        {
+          "x": 522,
+          "y": 343
+        },
+        {
+          "x": 522,
+          "y": 236
+        }
+      ],
+      "startPortId": "builder-component-7:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-5:out",
+      "id": "builder-wire-9",
+      "points": [
+        {
+          "x": 666,
+          "y": 343
+        },
+        {
+          "x": 666,
+          "y": 236
+        }
+      ],
+      "startPortId": "builder-component-7:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-5:out",
+      "id": "builder-wire-11",
+      "points": [
+        {
+          "x": 756,
+          "y": 234
+        },
+        {
+          "x": 756,
+          "y": 236
+        },
+        {
+          "x": 666,
+          "y": 236
+        }
+      ],
+      "startPortId": "builder-component-10:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-10:in",
+      "id": "builder-wire-13",
+      "points": [
+        {
+          "x": 756,
+          "y": 341
+        },
+        {
+          "x": 756,
+          "y": 234
+        }
+      ],
+      "startPortId": "builder-component-12:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-15:in",
+      "id": "builder-wire-16",
+      "points": [
+        {
+          "x": 1242,
+          "y": 234
+        },
+        {
+          "x": 1296,
+          "y": 234
+        },
+        {
+          "x": 1296,
+          "y": 236
+        }
+      ],
+      "startPortId": "builder-component-14:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-0:right",
+      "id": "builder-wire-17",
+      "points": [
+        {
+          "x": 1439,
+          "y": 236
+        },
+        {
+          "x": 1440,
+          "y": 236
+        },
+        {
+          "x": 1440,
+          "y": 90
+        },
+        {
+          "x": 972,
+          "y": 90
+        }
+      ],
+      "startPortId": "builder-component-15:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-14:in",
+      "id": "builder-wire-18",
+      "points": [
+        {
+          "x": 900,
+          "y": 234
+        },
+        {
+          "x": 1098,
+          "y": 234
+        }
+      ],
+      "startPortId": "builder-component-10:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-14:in",
+      "id": "builder-wire-19",
+      "points": [
+        {
+          "x": 900,
+          "y": 341
+        },
+        {
+          "x": 1098,
+          "y": 341
+        },
+        {
+          "x": 1098,
+          "y": 234
+        }
+      ],
+      "startPortId": "builder-component-12:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-1:in",
+      "id": "builder-wire-21",
+      "points": [
+        {
+          "x": 288,
+          "y": 450
+        },
+        {
+          "x": 216,
+          "y": 450
+        },
+        {
+          "x": 216,
+          "y": 234
+        }
+      ],
+      "startPortId": "builder-component-20:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-20:out",
+      "id": "builder-wire-23",
+      "points": [
+        {
+          "x": 522,
+          "y": 450
+        },
+        {
+          "x": 432,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-22:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-22:out",
+      "id": "builder-wire-25",
+      "points": [
+        {
+          "x": 756,
+          "y": 450
+        },
+        {
+          "x": 666,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-24:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-46:out",
+      "id": "builder-wire-50",
+      "points": [
+        {
+          "x": 631,
+          "y": 828
+        },
+        {
+          "x": 432,
+          "y": 828
+        }
+      ],
+      "startPortId": "builder-component-47:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-40:in",
+      "id": "builder-wire-56",
+      "points": [
+        {
+          "x": 775,
+          "y": 828
+        },
+        {
+          "x": 1098,
+          "y": 828
+        },
+        {
+          "x": 1098,
+          "y": 702
+        }
+      ],
+      "startPortId": "builder-component-47:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-40:out",
+      "id": "builder-wire-58",
+      "points": [
+        {
+          "x": 899,
+          "y": 701
+        },
+        {
+          "x": 954,
+          "y": 701
+        }
+      ],
+      "startPortId": "builder-component-38:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": null,
+      "id": "builder-wire-64",
+      "points": [
+        {
+          "x": 900,
+          "y": 450
+        },
+        {
+          "x": 1098,
+          "y": 450
+        },
+        {
+          "x": 1098,
+          "y": 342
+        }
+      ],
+      "startPortId": "builder-component-24:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-28:out",
+      "id": "builder-wire-69",
+      "points": [
+        {
+          "x": 540,
+          "y": 576
+        },
+        {
+          "x": 432,
+          "y": 576
+        }
+      ],
+      "startPortId": "builder-component-55:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-55:out",
+      "id": "builder-wire-70",
+      "points": [
+        {
+          "x": 756,
+          "y": 576
+        },
+        {
+          "x": 648,
+          "y": 576
+        }
+      ],
+      "startPortId": "builder-component-31:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-37:out",
+      "id": "builder-wire-71",
+      "points": [
+        {
+          "x": 756,
+          "y": 702
+        },
+        {
+          "x": 648,
+          "y": 702
+        }
+      ],
+      "startPortId": "builder-component-38:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-43:in",
+      "id": "builder-wire-72",
+      "points": [
+        {
+          "x": 540,
+          "y": 702
+        },
+        {
+          "x": 432,
+          "y": 702
+        }
+      ],
+      "startPortId": "builder-component-37:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": null,
+      "id": "builder-wire-73",
+      "points": [
+        {
+          "x": 288,
+          "y": 576
+        },
+        {
+          "x": 216,
+          "y": 576
+        },
+        {
+          "x": 216,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-28:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": null,
+      "id": "builder-wire-74",
+      "points": [
+        {
+          "x": 288,
+          "y": 702
+        },
+        {
+          "x": 216,
+          "y": 702
+        },
+        {
+          "x": 216,
+          "y": 576
+        }
+      ],
+      "startPortId": "builder-component-43:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": null,
+      "id": "builder-wire-75",
+      "points": [
+        {
+          "x": 288,
+          "y": 828
+        },
+        {
+          "x": 216,
+          "y": 828
+        },
+        {
+          "x": 216,
+          "y": 702
+        }
+      ],
+      "startPortId": "builder-component-46:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": null,
+      "id": "builder-wire-76",
+      "points": [
+        {
+          "x": 1098,
+          "y": 576
+        },
+        {
+          "x": 1098,
+          "y": 450
+        }
+      ],
+      "startPortId": "builder-component-31:out",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": null,
+      "id": "builder-wire-77",
+      "points": [
+        {
+          "x": 1098,
+          "y": 702
+        },
+        {
+          "x": 1098,
+          "y": 576
+        }
+      ],
+      "startPortId": "builder-component-40:in",
+      "thickness": 3.5
+    },
+    {
+      "color": "#111827",
+      "endPortId": "builder-component-31:out",
+      "id": "builder-wire-79",
+      "points": [
+        {
+          "x": 954,
+          "y": 576
+        },
+        {
+          "x": 900,
+          "y": 576
+        }
+      ],
+      "startPortId": "builder-component-78:in",
+      "thickness": 3.5
+    }
+  ]
+}

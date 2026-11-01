@@ -107,6 +107,9 @@ describe("SheetLayer markup (DOM assertions without jsdom)", () => {
     expect(html).toContain('data-testid="sheet-title-block"');
     expect(html).toContain('data-field="projectName"');
     expect(html).toContain("Bombeo");
-    expect(html).toContain("Página");
+    expect(html).toContain("Project");
+    expect(html).toContain("Date");
+    expect(html).toContain("Scale");
+    expect(html).toContain("Page");
   });
 });

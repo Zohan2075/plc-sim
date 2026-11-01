@@ -287,6 +287,86 @@ Cubierto por **4 tests** en `ui/src/diagram/interaction.spec.ts` (`describe` en 
 de un pulsador normal, enclavamiento del ESTOP al soltar, liberación con el segundo press y no
 alteración de otros componentes. Compuerta: **ui vitest 194/194**.
 
+### Topología de cables y plano (WP20, D40–D45)
+
+- **Geometría**: `SYMBOL_VIEWPORT_TOP` es **9** (centro puro, sin `top:-1px` en CSS). Todos los
+  viewBox (64/60/72) proyectan la pata en `y=51`; los componentes en la retícula (`y % 18 = 3`)
+  dejan los terminales en múltiplos de 18. No desplazar el glifo por CSS: el terminal proyectado y
+  la pata se mueven juntos.
+- **Reconciliación**: `ui/src/diagram/wireTopology.ts` (`reconcileWireTopology`) se ejecuta en
+  load/save/commit/reconnect/drag/rotate. Los endpoints con `startPortId`/`endPortId` se fijan al
+  terminal exacto; un extremo nulo a **≤4 px** de un terminal se conecta; a **≤2 px** de un
+  vértice/segmento se fusiona e inserta el punto de unión; si no coincide con nada, el cable se
+  **elimina** y se reporta. La pasada es idempotente.
+- **Trazado**: `cleanWirePath` no cuantiza a la rejilla; solo quita duplicados y escalones de
+  **≤3 px**, conservando los extremos. `insertPointIntoWire` inserta el punto exacto y
+  `moveAttachedWireEndpoints` mueve el extremo aunque el delta sea <3 px.
+- **Lógica**: `buildResolvedPortGraph` colapsa las redes de `buildElectricalNodeGraph` y conecta
+  los puertos de cada red en **clique** (no en cadena). `collectRungPaths` es **no dirigido**:
+  entra por cualquier borne y sale por el par; las bobinas terminan por cualquiera de sus bornes.
+  Se arranca solo desde el borne de alimentación de la fuente y se conservan los caminos maximales
+  por bobina (un contacto de enclavamiento en paralelo produce su propio rung).
+- **Puentes**: `findWireCrossings` exige cruce **estrictamente interior** a ambos segmentos y
+  descarta extremos, esquinas, T, nodos compartidos y segmentos nulos. **El cable más nuevo**
+  (sufijo numérico del id) dibuja el puente, sin depender del orden del array.
+- **Plano**: pan **off por defecto**, solo desde el fondo y con umbral de 4 px; los inputs
+  Ancho/Alto/Rejilla usan borrador local y confirman en blur/Enter (Esc revierte). Ancho/Alto solo
+  recortan lo que queda fuera; Rejilla re-cuantiza al confirmar; al arrastrar cerca del borde el
+  plano crece. Se quitaron filtros/`will-change`/transición de escala, el zoom va en pasos de 0.05
+  y el scroll se redondea a enteros para que la capa HTML y el SVG no se separen al bajar.
+- **Regresión**: `ui/src/diagram/__fixtures__/reference-latch.circuit.json` +
+  `reference-circuit.spec.ts` validan el circuito del usuario (28 cables, wire 64 en `(1098,342)`,
+  idempotencia, rungs M/TR1/Y/D, M enclavado y lámpara). Gates WP20: ui tsc **25** (< baseline 28),
+  ui vitest **212/212**, plc-engine **7/7**, `pnpm -r build` **OK**.
+
+### Vano horizontal común de dos bornes (2026-11-01, D47)
+
+- **Síntoma**: un XIC (viewBox 64) y un PUSH_BUTTON_NO (viewBox 72) alineados por el borne
+  izquierdo no podían tener una vertical recta entre sus bornes derechos: el XIC proyectaba
+  8..152 (144 px) y el pulsador, con letterbox horizontal, 12.333..147.667 (135.33 px). El cable
+  derecho quedaba con un codo de **8.667 px**.
+- **Causa**: el viewBox 72 se escalaba por altura (`84/72 = 1.1667`), centrando el arte 128x72 y
+  dejando 5.333 px de margen horizontal; el viewBox 64 se escalaba por anchura (`1.25`) y ocupaba
+  160 px. El vano de terminales dependía del **aspect ratio del arte**, no del modelo.
+- **Arreglo**: todos los símbolos horizontales de dos bornes usan el mismo vano local
+  **8..152** y `y=51`. Para que el glifo coincida, los símbolos con arte 6..122 se escalan
+  uniformemente a 160 px de ancho: `height = viewBoxHeight * (144/116)` — pulsadores/ESTOP
+  `72 * 1.241379 = 89.379 px`, breaker 1P `64 * 1.241379 = 79.448 px`. El OL (arte 2.3..125.7)
+  ya caía en 8..152 con su altura de 84 px.
+- **Migración**: al cargar, `clampSceneToPlane` reajusta cada componente a la retícula de su
+  borne de entrada y mueve sus cables; `reconcileWireTopology` fija los extremos y, si ambos
+  quedan en la misma X/Y, colapsa el trazado a una recta. Así un circuito guardado con el vano
+  viejo se abre ya alineado.
+- **Test**: `vertical-pb-circuit.json` + `vertical-wires.spec.ts` abren el circuito del usuario y
+  exigen que los dos cables XIC↔PUSH_BUTTON_NO tengan 2 puntos y la misma X (<0.01).
+
+### Error creciente con la Y (2026-11-01, D46)
+
+- **Síntoma**: el cable quedaba por encima/debajo del borne y el error **crecía** con la
+  coordenada Y del componente (no era un offset fijo).
+- **Causa raíz**: `.freeplay-canvas` tenía `width:1720; height:940; border:1px` con
+  `box-sizing:border-box` (`styles.css:43`), así que su **content-box** medía **1718×938**.
+  El SVG de cables usaba `inset:0; width:100%; height:100%` (`App.css:1965`) con
+  `viewBox="0 0 1720 940"`: el contenido SVG se escalaba por `938/940 = 0.99787`, mientras los
+  componentes HTML se posicionaban en coordenadas de modelo sin escalar. Error lineal:
+  `y·(1-938/940)` → ≈1.65 px a y=777 y ≈42 px a y=20000.
+- **Arreglo**: se eliminó el `border` del canvas (el borde se dibuja con `box-shadow`, que no
+  ocupa layout) y el SVG usa `width={planeSettings.width} height={planeSettings.height}` +
+  `preserveAspectRatio="none"`, de modo que `viewBox` y caja CSS son **1:1**. `getCanvasPointFromClient`
+  resta `clientLeft/clientTop` (borde sin escalar × zoom) para convertir screen→model una sola vez.
+- **Segunda fuente de error**: `projectSymbolPoint` aplicaba `snapPointToTerminalLattice` al
+  terminal local. En viewBox 72 (PUSH_BUTTON_*, ESTOP, OL) el arte proyecta x=12.333/147.667,
+  pero el snap lo movía a 8/152: **4.3 px** de error horizontal constante respecto al glifo.
+  Se eliminó el snap; los terminales son la proyección exacta del arte y los cables se resuelven
+  desde el `portId` en cada render (`resolveWirePointsWithMap`).
+- **Regla**: el snap de rejilla aplica a la **posición del componente** (su borne de entrada) y a
+  los quiebres libres del cable; **nunca** a un offset local derivado del arte ni a un extremo con
+  `portId`.
+- **Debug**: `?debugTerminals=1` dibuja un punto rojo en cada terminal calculado, en una capa SVG
+  por encima de los componentes (`freeplay-debug-overlay`).
+- **Test**: `terminal-alignment.spec.ts` recorre todos los tipos y rotaciones con
+  `y = 0, 500, 5000, 20000`; el extremo del cable y el terminal difieren <0.01.
+
 ## Gotchas
 
 - **PowerShell 5.1**: no escribir archivos fuente con `Get-Content`/`Set-Content` sin

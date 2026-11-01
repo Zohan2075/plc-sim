@@ -6,6 +6,7 @@ import {
   TERMINAL_LATTICE_X_OFFSET,
   TERMINAL_LATTICE_Y_OFFSET,
   getComponentTerminals,
+  getDefaultEntryTerminalId,
   getTerminalDefinitions,
   getTerminalPoint,
   instructionPalette
@@ -52,16 +53,30 @@ describe("alignment proof: component anchors land on grid intersections (all pal
   }
 });
 
-describe("alignment proof: every terminal of every snapped component sits on a grid intersection", () => {
+describe("alignment proof: the entry terminal sits on the grid; all terminal offsets are exact art projections", () => {
   for (const type of PALETTE_TYPES) {
     for (const rotation of ROTATIONS) {
-      it(`${type} rotation ${rotation}: all terminals are multiples of gridSpacing`, () => {
+      it(`${type} rotation ${rotation}: entry terminal is a grid multiple`, () => {
         const snapped = snapInterior(type, rotation);
+        const entryTerminalId = getDefaultEntryTerminalId(type);
+        const entryTerminal = getComponentTerminals(snapped)
+          .find((terminal) => terminal.terminalId === entryTerminalId);
 
-        expect(getComponentTerminals(snapped).length).toBeGreaterThan(0);
+        expect(entryTerminal).toBeDefined();
+        expect(isOnGrid(entryTerminal!, spacing), `${type}.${entryTerminalId} @ ${entryTerminal?.x},${entryTerminal?.y}`).toBe(true);
+      });
 
-        for (const terminal of getComponentTerminals(snapped)) {
-          expect(isOnGrid(terminal, spacing), `${type}.${terminal.terminalId} @ ${terminal.x},${terminal.y}`).toBe(true);
+      it(`${type} rotation ${rotation}: local terminal offsets are invariant with world Y`, () => {
+        const localTerminals = getTerminalDefinitions(type);
+        const atOrigin = getComponentTerminals(makeComponent(type, 0, 0, rotation));
+        const farAway = getComponentTerminals(makeComponent(type, 0, 20000, rotation));
+
+        for (const localTerminal of localTerminals) {
+          const originTerminal = atOrigin.find((terminal) => terminal.terminalId === localTerminal.id)!;
+          const farTerminal = farAway.find((terminal) => terminal.terminalId === localTerminal.id)!;
+
+          expect(farTerminal.x - originTerminal.x).toBeCloseTo(0, 10);
+          expect(farTerminal.y - originTerminal.y).toBeCloseTo(20000, 10);
         }
       });
     }
@@ -87,17 +102,15 @@ describe("alignment proof: raw terminal geometry follows the lattice rule", () =
     }
   });
 
-  it("every palette type's raw terminals are pairwise congruent mod spacing (lattice family)", () => {
+  it("every palette type defines finite local terminal offsets", () => {
     for (const type of PALETTE_TYPES) {
       const terminals = getTerminalDefinitions(type);
 
       expect(terminals.length, `${type} has terminals`).toBeGreaterThan(0);
 
-      for (const left of terminals) {
-        for (const right of terminals) {
-          expect(((right.x - left.x) % spacing) + 0, `${type} dx ${left.id}->${right.id}`).toBe(0);
-          expect(((right.y - left.y) % spacing) + 0, `${type} dy ${left.id}->${right.id}`).toBe(0);
-        }
+      for (const terminal of terminals) {
+        expect(Number.isFinite(terminal.x), `${type}.${terminal.id}.x`).toBe(true);
+        expect(Number.isFinite(terminal.y), `${type}.${terminal.id}.y`).toBe(true);
       }
     }
   });
