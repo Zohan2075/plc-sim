@@ -360,3 +360,9 @@ Orden estricto: 1 → 2 → 3 → 4 → 5 → 6 → 7. Fase 3 puede empezar tras
 - **Migración/cables**: `clampSceneToPlane` vuelve a alinear componentes al cargar (borne de entrada) y mueve los cables; `reconcileWireTopology` fija extremos y colapsa a recta cualquier cable cuyos extremos queden en la misma X/Y.
 - **Test**: `ui/src/diagram/__fixtures__/vertical-pb-circuit.json` + `vertical-wires.spec.ts` verifican que los dos cables XIC↔PB_NO quedan en 2 puntos y misma X (<0.01). Gates: ui vitest **574/574**; tsc **25**; engine **7/7**; build **OK**.
 - **Hoja**: tarjeta y título en inglés (Sheet/Project/Date/Scale/Page); title block 420 px con `clipPath` para que valores largos no crucen el marco; inputs con `maxLength` y `width:100%`.
+
+### 2026-11-02 (D48): reset de temporizadores al desenergizar la bobina
+
+- **Causa**: el fallback de oscilación de `resolvePhysicalInstructionTagValues` forzaba **todas** las bobinas físicas a `true`, incluidas `TM1/TM2/TM3`; los temporizadores quedaban en `5000 ms` y no volvían a reposo al desenergizarse su bobina.
+- **Arreglo**: historial de estados del punto fijo; al repetirse un estado se identifican solo las bobinas que cambian en el ciclo. Las estables (CR1) conservan su valor; las oscilantes se resuelven en reposo salvo que el grafo con todas accionadas tenga un lazo sin carga (entonces `true` para reportar el cortocircuito). `collectTimedContactRuntimeStates` elimina el estado cuando el tag es falso, por lo que NOTC/NCTO vuelven a su estado normal.
+- **Test**: `timer-reset.spec.ts` (reset sintético, regresión de cortocircuito y cascada real `timer-cascade.circuit.json`); ui vitest **577/577**. Gates: tsc **25**, engine **7/7**, build **OK**.

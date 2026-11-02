@@ -905,6 +905,46 @@ function buildElectricalSimulationGraph(
   return { componentsById, electricalConnections, portsById, wireNodeIdsByWire };
 }
 
+function hasLoadFreeElectricalLoop(
+  components: BuilderComponent[],
+  wires: BuilderWire[],
+  tagValues: Readonly<Record<string, boolean>>,
+  previousTimedContactStateByComponentId: TimedContactStateByComponentId,
+  elapsedMsThisStep: number
+): boolean {
+  const { electricalConnections } = buildElectricalSimulationGraph(
+    components,
+    wires,
+    tagValues,
+    previousTimedContactStateByComponentId,
+    elapsedMsThisStep
+  );
+
+  for (const source of components) {
+    if (!isSourceType(source.type)) {
+      continue;
+    }
+
+    const { feedTerminalId, returnTerminalId } = getSourceTraversalTerminalIds(source);
+    const feedNodes = collectReachableNodes(
+      electricalConnections,
+      getElectricalPortNodeId(getPortId(source.id, feedTerminalId))
+    );
+    const returnNodes = collectReachableNodes(
+      electricalConnections,
+      getElectricalPortNodeId(getPortId(source.id, returnTerminalId))
+    );
+
+    for (const nodeId of feedNodes) {
+      if (returnNodes.has(nodeId)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function resolvePhysicalInstructionTagValues(
   components: BuilderComponent[],
   wires: BuilderWire[],
@@ -951,8 +991,10 @@ export function resolvePhysicalInstructionTagValues(
   // paralelo con la bobina, que la cortocircuita), el resultado no puede
   // depender del numero de iteraciones ni del numero de componentes: se detecta
   // el ciclo y se dejan las bobinas fisicas en reposo (estado seguro).
-  const visitedStates = new Set<string>();
   const stateKey = () => physicalOutputTags.map((tag) => (resolvedTagValues[tag] ? "1" : "0")).join("");
+  const stateHistory: Array<{ key: string; values: Record<string, boolean> }> = [
+    { key: stateKey(), values: { ...resolvedTagValues } }
+  ];
 
   for (let iteration = 0; iteration < Math.max(components.length, 1); iteration += 1) {
     const { electricalConnections } = buildElectricalSimulationGraph(
@@ -995,20 +1037,43 @@ export function resolvePhysicalInstructionTagValues(
     }
 
     const key = stateKey();
+    const cycleStartIndex = stateHistory.findIndex((entry) => entry.key === key);
 
-    if (visitedStates.has(key)) {
-      // El circuito no tiene punto fijo (una bobina realimenta su propio
-      // contacto y se cortocircuita). Se resuelve con las bobinas accionadas
-      // para que la comprobacion de cortocircuito vea el contacto cerrado y
-      // avise, en vez de dejar la simulacion silenciosamente muerta.
+    if (cycleStartIndex >= 0) {
+      // El circuito no tiene punto fijo. Se identifican SOLO las bobinas que
+      // cambian dentro del ciclo; las estables (p. ej. un reloj de enclavamiento
+      // CR1) conservan su estado.
+      const cycleStates = [
+        ...stateHistory.slice(cycleStartIndex).map((entry) => entry.values),
+        { ...resolvedTagValues }
+      ];
+      const oscillatingTags = physicalOutputTags.filter((tag) => {
+        const values = new Set(cycleStates.map((state) => state[tag] === true));
+
+        return values.size > 1;
+      });
+      const allCoilsOn: Record<string, boolean> = { ...resolvedTagValues };
+
       for (const tag of physicalOutputTags) {
-        resolvedTagValues[tag] = true;
+        allCoilsOn[tag] = true;
+      }
+
+      const hasShort = hasLoadFreeElectricalLoop(
+        components,
+        wires,
+        allCoilsOn,
+        previousTimedContactStateByComponentId,
+        elapsedMsThisStep
+      );
+
+      for (const tag of oscillatingTags) {
+        resolvedTagValues[tag] = hasShort;
       }
 
       break;
     }
 
-    visitedStates.add(key);
+    stateHistory.push({ key, values: { ...resolvedTagValues } });
   }
 
   return {

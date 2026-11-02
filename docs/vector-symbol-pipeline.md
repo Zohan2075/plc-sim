@@ -367,6 +367,29 @@ alteración de otros componentes. Compuerta: **ui vitest 194/194**.
 - **Test**: `terminal-alignment.spec.ts` recorre todos los tipos y rotaciones con
   `y = 0, 500, 5000, 20000`; el extremo del cable y el terminal difieren <0.01.
 
+### Temporizadores al desenergizar la bobina (2026-11-02, D48)
+
+- **Síntoma**: al desenergizarse una bobina, sus contactos/temporizadores no volvían a reposo; en
+  cascadas de temporizadores (`NOTC`/`NCTO`) los estados se quedaban en `5000 ms` y las bobinas
+  `TM*` seguían accionadas.
+- **Causa**: `resolvePhysicalInstructionTagValues` detectaba un ciclo (oscilador de relés) y
+  forzaba **todas** las bobinas físicas a `true` para que el detector de cortocircuito viera los
+  contactos cerrados. Eso también fijaba los temporizadores y las bobinas estables, impidiendo el
+  reset.
+- **Arreglo**: se guarda el historial de estados del punto fijo. Al repetirse un estado se
+  identifican **solo las bobinas que cambian dentro del ciclo**:
+  - las bobinas estables (p. ej. el enclavamiento `CR1`) conservan su valor;
+  - las oscilantes se resuelven en **reposo** (`false`) salvo que el grafo con todas accionadas
+    tenga un lazo sin carga; en ese caso se dejan en `true` para que el detector reporte el
+    cortocircuito.
+  - `previewTimedContactState` ya reseteaba con `inputValue=false`; al dejar de forzar `TM*` a
+    `true`, `collectTimedContactRuntimeStates` elimina el estado y el contacto vuelve a su estado
+    normal (NOTC abierto, NCTO cerrado).
+- **Test**: `timer-reset.spec.ts` cubre (1) reset de un `NOTC` cuando su bobina se desenergiza,
+  (2) regresión de cortocircuito bobina+contacto, y (3) la cascada real `timer-cascade.circuit.json`
+  mantiene `CR1` enclavado pero reinicia los temporizadores tras un ciclo.
+- Gates: ui vitest **577/577**; tsc **25**; engine **7/7**; build **OK**.
+
 ## Gotchas
 
 - **PowerShell 5.1**: no escribir archivos fuente con `Get-Content`/`Set-Content` sin
