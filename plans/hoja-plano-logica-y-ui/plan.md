@@ -4,7 +4,7 @@ entity: plan
 plan: "hoja-plano-logica-y-ui"
 status: completed  # draft | approved | active | completed | abandoned
 created: "2026-10-29"
-updated: "2026-10-31"
+updated: "2026-11-02"
 ---
 
 # Plan: hoja-plano-logica-y-ui
@@ -353,10 +353,13 @@ Orden estricto: 1 → 2 → 3 → 4 → 5 → 6 → 7. Fase 3 puede empezar tras
 - **Debug**: `?debugTerminals=1` + capa `freeplay-debug-overlay`.
 - **Test**: `terminal-alignment.spec.ts` (288 casos) con `y=0/500/5000/20000` y rotaciones 0–3, error <0.01. Gates actualizados: ui vitest **572/572**; tsc **25**; engine **7/7**; build **OK**.
 
-### 2026-11-01 (D47): vano horizontal común y verticales rectas
+### 2026-11-01 (D47): vano horizontal común y verticales rectas — **REVERTIDO por D50**
+
+> Histórico: el vano 8..152, las patas añadidas y el escalado de glifos se revirtieron. El arte y
+> los terminales vuelven a `d9e5057`.
 
 - **Causa**: los símbolos horizontales de dos bornes tenían vanos distintos según el aspect ratio del arte: XIC/LAMP 8..152 (144 px), PUSH_BUTTON/ESTOP 12.333..147.667 (135.33 px) por el letterbox del viewBox 72, y OL con modelo 12.333 aunque su arte caía en 8..152. Alinear dos componentes por un borne dejaba el otro con un codo de 8.667 px.
-- **Arreglo**: vano común **8..152, y=51** para todos. Los glifos con arte 6..122 se escalan uniformemente a 160 px de ancho (`height = viewBoxHeight * 144/116`): PB/ESTOP 89.379 px, BREAKER_1P 79.448 px; el OL conserva 84 px porque su arte 2.3..125.7 ya cubre el vano.
+- **Arreglo**: vano común **8..152, y=51** para todos, **sin cambiar el tamaño ni el diseño del glifo**. Los pulsadores/ESTOP conservan 84 px y solo se añaden patas terminales 2.2857..6 / 122..125.7143 en el viewBox 72; el OL ya cubría el vano con 84 px; el breaker 1P conserva su glifo y su pata cubre 8..152.
 - **Migración/cables**: `clampSceneToPlane` vuelve a alinear componentes al cargar (borne de entrada) y mueve los cables; `reconcileWireTopology` fija extremos y colapsa a recta cualquier cable cuyos extremos queden en la misma X/Y.
 - **Test**: `ui/src/diagram/__fixtures__/vertical-pb-circuit.json` + `vertical-wires.spec.ts` verifican que los dos cables XIC↔PB_NO quedan en 2 puntos y misma X (<0.01). Gates: ui vitest **574/574**; tsc **25**; engine **7/7**; build **OK**.
 - **Hoja**: tarjeta y título en inglés (Sheet/Project/Date/Scale/Page); title block 420 px con `clipPath` para que valores largos no crucen el marco; inputs con `maxLength` y `width:100%`.
@@ -366,3 +369,31 @@ Orden estricto: 1 → 2 → 3 → 4 → 5 → 6 → 7. Fase 3 puede empezar tras
 - **Causa**: el fallback de oscilación de `resolvePhysicalInstructionTagValues` forzaba **todas** las bobinas físicas a `true`, incluidas `TM1/TM2/TM3`; los temporizadores quedaban en `5000 ms` y no volvían a reposo al desenergizarse su bobina.
 - **Arreglo**: historial de estados del punto fijo; al repetirse un estado se identifican solo las bobinas que cambian en el ciclo. Las estables (CR1) conservan su valor; las oscilantes se resuelven en reposo salvo que el grafo con todas accionadas tenga un lazo sin carga (entonces `true` para reportar el cortocircuito). `collectTimedContactRuntimeStates` elimina el estado cuando el tag es falso, por lo que NOTC/NCTO vuelven a su estado normal.
 - **Test**: `timer-reset.spec.ts` (reset sintético, regresión de cortocircuito y cascada real `timer-cascade.circuit.json`); ui vitest **577/577**. Gates: tsc **25**, engine **7/7**, build **OK**.
+
+### 2026-11-02 (D49): terminales de NCTO/NOTC y verticales — **REVERTIDO por D50**
+
+> Histórico: los anillos movidos a 6.4/121.6 y las patas añadidas se revirtieron. El temporizador
+> vuelve a 25.6/102.4 y al arte de `d9e5057`.
+
+### 2026-11-02 (D50): restauración pixel-exacta de glifos + stubs en el cable
+
+- **Glifos**: el arte y las coordenadas internas de `renderSymbolGraphic` quedan **byte-idénticos a `d9e5057`**. No se mueven anillos, no se añaden patas, no se rediseña ningún símbolo. `NCTO/NOTC` usan sus anillos 25.6/102.4; `PUSH_BUTTON_NO`/`PUSH_BUTTON_NC`/`ESTOP`/`OL` usan el vano 8/152; `BREAKER_1P` conserva su pata 6/122.
+- **Cable**: `ui/src/diagram/wireRoute.ts` resuelve `ancla exacta -> pata al punto de rejilla exterior -> ruta ortogonal`; la pata es parte del polilínea y no se guarda. Si los dos bornes comparten X/Y, la ruta se colapsa a **2 puntos**. Los extremos se recalculan desde `startPortId`/`endPortId` en cada render/movimiento.
+- **Snap**: `snapComponentToPlaneGrid` acepta el terminal elegido (`origin = snap(origin + terminalLocal) - terminalLocal`). `createComponent`/`finalizeComponentDrag` usan el terminal más cercano al cursor, no el borne de entrada.
+- **Edición/debug**: `resolvedWires` usa la ruta con stubs; `wireNodeWires` conserva los índices editables (los stubs no se arrastran). `?debugTerminals=1` muestra anclas (rojo) y extremos de pata (cian).
+- **Tests**: `wire-stubs.spec.ts` + `vertical-wires.spec.ts` (4) + `terminal-alignment.spec.ts` (288). Diff de glifos/terminales vs `d9e5057`: **vacío**.
+
+### 2026-11-02 (D51): tolerancia del router, nunca un Z de 1-2 px
+
+- **Regla**: `EPS = 0.25 * GRID` (4.5 px con rejilla 18). Si `|dx| <= EPS` o `|dy| <= EPS` entre las dos anclas, el cable es **una recta de 2 puntos** en el eje dominante. El borne inicial manda; el otro extremo absorbe el residuo bajo el anillo. Nunca diagonal ni Z.
+- **Comparaciones sustituidas**: `createOrthogonalPath` (`===`), `getSegmentAxis` (`<1`), `rebuildWirePath` (`<0.001`), `createWire` (`===`), `repositionWireEndpointOrthogonally` y `isAligned`/`routeBetweenStubs`.
+- **Limpieza**: `collapseWireRoute` elimina colineales y segmentos < `EPS`; al absorber un escalón pega el punto exterior al eje anterior para no dejar diagonal.
+- **Verificación**: `(0,0)`, `(1,2)`, `(2,1)`, `(0.5,0)`, `(0,3)` → 2 puntos; `(0,3*GRID)` → recta vertical; `(2*GRID,2*GRID)` → ruta ortogonal de 3+ puntos.
+
+### 2026-11-02 (D52): PUSH_BUTTON_NO, wrapper uniforme probado y revertido
+
+- **Medida**: `ringL.cx=34`, `ringR.cx=94`, `ringY=36`, `span=60` viewBox; proyectado 45/115, span 70 (70 mod 18 = 16).
+- **Intento**: `s=2.057142857`, `tx=-67.657143`, `ty=-38.057143` colocaba los anillos en (8,51)/(152,51) y conservaba el hash interno, pero el glifo quedaba gigante y las patas se iban a ≈-59/219 px. **Rechazado y revertido.**
+- **Estado actual**: glifo a 84 px sin wrapper; anillos en 45/115; anclas PB/ESTOP/OL en 8/152. Pendiente decidir entre mover anillos, mover anclas o redibujar.
+- **Otras glyphs (reporte, sin fix)**: XIC/XIO/OTE/LAMP sin anillos, vano 144 (OK); PUSH_BUTTON_NC anillos 45/115 span 70 y y=44; ESTOP span ~56.4/56.8; NCTO/NOTC anillos 32/128 span 96 y y=48.5.
+- **Gates**: ui vitest **882/882**; tsc **25**; engine **7/7**; build **OK**.

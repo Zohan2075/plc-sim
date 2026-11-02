@@ -56,6 +56,7 @@ import {
   repositionWireEndpointOrthogonally
 } from "./diagram/grid";
 import { reconcileWireTopology } from "./diagram/wireTopology";
+import { getWireTerminalRoutes, resolveWireDisplayPoints } from "./diagram/wireRoute";
 import {
   createCircuitSnapshot,
   createGeneratedInstructionTag,
@@ -277,14 +278,7 @@ export const COMPONENT_HEIGHT = 136;
 const COMPONENT_GLYPH_HEIGHT = 102;
 const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
 const SYMBOL_VIEWPORT_HEIGHT = 84;
-// Vano comun de los simbolos horizontales de dos bornes. El alto del glifo de
-// los viewBox 72 (6..122) se escala uniformemente para que 6->8 y 122->152:
-// scale = 144 / 116; height = 72 * scale; el borne queda en y=51 al centrarlo.
-const HORIZONTAL_TERMINAL_LEFT_X = 8;
-const HORIZONTAL_TERMINAL_RIGHT_X = 152;
-const HORIZONTAL_TERMINAL_Y = 51;
-const PUSH_BUTTON_SYMBOL_HEIGHT = 72 * (144 / 116);
-const BREAKER_1P_SYMBOL_HEIGHT = 64 * (144 / 116);
+
 // El glifo se centra en el contenedor de 102 px. Con top=9 las patas de todos
 // los viewBox (64/60/72) caen en y=51, que con componentes sobre la rejilla
 // (y % 18 = 3) da terminales en multiplos de 18. No desplazar por CSS.
@@ -1280,10 +1274,13 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
     }
     case "BREAKER_1P":
       {
-        return [
-          { id: "in", label: "1", pairId: "main", role: "input", x: HORIZONTAL_TERMINAL_LEFT_X, y: HORIZONTAL_TERMINAL_Y },
-          { id: "out", label: "2", pairId: "main", role: "output", x: HORIZONTAL_TERMINAL_RIGHT_X, y: HORIZONTAL_TERMINAL_Y }
-        ];
+        const inputTerminal = projectSymbolPoint(6, 32, 64);
+        const outputTerminal = projectSymbolPoint(122, 32, 64);
+
+      return [
+          { id: "in", label: "1", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+          { id: "out", label: "2", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
+      ];
       }
     case "SWITCH_1P":
     case "LIMIT_SWITCH_NO":
@@ -1324,12 +1321,9 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
     case "PUSH_BUTTON_NC":
     case "ESTOP":
     case "OL_CONTACT": {
-      // Todos los simbolos horizontales de dos bornes comparten el mismo vano
-      // de terminales (8..152) para que dos componentes alineados en X tengan
-      // sus bornes superior/inferior en la misma vertical.
       return [
-        { id: "in", label: "In", pairId: "main", role: "input", x: HORIZONTAL_TERMINAL_LEFT_X, y: HORIZONTAL_TERMINAL_Y },
-        { id: "out", label: "Out", pairId: "main", role: "output", x: HORIZONTAL_TERMINAL_RIGHT_X, y: HORIZONTAL_TERMINAL_Y }
+        { id: "in", label: "In", pairId: "main", role: "input", x: 8, y: 51 },
+        { id: "out", label: "Out", pairId: "main", role: "output", x: 152, y: 51 }
       ];
     }
     case "XIC":
@@ -1605,12 +1599,7 @@ function renderSymbolGraphic(
       );
     case "BREAKER_1P":
       return (
-        <svg
-          viewBox="0 0 128 64"
-          className={symbolClassName}
-          style={{ height: BREAKER_1P_SYMBOL_HEIGHT }}
-          aria-hidden="true"
-        >
+        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
           <text x="34" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("in", "1")}</text>
           <text x="94" y="14" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out", "2")}</text>
           <line x1="6" y1="32" x2="28" y2="32" className="diagram-symbol__line" />
@@ -1745,12 +1734,7 @@ function renderSymbolGraphic(
       const contactBarY = options.pushButtonPressed ? 36 : 20;
 
       return (
-        <svg
-          viewBox="0 0 128 72"
-          className={symbolClassName}
-          style={{ height: PUSH_BUTTON_SYMBOL_HEIGHT }}
-          aria-hidden="true"
-        >
+        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
           <line x1="6" y1="36" x2="28" y2="36" className="diagram-symbol__line" />
           <line x1="100" y1="36" x2="122" y2="36" className="diagram-symbol__line" />
           <circle cx="34" cy="36" r="5.5" className="diagram-symbol__terminal" />
@@ -1770,12 +1754,7 @@ function renderSymbolGraphic(
       const contactBarY = options.pushButtonPressed ? 44 : 36;
 
       return (
-        <svg
-          viewBox="0 0 128 72"
-          className={symbolClassName}
-          style={{ height: PUSH_BUTTON_SYMBOL_HEIGHT }}
-          aria-hidden="true"
-        >
+        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
           <line x1="6" y1="36" x2="28" y2="36" className="diagram-symbol__line" />
           <line x1="100" y1="36" x2="122" y2="36" className="diagram-symbol__line" />
           <circle cx="34" cy="30" r="5.5" className="diagram-symbol__terminal" />
@@ -1803,12 +1782,7 @@ function renderSymbolGraphic(
       const labelPaths = isPressed ? ESTOP_VECTOR_OPEN_LABEL_PATHS : ESTOP_VECTOR_LABEL_PATHS;
 
       return (
-        <svg
-          viewBox="0 0 128 72"
-          className={symbolClassName}
-          style={{ height: PUSH_BUTTON_SYMBOL_HEIGHT }}
-          aria-hidden="true"
-        >
+        <svg viewBox="0 0 128 72" className={symbolClassName} aria-hidden="true">
           <g transform={transform} className="diagram-symbol__vector" fillRule="evenodd">
             <path d={symbolPath} />
           </g>
@@ -2152,7 +2126,8 @@ function getWireEndpointPreferredAxis(
   wire: BuilderWire,
   endpointIndex: number,
   components: BuilderComponent[],
-  targetPoint?: Point
+  targetPoint?: Point,
+  tolerance = 1
 ): "horizontal" | "vertical" {
   const resolvedTargetPort = targetPoint ? findNearestPort(targetPoint, components) : null;
 
@@ -2169,7 +2144,7 @@ function getWireEndpointPreferredAxis(
   const endpointPoint = wire.points[endpointIndex];
 
   if (adjacentPoint && endpointPoint) {
-    const currentAxis = getSegmentAxis(adjacentPoint, endpointPoint);
+    const currentAxis = getSegmentAxis(adjacentPoint, endpointPoint, tolerance);
 
     if (currentAxis) {
       return currentAxis;
@@ -2531,6 +2506,34 @@ function findNearestWireSegmentAnchor(
   }
 
   return nearestAnchor;
+}
+
+function getNearestTerminalId(component: BuilderComponent, point: Point): string {
+  let nearestTerminalId = getDefaultEntryTerminalId(component.type);
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const terminal of getComponentTerminals(component)) {
+    const distance = distanceBetween(point, terminal);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestTerminalId = terminal.terminalId;
+    }
+  }
+
+  return nearestTerminalId;
+}
+
+function snapComponentByTerminal(
+  component: BuilderComponent,
+  point: Point,
+  planeSettings: BuilderPlaneSettings
+): BuilderComponent {
+  return snapComponentToPlaneGrid(
+    component,
+    planeSettings,
+    getNearestTerminalId(component, point)
+  );
 }
 
 function snapComponentToNearbyWire(
@@ -2947,8 +2950,23 @@ function createWire(
   end: Point,
   endpointPortIds: Partial<Record<WireEndpointKey, string | null>> = {}
 ): BuilderWire {
-  if (start.x === end.x || start.y === end.y) {
-    return createWireWithPoints(nextId, color, [start, end], endpointPortIds);
+  const tolerance = DEFAULT_GRID_SPACING * 0.25;
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const withinX = Math.abs(deltaX) <= tolerance;
+  const withinY = Math.abs(deltaY) <= tolerance;
+
+  if (withinX || withinY) {
+    const alignToX = withinX && (!withinY || Math.abs(deltaX) <= Math.abs(deltaY));
+
+    return createWireWithPoints(
+      nextId,
+      color,
+      alignToX
+        ? [start, { x: start.x, y: end.y }]
+        : [start, { x: end.x, y: start.y }],
+      endpointPortIds
+    );
   }
 
   return createWireWithPoints(nextId, color, [start, { x: end.x, y: start.y }, end], endpointPortIds);
@@ -3967,6 +3985,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     componentId: string;
     offsetX: number;
     offsetY: number;
+    pointerPoint: Point;
   } | null>(null);
   const paletteDragState = useRef<{
     didDrag: boolean;
@@ -4402,6 +4421,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return false;
     }
 
+    drag.pointerPoint = point;
+
     const padding = getComponentPlanePadding(planeSettingsRef.current);
     const nextX = clamp(
       point.x - drag.offsetX,
@@ -4445,7 +4466,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const nextComponents = componentsRef.current.map((component) =>
       component.id === nextComponent.id ? nextComponent : component
     );
-    const nextWires = moveAttachedWireEndpoints(wiresRef.current, movedComponent, nextComponent);
+    const nextWires = moveAttachedWireEndpoints(
+      wiresRef.current,
+      movedComponent,
+      nextComponent,
+      planeSettingsRef.current.gridSpacing
+    );
 
     componentsRef.current = nextComponents;
     wiresRef.current = nextWires;
@@ -4480,15 +4506,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
-    const snappedComponent = snapComponentToPlaneGrid(
+    const snappedComponent = snapComponentByTerminal(
       clampComponentToPlane(releasedComponent, planeSettingsRef.current),
+      releasedDragState.pointerPoint,
       planeSettingsRef.current
     );
 
     const nextComponents = componentsRef.current.map((component) =>
       component.id === snappedComponent.id ? snappedComponent : component
     );
-    const movedWires = moveAttachedWireEndpoints(wiresRef.current, releasedComponent, snappedComponent);
+    const movedWires = moveAttachedWireEndpoints(
+      wiresRef.current,
+      releasedComponent,
+      snappedComponent,
+      planeSettingsRef.current.gridSpacing
+    );
     const reconciled = reconcileWireTopology(
       { components: nextComponents, wires: movedWires },
       planeSettingsRef.current
@@ -4587,7 +4619,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
               wire.points,
               pointIndex,
               nextPoint,
-              getWireEndpointPreferredAxis(wire, pointIndex, componentsRef.current, nextPoint)
+              getWireEndpointPreferredAxis(
+                wire,
+                pointIndex,
+                componentsRef.current,
+                nextPoint,
+                planeSettingsRef.current.gridSpacing * 0.25
+              ),
+              planeSettingsRef.current.gridSpacing * 0.25
             )
             : (() => {
               const updatedPoints = [...wire.points];
@@ -4677,8 +4716,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   wire,
                   releasedWirePointDragState.pointIndex,
                   componentsRef.current,
-                  snapTarget.point
-                )
+                  snapTarget.point,
+                  planeSettingsRef.current.gridSpacing * 0.25
+                ),
+                planeSettingsRef.current.gridSpacing * 0.25
               );
 
               if (releasedWirePointDragState.pointIndex === 0) {
@@ -4762,18 +4803,29 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     electricalElapsedMs
   );
   const derivedProgramSignature = JSON.stringify(derivedState.program);
-  const terminalByPortMap = useMemo(() => buildTerminalPortMap(components), [components]);
   const resolvedWires = useMemo(
     () => wires.map((wire) => ({
       ...wire,
-      points: resolveWirePointsWithMap(wire, terminalByPortMap)
+      points: resolveWireDisplayPoints(wire, components, planeSettings)
     })),
-    [terminalByPortMap, wires]
+    [components, planeSettings, wires]
+  );
+  // Los nodos editables deben conservar el mismo numero de puntos que el cable
+  // guardado; los stubs son solo visuales y no se pueden arrastrar.
+  const wireNodeWires = useMemo(
+    () => wires.map((wire) => ({
+      ...wire,
+      points: resolveWirePoints(wire, components)
+    })),
+    [components, wires]
   );
   const showTerminalDebug = typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("debugTerminals") === "1";
   const terminalDebugNodes = showTerminalDebug
     ? components.flatMap((component) => getComponentTerminals(component))
+    : [];
+  const stubDebugNodes = showTerminalDebug
+    ? wires.flatMap((wire) => getWireTerminalRoutes(wire, components, planeSettings))
     : [];
   const selectedComponent = selection?.kind === "component"
     ? components.find((component) => component.id === selection.id) ?? null
@@ -4802,7 +4854,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     ? [...draftWirePoints, cursorPoint]
     : draftWirePoints;
   const wireDisplayNodes = Array.from(
-    resolvedWires.reduce((nodesByPointKey, wire) => {
+    wireNodeWires.reduce((nodesByPointKey, wire) => {
       const isSelected = selection?.kind === "wire" && selection.id === wire.id;
 
       wire.points.forEach((point, index) => {
@@ -5121,16 +5173,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       }
       : getNextComponentSpawnPoint();
 
-    return snapComponentToPlaneGrid(
-      createCanvasComponent(
-        nextId,
-        builderTags,
-        type,
-        spawnPoint.x,
-        spawnPoint.y
-      ),
-      currentPlaneSettings
+    const component = createCanvasComponent(
+      nextId,
+      builderTags,
+      type,
+      spawnPoint.x,
+      spawnPoint.y
     );
+
+    return point
+      ? snapComponentByTerminal(component, point, currentPlaneSettings)
+      : snapComponentToPlaneGrid(component, currentPlaneSettings);
   }
 
   function handlePaletteMouseDown(
@@ -5422,7 +5475,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         wire.points,
         endpointIndex,
         snapTarget.point,
-        getWireEndpointPreferredAxis(wire, endpointIndex, componentsRef.current, snapTarget.point)
+        getWireEndpointPreferredAxis(
+          wire,
+          endpointIndex,
+          componentsRef.current,
+          snapTarget.point,
+          planeSettingsRef.current.gridSpacing * 0.25
+        ),
+        planeSettingsRef.current.gridSpacing * 0.25
       );
 
       if (wireReconnectTarget.endpoint === "start") {
@@ -5909,7 +5969,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     dragState.current = {
       componentId,
       offsetX: point.x - component.x,
-      offsetY: point.y - component.y
+      offsetY: point.y - component.y,
+      pointerPoint: point
     };
     setDraggingComponentId(componentId);
     setSelection({ kind: "component", id: componentId });
@@ -6198,7 +6259,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       dragState.current = {
         componentId,
         offsetX: point.x - component.x,
-        offsetY: point.y - component.y
+        offsetY: point.y - component.y,
+        pointerPoint: point
       };
     }
 
@@ -7508,6 +7570,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         cx={terminal.x}
                         cy={terminal.y}
                         r={3}
+                      />
+                    ))}
+                    {stubDebugNodes.map((route, index) => (
+                      <circle
+                        key={`stub-debug-${index}-${route.portId}`}
+                        className="freeplay-terminal-debug freeplay-terminal-debug--stub"
+                        cx={route.stub.x}
+                        cy={route.stub.y}
+                        r={2.5}
                       />
                     ))}
                   </svg>

@@ -93,8 +93,11 @@ export function getComponentPlanePadding(planeSettings: BuilderPlaneSettings): n
   return Math.ceil(minPadding / planeSettings.gridSpacing) * planeSettings.gridSpacing;
 }
 
-export function getComponentPlaneSnapOffset(component: BuilderComponent): Point {
-  const anchorTerminal = getTerminalDefinition(component.type, getDefaultEntryTerminalId(component.type));
+export function getComponentPlaneSnapOffset(component: BuilderComponent, terminalId?: string): Point {
+  const anchorTerminal = getTerminalDefinition(
+    component.type,
+    terminalId ?? getDefaultEntryTerminalId(component.type)
+  );
 
   if (!anchorTerminal) {
     return {
@@ -104,6 +107,59 @@ export function getComponentPlaneSnapOffset(component: BuilderComponent): Point 
   }
 
   return rotatePoint({ x: anchorTerminal.x, y: anchorTerminal.y }, component.rotation);
+}
+
+/**
+ * Direccion hacia FUERA del glifo para un borne. Se calcula desde el centro de
+ * rotacion del simbolo, no desde la caja del componente: asi un borne izquierdo
+ * siempre sale hacia la izquierda aunque el componente este rotado.
+ */
+export function getTerminalOutwardDirection(component: BuilderComponent, terminalId: string): Point {
+  const terminal = getTerminalDefinition(component.type, terminalId);
+
+  if (!terminal) {
+    return { x: 0, y: 0 };
+  }
+
+  const rotatedPoint = rotatePoint({ x: terminal.x, y: terminal.y }, component.rotation);
+  const dx = rotatedPoint.x - ROTATION_CENTER_X;
+  const dy = rotatedPoint.y - ROTATION_CENTER_Y;
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return { x: dx >= 0 ? 1 : -1, y: 0 };
+  }
+
+  return { x: 0, y: dy >= 0 ? 1 : -1 };
+}
+
+/**
+ * Punto de rejilla mas cercano en la direccion de salida del borne. La pata
+ * pertenece al CABLE: el glifo no se toca.
+ */
+export function getTerminalStubEnd(
+  anchor: Point,
+  direction: Point,
+  planeSettings: BuilderPlaneSettings
+): Point {
+  const gridSpacing = planeSettings.gridSpacing;
+
+  if (direction.x !== 0) {
+    const x = direction.x > 0
+      ? Math.floor(anchor.x / gridSpacing) * gridSpacing + gridSpacing
+      : Math.ceil(anchor.x / gridSpacing) * gridSpacing - gridSpacing;
+
+    return clampPointToPlane({ x, y: anchor.y }, planeSettings);
+  }
+
+  if (direction.y !== 0) {
+    const y = direction.y > 0
+      ? Math.floor(anchor.y / gridSpacing) * gridSpacing + gridSpacing
+      : Math.ceil(anchor.y / gridSpacing) * gridSpacing - gridSpacing;
+
+    return clampPointToPlane({ x: anchor.x, y }, planeSettings);
+  }
+
+  return anchor;
 }
 
 export function requantizeComponentToPlaneGrid(
@@ -139,9 +195,13 @@ export function requantizeComponentToPlaneGrid(
   };
 }
 
-export function snapComponentToPlaneGrid(component: BuilderComponent, planeSettings: BuilderPlaneSettings): BuilderComponent {
+export function snapComponentToPlaneGrid(
+  component: BuilderComponent,
+  planeSettings: BuilderPlaneSettings,
+  terminalId?: string
+): BuilderComponent {
   const padding = getComponentPlanePadding(planeSettings);
-  const snapOffset = getComponentPlaneSnapOffset(component);
+  const snapOffset = getComponentPlaneSnapOffset(component, terminalId);
   const anchorX = Math.round((component.x + snapOffset.x) / planeSettings.gridSpacing) * planeSettings.gridSpacing;
   const anchorY = Math.round((component.y + snapOffset.y) / planeSettings.gridSpacing) * planeSettings.gridSpacing;
 
@@ -215,7 +275,12 @@ export function clampSceneBounds(scene: BuilderScene, planeSettings: BuilderPlan
     }
 
     nextComponents[index] = clampedComponent;
-    nextWires = moveAttachedWireEndpoints(nextWires, currentComponent, clampedComponent);
+    nextWires = moveAttachedWireEndpoints(
+      nextWires,
+      currentComponent,
+      clampedComponent,
+      planeSettings.gridSpacing
+    );
   }
 
   return {
@@ -245,7 +310,12 @@ export function clampSceneToPlane(scene: BuilderScene, planeSettings: BuilderPla
     }
 
     nextComponents[index] = nextComponent;
-    nextWires = moveAttachedWireEndpoints(nextWires, currentComponent, nextComponent);
+    nextWires = moveAttachedWireEndpoints(
+      nextWires,
+      currentComponent,
+      nextComponent,
+      planeSettings.gridSpacing
+    );
   }
 
   return {
@@ -290,12 +360,28 @@ export function createOrthogonalPath(currentPoints: Point[], targetPoint: Point,
     return currentPoints;
   }
 
-  if (previousPoint.x === targetPoint.x || previousPoint.y === targetPoint.y) {
-    return [...currentPoints, targetPoint];
+  const tolerance = planeSettings.gridSpacing * 0.25;
+  const deltaX = targetPoint.x - previousPoint.x;
+  const deltaY = targetPoint.y - previousPoint.y;
+  const withinX = Math.abs(deltaX) <= tolerance;
+  const withinY = Math.abs(deltaY) <= tolerance;
+
+  // Cerca de la alineacion: un solo tramo recto en el eje dominante. Nunca
+  // se emite una diagonal de 1-2 px.
+  if (withinX || withinY) {
+    const alignToX = withinX && (!withinY || Math.abs(deltaX) <= Math.abs(deltaY));
+
+    return [
+      ...currentPoints,
+      alignToX
+        ? { x: previousPoint.x, y: targetPoint.y }
+        : { x: targetPoint.x, y: previousPoint.y }
+    ];
   }
 
   const beforePreviousPoint = currentPoints[currentPoints.length - 2] ?? null;
-  const prefersVerticalFirst = beforePreviousPoint !== null && beforePreviousPoint.x === previousPoint.x;
+  const prefersVerticalFirst = beforePreviousPoint !== null
+    && Math.abs(beforePreviousPoint.x - previousPoint.x) <= tolerance;
   const elbow = prefersVerticalFirst
     ? { x: previousPoint.x, y: targetPoint.y }
     : { x: targetPoint.x, y: previousPoint.y };
@@ -474,12 +560,16 @@ export function simplifyWirePoints(points: Point[]): Point[] {
   return simplified.length >= 2 ? simplified : normalized;
 }
 
-export function getSegmentAxis(start: Point, end: Point): "horizontal" | "vertical" | null {
-  if (Math.abs(start.x - end.x) < 1) {
+export function getSegmentAxis(
+  start: Point,
+  end: Point,
+  tolerance = 1
+): "horizontal" | "vertical" | null {
+  if (Math.abs(start.x - end.x) <= tolerance) {
     return "vertical";
   }
 
-  if (Math.abs(start.y - end.y) < 1) {
+  if (Math.abs(start.y - end.y) <= tolerance) {
     return "horizontal";
   }
 
@@ -496,7 +586,8 @@ export function repositionWireEndpointOrthogonally(
   points: Point[],
   endpointIndex: number,
   endpointPoint: Point,
-  preferredAxis: "horizontal" | "vertical"
+  preferredAxis: "horizontal" | "vertical",
+  tolerance = 1
 ): Point[] {
   if (points.length < 2 || !isWireEndpointIndex(endpointIndex, points.length)) {
     return points;
@@ -512,7 +603,7 @@ export function repositionWireEndpointOrthogonally(
     return nextPoints;
   }
 
-  if (getSegmentAxis(adjacentPoint, endpointPoint) !== null) {
+  if (getSegmentAxis(adjacentPoint, endpointPoint, tolerance) !== null) {
     return cleanWirePath(nextPoints);
   }
 
@@ -527,7 +618,7 @@ export function repositionWireEndpointOrthogonally(
       : cleanWirePath([...nextPoints.slice(0, -1), elbowPoint, endpointPoint]);
   }
 
-  const outerAxis = getSegmentAxis(adjacentPoint, outerPoint);
+  const outerAxis = getSegmentAxis(adjacentPoint, outerPoint, tolerance);
   const canAdjustAdjacent = (preferredAxis === "horizontal" && outerAxis === "vertical")
     || (preferredAxis === "vertical" && outerAxis === "horizontal");
 
@@ -555,24 +646,18 @@ export function getWireSegmentMidpoint(left: Point, right: Point): Point {
 }
 
 export function getTerminalApproachAxis(component: BuilderComponent, terminalId: string): "horizontal" | "vertical" {
-  const terminal = getTerminalDefinition(component.type, terminalId);
+  const direction = getTerminalOutwardDirection(component, terminalId);
 
-  if (!terminal) {
-    return "horizontal";
-  }
-
-  const rotatedPoint = rotatePoint({ x: terminal.x, y: terminal.y }, component.rotation);
-  const horizontalDistance = Math.abs(rotatedPoint.x - ROTATION_CENTER_X);
-  const verticalDistance = Math.abs(rotatedPoint.y - ROTATION_CENTER_Y);
-
-  return horizontalDistance >= verticalDistance ? "horizontal" : "vertical";
+  return direction.x !== 0 ? "horizontal" : "vertical";
 }
 
 export function moveAttachedWireEndpoints(
   wires: BuilderWire[],
   previousComponent: BuilderComponent,
-  nextComponent: BuilderComponent
+  nextComponent: BuilderComponent,
+  gridSpacing = 18
 ): BuilderWire[] {
+  const tolerance = gridSpacing * 0.25;
   const movedTerminalPoints = new Map(
     getTerminalDefinitions(previousComponent.type).map((terminal) => [
       getPortId(previousComponent.id, terminal.id),
@@ -594,7 +679,13 @@ export function moveAttachedWireEndpoints(
     const endTerminal = wire.endPortId ? movedTerminalPoints.get(wire.endPortId) : undefined;
 
     if (startTerminal) {
-      nextPoints = repositionWireEndpointOrthogonally(nextPoints, 0, startTerminal.point, startTerminal.axis);
+      nextPoints = repositionWireEndpointOrthogonally(
+        nextPoints,
+        0,
+        startTerminal.point,
+        startTerminal.axis,
+        tolerance
+      );
       didMove = true;
     }
 
@@ -603,7 +694,8 @@ export function moveAttachedWireEndpoints(
         nextPoints,
         nextPoints.length - 1,
         endTerminal.point,
-        endTerminal.axis
+        endTerminal.axis,
+        tolerance
       );
       didMove = true;
     }

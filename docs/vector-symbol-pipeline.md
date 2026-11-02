@@ -1,7 +1,7 @@
 ---
 type: documentation
 entity: feature
-version: 1.5
+version: 1.6
 ---
 
 # Pipeline de símbolos vectoriales (SVG del usuario)
@@ -319,7 +319,10 @@ alteración de otros componentes. Compuerta: **ui vitest 194/194**.
   idempotencia, rungs M/TR1/Y/D, M enclavado y lámpara). Gates WP20: ui tsc **25** (< baseline 28),
   ui vitest **212/212**, plc-engine **7/7**, `pnpm -r build` **OK**.
 
-### Vano horizontal común de dos bornes (2026-11-01, D47)
+### Vano horizontal común de dos bornes (2026-11-01, D47) — **REVERTIDO por D50**
+
+> Se conserva como histórico. El vano común 8..152, las patas añadidas y el escalado de glifos
+> fueron revertidos: el arte y los terminales vuelven a `d9e5057`.
 
 - **Síntoma**: un XIC (viewBox 64) y un PUSH_BUTTON_NO (viewBox 72) alineados por el borne
   izquierdo no podían tener una vertical recta entre sus bornes derechos: el XIC proyectaba
@@ -329,10 +332,10 @@ alteración de otros componentes. Compuerta: **ui vitest 194/194**.
   dejando 5.333 px de margen horizontal; el viewBox 64 se escalaba por anchura (`1.25`) y ocupaba
   160 px. El vano de terminales dependía del **aspect ratio del arte**, no del modelo.
 - **Arreglo**: todos los símbolos horizontales de dos bornes usan el mismo vano local
-  **8..152** y `y=51`. Para que el glifo coincida, los símbolos con arte 6..122 se escalan
-  uniformemente a 160 px de ancho: `height = viewBoxHeight * (144/116)` — pulsadores/ESTOP
-  `72 * 1.241379 = 89.379 px`, breaker 1P `64 * 1.241379 = 79.448 px`. El OL (arte 2.3..125.7)
-  ya caía en 8..152 con su altura de 84 px.
+  **8..152** y `y=51`. **No se cambia el tamaño ni el diseño del glifo**: los pulsadores/ESTOP
+  conservan sus 84 px y solo se añaden patas terminales de `2.2857..6` y `122..125.7143` en el
+  viewBox 72 para que el cable llegue al borde; el OL (arte 2.3..125.7) ya caía en 8..152. El
+  breaker 1P conserva su glifo y su pata 6..122 cubre el terminal 8..152.
 - **Migración**: al cargar, `clampSceneToPlane` reajusta cada componente a la retícula de su
   borne de entrada y mueve sus cables; `reconcileWireTopology` fija los extremos y, si ambos
   quedan en la misma X/Y, colapsa el trazado a una recta. Así un circuito guardado con el vano
@@ -366,6 +369,64 @@ alteración de otros componentes. Compuerta: **ui vitest 194/194**.
   por encima de los componentes (`freeplay-debug-overlay`).
 - **Test**: `terminal-alignment.spec.ts` recorre todos los tipos y rotaciones con
   `y = 0, 500, 5000, 20000`; el extremo del cable y el terminal difieren <0.01.
+
+### Terminales de NCTO/NOTC y verticales (2026-11-02, D49) — **REVERTIDO por D50**
+
+> Se conserva como histórico. Los anillos movidos a 6.4/121.6 y las patas añadidas fueron
+> revertidos: el temporizador vuelve a sus anillos originales 25.6/102.4 y a su arte de `d9e5057`.
+
+### Restauración pixel-exacta de glifos + stubs en el cable (2026-11-02, D50)
+
+- **Regla dura**: arte y coordenadas internas de `renderSymbolGraphic` **byte-idénticos a
+  `d9e5057`**. No se mueven anillos, no se añaden patas, no se rediseña ningún símbolo.
+  `NCTO/NOTC` usan sus anillos 25.6/102.4; `PUSH_BUTTON_NO`/`PUSH_BUTTON_NC`/`ESTOP`/`OL` usan el
+  vano 8/152; `BREAKER_1P` conserva su pata 6/122.
+- **Anclas**: cada terminal expone su `(x, y)` local original. Los extremos del cable guardan
+  `startPortId`/`endPortId` (`componentId:terminalId`), nunca píxeles; se recalculan en cada render
+  y en cada movimiento desde `getTerminalPoint`.
+- **Pata de cable**: `ui/src/diagram/wireRoute.ts` dibuja
+  `ancla exacta -> punto de rejilla exterior -> ruta ortogonal`. La pata es parte del polilínea y
+  no se guarda en el cable. Si los dos bornes comparten X o Y, la ruta colapsa a **2 puntos**.
+- **Snap por terminal**: `snapComponentToPlaneGrid(component, plane, terminalId)` usa
+  `origin = snap(origin + terminalLocal) - terminalLocal`. Al crear o soltar un componente se elige
+  el terminal más cercano al cursor (`snapComponentByTerminal`), no siempre el borne de entrada.
+- **Edición**: `resolvedWires` usa la ruta visual con stubs; `wireNodeWires` conserva los índices
+  del cable guardado, de modo que los stubs no se puedan arrastrar.
+- **Debug**: `?debugTerminals=1` dibuja anclas en rojo y extremos de pata en cian.
+- **Tests**: `wire-stubs.spec.ts` cubre anclas originales, stubs, matriz
+  `y=0/500/5000/20000` × rotaciones 0–3, snap por terminal y tolerancia; `vertical-wires.spec.ts`
+  (4) cubre la migración del circuito guardado y la vertical NO↔NCTO; `terminal-alignment.spec.ts`
+  (288) mantiene los extremos <0.01. Diff de glifos/terminales contra `d9e5057`: **vacío**.
+
+### Tolerancia del router: nunca un Z de 1-2 px (2026-11-02, D51)
+
+- **Regla**: `EPS = 0.25 * GRID` (4.5 px con rejilla 18). Si `|dx| <= EPS` o `|dy| <= EPS` entre
+  las dos anclas de terminal, el cable es **una recta de 2 puntos** en el eje dominante. El borne
+  inicial manda en ese eje; el otro extremo absorbe el residuo de 1-2 px bajo el anillo. Nunca se
+  emite una diagonal ni un Z.
+- **Comparaciones sustituidas**: `createOrthogonalPath` (`===` exacto), `getSegmentAxis` (`<1`),
+  `rebuildWirePath` (`<0.001`), `createWire` (`===`), `repositionWireEndpointOrthogonally`
+  (`getSegmentAxis` sin tolerancia) y el router visual (`isAligned`/`routeBetweenStubs`).
+- **Limpieza**: `collapseWireRoute` elimina colineales y segmentos menores que `EPS`; al absorber
+  un escalon pega el punto exterior al eje del anterior para no dejar diagonal.
+- **Verificación**: `(0,0)`, `(1,2)`, `(2,1)`, `(0.5,0)`, `(0,3)` → 2 puntos; `(0,3*GRID)` →
+  recta vertical de 2 puntos; `(2*GRID,2*GRID)` → ruta ortogonal de 3+ puntos.
+
+### PUSH_BUTTON_NO: wrapper uniforme probado y revertido (2026-11-02, D52)
+
+- **Medida**: `ringL.cx=34`, `ringR.cx=94`, `ringY=36`, `span=60` en viewBox. Proyectado al
+  componente (160×84, viewBox 128×72): `ringL=45`, `ringR=115`, `span=70`; `70 mod 18 = 16`, no es
+  múltiplo de la rejilla.
+- **Intento**: envolver el contenido en `<g transform="translate(-67.657 -38.057) scale(2.057143)">`
+  colocaba los anillos en `(8,51)`/`(152,51)` y conservaba el hash interno, pero el glifo resultaba
+  **gigante** y las patas originales se iban a ≈`-59`/`219` px. **Rechazado y revertido.**
+- **Estado actual**: el glifo vuelve a 84 px, sin wrapper; los anillos siguen en 45/115. Los anclas
+  de `PUSH_BUTTON_NO`/`PUSH_BUTTON_NC`/`ESTOP`/`OL` siguen en 8/152. Queda pendiente decidir entre
+  mover los anillos, mover las anclas o redibujar.
+- **Otras glyphs (solo reporte, sin fix)**: XIC/XIO/OTE/LAMP sin anillos, vano de patas 144 (OK);
+  PUSH_BUTTON_NC anillos 45/115 span 70 y y=44; ESTOP anillos ~50.6/107.0 span ~56.4 (reposo) y
+  ~50.6/107.4 span ~56.8 (accionado); NCTO/NOTC anillos 32/128 span 96 y y=48.5.
+- **Gates**: ui vitest **882/882**; tsc **25**; engine **7/7**; build **OK**.
 
 ### Temporizadores al desenergizar la bobina (2026-11-02, D48)
 

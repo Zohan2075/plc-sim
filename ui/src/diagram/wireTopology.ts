@@ -37,7 +37,6 @@ export interface WireTopologyReport {
 
 const TERMINAL_SNAP_DISTANCE = 4;
 const JUNCTION_TOLERANCE = 2;
-const PORT_REANCHOR_DISTANCE = 24;
 const EPSILON = 0.001;
 
 function samePoint(left: Point, right: Point): boolean {
@@ -217,7 +216,13 @@ function insertPointIntoWire(wire: BuilderWire, point: Point): boolean {
   return false;
 }
 
-function rebuildWirePath(points: Point[], startAxis: Axis | null, endAxis: Axis | null): Point[] {
+function rebuildWirePath(
+  points: Point[],
+  startAxis: Axis | null,
+  endAxis: Axis | null,
+  gridSpacing = 18
+): Point[] {
+  const tolerance = gridSpacing * 0.25;
   let nextPoints = points.map((point) => ({ ...point }));
 
   if (nextPoints.length < 2) {
@@ -225,7 +230,13 @@ function rebuildWirePath(points: Point[], startAxis: Axis | null, endAxis: Axis 
   }
 
   if (startAxis) {
-    nextPoints = repositionWireEndpointOrthogonally(nextPoints, 0, nextPoints[0]!, startAxis);
+    nextPoints = repositionWireEndpointOrthogonally(
+      nextPoints,
+      0,
+      nextPoints[0]!,
+      startAxis,
+      tolerance
+    );
   }
 
   if (endAxis) {
@@ -233,22 +244,27 @@ function rebuildWirePath(points: Point[], startAxis: Axis | null, endAxis: Axis 
       nextPoints,
       nextPoints.length - 1,
       nextPoints[nextPoints.length - 1]!,
-      endAxis
+      endAxis,
+      tolerance
     );
   }
 
   if (nextPoints.length > 2) {
     const start = nextPoints[0]!;
     const end = nextPoints[nextPoints.length - 1]!;
+    const deltaX = end.x - start.x;
+    const deltaY = end.y - start.y;
+    const withinX = Math.abs(deltaX) <= tolerance;
+    const withinY = Math.abs(deltaY) <= tolerance;
 
-    // Si los dos extremos quedaron en la misma vertical/horizontal, el tramo
-    // recto es la ruta correcta: los quiebres intermedios son restos de una
-    // alineacion anterior (p. ej. el borne derecho de un pulsador).
-    if (
-      Math.abs(start.x - end.x) < 0.001
-      || Math.abs(start.y - end.y) < 0.001
-    ) {
-      return [{ x: start.x, y: start.y }, { x: end.x, y: end.y }];
+    // Cerca de la alineacion: recta de 2 puntos en el eje dominante. El
+    // extremo final absorbe el residuo de 1-2 px; nunca se deja un Z.
+    if (withinX || withinY) {
+      const alignToX = withinX && (!withinY || Math.abs(deltaX) <= Math.abs(deltaY));
+
+      return alignToX
+        ? [{ x: start.x, y: start.y }, { x: start.x, y: end.y }]
+        : [{ x: start.x, y: start.y }, { x: end.x, y: start.y }];
     }
   }
 
@@ -279,24 +295,13 @@ function resolveTerminalEndpoint(
   }
 
   const endpointIndex = endpoint === "start" ? 0 : wire.points.length - 1;
-  const endpointPoint = wire.points[endpointIndex];
 
-  if (!endpointPoint) {
+  if (!wire.points[endpointIndex]) {
     return null;
   }
 
-  const distance = distanceBetween(endpointPoint, terminal.terminal);
-
-  if (distance > PORT_REANCHOR_DISTANCE) {
-    if (endpoint === "start") {
-      wire.startPortId = null;
-    } else {
-      wire.endPortId = null;
-    }
-
-    return null;
-  }
-
+  // Un portId valido es la fuente de verdad: el extremo se recoloca en el
+  // terminal aunque el punto guardado haya quedado lejos tras una migracion.
   wire.points[endpointIndex] = { x: terminal.terminal.x, y: terminal.terminal.y };
 
   return getTerminalApproachAxis(terminal.component, terminal.terminal.terminalId);
@@ -304,8 +309,9 @@ function resolveTerminalEndpoint(
 
 export function reconcileWireTopology(
   scene: BuilderScene,
-  _planeSettings?: BuilderPlaneSettings
+  planeSettings?: BuilderPlaneSettings
 ): WireTopologyReport {
+  const gridSpacing = planeSettings?.gridSpacing ?? 18;
   const components = scene.components.map((component) => ({ ...component }));
   let wires = scene.wires
     .filter((wire) => wire.points.length >= 2)
@@ -348,7 +354,12 @@ export function reconcileWireTopology(
     }
 
     for (const wire of wires) {
-      wire.points = rebuildWirePath(wire.points, startAxes.get(wire.id) ?? null, endAxes.get(wire.id) ?? null);
+      wire.points = rebuildWirePath(
+        wire.points,
+        startAxes.get(wire.id) ?? null,
+        endAxes.get(wire.id) ?? null,
+        gridSpacing
+      );
     }
   };
 
@@ -434,7 +445,12 @@ export function reconcileWireTopology(
       const wire = wires.find((candidate) => candidate.id === wireId);
 
       if (wire && !removedWireIds.has(wire.id)) {
-        wire.points = rebuildWirePath(wire.points, startAxes.get(wire.id) ?? null, endAxes.get(wire.id) ?? null);
+        wire.points = rebuildWirePath(
+        wire.points,
+        startAxes.get(wire.id) ?? null,
+        endAxes.get(wire.id) ?? null,
+        gridSpacing
+      );
       }
     }
 

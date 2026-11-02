@@ -2047,6 +2047,10 @@
 	pointer-events: none;
 }
 
+.freeplay-terminal-debug--stub {
+	fill: #0e7490;
+}
+
 .freeplay-wire__snap-marker {
 	fill: rgba(14, 116, 144, 0.16);
 	stroke: #0e7490;
