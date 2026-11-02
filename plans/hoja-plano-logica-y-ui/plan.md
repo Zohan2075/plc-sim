@@ -390,10 +390,11 @@ Orden estricto: 1 → 2 → 3 → 4 → 5 → 6 → 7. Fase 3 puede empezar tras
 - **Limpieza**: `collapseWireRoute` elimina colineales y segmentos < `EPS`; al absorber un escalón pega el punto exterior al eje anterior para no dejar diagonal.
 - **Verificación**: `(0,0)`, `(1,2)`, `(2,1)`, `(0.5,0)`, `(0,3)` → 2 puntos; `(0,3*GRID)` → recta vertical; `(2*GRID,2*GRID)` → ruta ortogonal de 3+ puntos.
 
-### 2026-11-02 (D52): PUSH_BUTTON_NO, wrapper uniforme probado y revertido
+### 2026-11-02 (D52): PUSH_BUTTON_NO, estado final sin wrapper ni pads
 
 - **Medida**: `ringL.cx=34`, `ringR.cx=94`, `ringY=36`, `span=60` viewBox; proyectado 45/115, span 70 (70 mod 18 = 16).
-- **Intento**: `s=2.057142857`, `tx=-67.657143`, `ty=-38.057143` colocaba los anillos en (8,51)/(152,51) y conservaba el hash interno, pero el glifo quedaba gigante y las patas se iban a ≈-59/219 px. **Rechazado y revertido.**
-- **Estado actual**: glifo a 84 px sin wrapper; anillos en 45/115; anclas PB/ESTOP/OL en 8/152. Pendiente decidir entre mover anillos, mover anclas o redibujar.
+- **Wrapper**: `s=2.057142857`, `tx=-67.657143`, `ty=-38.057143` colocaba los anillos en (8,51)/(152,51) pero el glifo quedaba gigante y las patas se iban a ≈-59/219 px. **Rechazado y revertido.**
+- **Mover anillos**: los anillos 34/94 son los contactos fijos que cierra la barra 38..90; moverlos a 2.285/125.714 rompía el puente. **Rechazado y revertido.**
+- **Estado final**: glifo original de 84 px, anillos 34/94, patas 6..28 / 100..122, barra 38..90; sin wrapper ni pads externos. Anclas PB/ESTOP/OL en 8/152; el cable cae en el extremo exterior de la pata y los anillos quedan dentro. Contenido interno byte-idéntico a `d9e5057` (`ACE595AB…5ADDA5`).
 - **Otras glyphs (reporte, sin fix)**: XIC/XIO/OTE/LAMP sin anillos, vano 144 (OK); PUSH_BUTTON_NC anillos 45/115 span 70 y y=44; ESTOP span ~56.4/56.8; NCTO/NOTC anillos 32/128 span 96 y y=48.5.
 - **Gates**: ui vitest **882/882**; tsc **25**; engine **7/7**; build **OK**.

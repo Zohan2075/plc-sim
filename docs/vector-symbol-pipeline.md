@@ -412,17 +412,21 @@ alteración de otros componentes. Compuerta: **ui vitest 194/194**.
 - **Verificación**: `(0,0)`, `(1,2)`, `(2,1)`, `(0.5,0)`, `(0,3)` → 2 puntos; `(0,3*GRID)` →
   recta vertical de 2 puntos; `(2*GRID,2*GRID)` → ruta ortogonal de 3+ puntos.
 
-### PUSH_BUTTON_NO: wrapper uniforme probado y revertido (2026-11-02, D52)
+### PUSH_BUTTON_NO: estado final, sin wrapper ni pads (2026-11-02, D52)
 
 - **Medida**: `ringL.cx=34`, `ringR.cx=94`, `ringY=36`, `span=60` en viewBox. Proyectado al
   componente (160×84, viewBox 128×72): `ringL=45`, `ringR=115`, `span=70`; `70 mod 18 = 16`, no es
   múltiplo de la rejilla.
-- **Intento**: envolver el contenido en `<g transform="translate(-67.657 -38.057) scale(2.057143)">`
-  colocaba los anillos en `(8,51)`/`(152,51)` y conservaba el hash interno, pero el glifo resultaba
-  **gigante** y las patas originales se iban a ≈`-59`/`219` px. **Rechazado y revertido.**
-- **Estado actual**: el glifo vuelve a 84 px, sin wrapper; los anillos siguen en 45/115. Los anclas
-  de `PUSH_BUTTON_NO`/`PUSH_BUTTON_NC`/`ESTOP`/`OL` siguen en 8/152. Queda pendiente decidir entre
-  mover los anillos, mover las anclas o redibujar.
+- **Intento de wrapper**: `<g transform="translate(-67.657 -38.057) scale(2.057143)">` colocaba los
+  anillos en `(8,51)`/`(152,51)` y conservaba el hash interno, pero el glifo resultaba **gigante** y
+  las patas se iban a ≈`-59`/`219` px. **Rechazado y revertido.**
+- **Intento de mover anillos**: los anillos `34/94` son los contactos fijos que cierra la barra
+  `38..90`; moverlos a `2.285/125.714` dejaba la barra sin puente. **Rechazado y revertido.**
+- **Solución final**: se mantiene el glifo original de 84 px, anillos `34/94`, patas `6..28` /
+  `100..122` y barra `38..90`, **sin wrapper y sin pads externos**. Los anclas de
+  `PUSH_BUTTON_NO`/`PUSH_BUTTON_NC`/`ESTOP`/`OL` siguen en `8/152`; el cable cae en el extremo
+  exterior de la pata y los anillos quedan dentro. El contenido interno sigue siendo **byte-idéntico
+  a `d9e5057`** (SHA-256 `ACE595AB…5ADDA5`).
 - **Otras glyphs (solo reporte, sin fix)**: XIC/XIO/OTE/LAMP sin anillos, vano de patas 144 (OK);
   PUSH_BUTTON_NC anillos 45/115 span 70 y y=44; ESTOP anillos ~50.6/107.0 span ~56.4 (reposo) y
   ~50.6/107.4 span ~56.8 (accionado); NCTO/NOTC anillos 32/128 span 96 y y=48.5.
