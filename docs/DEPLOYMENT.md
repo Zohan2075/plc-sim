@@ -18,6 +18,22 @@ pnpm start
 - Server: `http://localhost:3000`
 - Health check: `http://localhost:3000/healthz`
 
+## Social preview (Open Graph / Twitter)
+
+`ui/index.html` contains static OG/Twitter tags. All absolute URLs come from one
+build-time value, `VITE_PUBLIC_URL` (absolute origin, no trailing slash):
+
+```bash
+VITE_PUBLIC_URL=https://<domain> pnpm build
+```
+
+- Set `VITE_PUBLIC_URL` in the Netlify/Vercel/Docker build environment before building.
+- The card image is `ui/public/og-image.png` (1200x630 PNG, ~39 KB). The Vite
+  config serves this overlay in dev and copies it into `ui/dist` on build, so it
+  is published at the site root as `/og-image.png`.
+- Verify after deploy: `curl -I https://<domain>/og-image.png` must return
+  `200`, `Content-Type: image/png` and `Content-Length` under 5 MB.
+
 ## Docker (optional)
 
 ```bash
