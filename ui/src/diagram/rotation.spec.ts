@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  formatRotationRemovalMessage,
   getComponentTerminals,
   getDefaultEntryTerminalId,
   rotateComponentInScene
@@ -12,12 +13,12 @@ import type {
   BuilderComponentType,
   BuilderPlaneSettings,
   BuilderScene,
+  BuilderWire,
   Point
 } from "../DiagramBuilder";
 import { snapComponentToPlaneGrid } from "./grid";
 import { resolveDiagramShortcut } from "./interaction";
 import { parseCircuitSnapshot } from "./snapshot";
-import { resolveWireDisplayPoints } from "./wireRoute";
 
 const planeSettings: BuilderPlaneSettings = { gridSpacing: 18, height: 20000, width: 4200 };
 const TYPES: BuilderComponentType[] = [
@@ -98,7 +99,7 @@ describe("rotateComponentInScene (menu/R action path)", () => {
           current.id,
           current.rotation + 1,
           planeSettings
-        );
+        ).scene;
 
         const rotated = scene.components[0]!;
         const terminals = getComponentTerminals(rotated);
@@ -146,7 +147,7 @@ describe("rotateComponentInScene (menu/R action path)", () => {
           current.id,
           current.rotation + delta,
           planeSettings
-        );
+        ).scene;
       }
 
       const finalComponent = scene.components[0]!;
@@ -168,12 +169,36 @@ describe("rotateComponentInScene (menu/R action path)", () => {
     const start = snapComponentToPlaneGrid(component("XIC"), planeSettings);
     const scene: BuilderScene = { components: [start], wires: [] };
 
-    expect(rotateComponentInScene(scene, start.id, Number.NaN, planeSettings)).toBe(scene);
-    expect(rotateComponentInScene(scene, start.id, Number.POSITIVE_INFINITY, planeSettings)).toBe(scene);
+    const nan = rotateComponentInScene(scene, start.id, Number.NaN, planeSettings);
+    const infinite = rotateComponentInScene(scene, start.id, Number.POSITIVE_INFINITY, planeSettings);
+
+    expect(nan.changed).toBe(false);
+    expect(nan.scene).toBe(scene);
+    expect(infinite.changed).toBe(false);
+    expect(infinite.scene).toBe(scene);
     expect(scene.components[0]!.rotation).toBe(0);
   });
 
-  it("keeps wires 10/11 intact across a 90 degree round trip and re-anchors their display", () => {
+  it("does nothing when the angle does not change", () => {
+    const start = snapComponentToPlaneGrid(component("XIC"), planeSettings);
+    const wire: BuilderWire = {
+      color: "#1d4ed8",
+      endPortId: "builder-wire-noop:out",
+      id: "builder-wire-noop",
+      points: [{ x: 324, y: 450 }, { x: 468, y: 450 }],
+      startPortId: "builder-wire-noop:in",
+      thickness: 2
+    };
+    const scene: BuilderScene = { components: [start], wires: [wire] };
+    const result = rotateComponentInScene(scene, start.id, start.rotation, planeSettings);
+
+    expect(result.changed).toBe(false);
+    expect(result.removedWireIds).toEqual([]);
+    expect(result.scene).toBe(scene);
+    expect(result.scene.wires).toHaveLength(1);
+  });
+
+  it("deletes wires 10/11 on component-9, keeps the other 28 byte-identical", () => {
     const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "yd-control.circuit.json");
     const snapshot = parseCircuitSnapshot(JSON.parse(readFileSync(fixturePath, "utf8")));
     const scene: BuilderScene = {
@@ -184,60 +209,108 @@ describe("rotateComponentInScene (menu/R action path)", () => {
 
     expect(target).toBeDefined();
     expect(target!.type).toBe("XIC");
+    expect(scene.wires).toHaveLength(30);
 
-    const wireIds = new Set(["builder-wire-10", "builder-wire-11"]);
-    const before = new Map(
-      scene.wires
-        .filter((wire) => wireIds.has(wire.id))
-        .map((wire) => [wire.id, JSON.stringify(wire.points)])
-    );
+    const before = new Map(scene.wires.map((wire) => [wire.id, JSON.stringify(wire.points)]));
+    const result = rotateComponentInScene(scene, target!.id, target!.rotation + 1, planeSettings);
+    const rotatedTarget = result.scene.components.find((entry) => entry.id === target!.id)!;
+    const entryTerminal = getComponentTerminals(rotatedTarget).find(
+      (terminal) => terminal.terminalId === getDefaultEntryTerminalId(rotatedTarget.type)
+    )!;
 
-    expect(before.size).toBe(2);
-    console.log("wires 10/11 stored before:", JSON.stringify(Object.fromEntries(before)));
+    console.log("removed wire ids:", result.removedWireIds);
+    console.log("remaining wires:", result.scene.wires.length);
 
-    const rotated = rotateComponentInScene(
-      scene,
-      target!.id,
-      target!.rotation + 1,
-      planeSettings
-    );
-    const rotatedTarget = rotated.components.find((entry) => entry.id === target!.id)!;
-    const anchorByPort = new Map(
-      rotated.components
-        .flatMap((component) => getComponentTerminals(component))
-        .map((terminal) => [
-          terminal.portId,
-          { x: terminal.x, y: terminal.y }
-        ])
-    );
+    expect(result.changed).toBe(true);
+    expect(result.removedWireIds).toEqual(expect.arrayContaining(["builder-wire-10", "builder-wire-11"]));
+    expect(result.removedWireIds).toHaveLength(2);
+    expect(result.scene.wires).toHaveLength(28);
+    expect(result.scene.wires.some((wire) => wire.id === "builder-wire-10")).toBe(false);
+    expect(result.scene.wires.some((wire) => wire.id === "builder-wire-11")).toBe(false);
 
-    for (const wire of rotated.wires.filter((entry) => wireIds.has(entry.id))) {
-      const display = resolveWireDisplayPoints(wire, rotated.components, planeSettings);
-
-      console.log(
-        `wire ${wire.id} after 90°: ${display.length} pts ${JSON.stringify(display)} ` +
-        `start=${JSON.stringify(anchorByPort.get(wire.startPortId!))} ` +
-        `end=${JSON.stringify(anchorByPort.get(wire.endPortId!))}`
-      );
-
-      expect(display[0]).toEqual(anchorByPort.get(wire.startPortId!));
-      expect(display[display.length - 1]).toEqual(anchorByPort.get(wire.endPortId!));
-      expect([2, 3]).toContain(display.length);
-    }
-
-    const restored = rotateComponentInScene(
-      rotated,
-      target!.id,
-      rotatedTarget.rotation + 3,
-      planeSettings
-    );
-    const restoredTarget = restored.components.find((entry) => entry.id === target!.id)!;
-
-    expect(restoredTarget.rotation).toBe(0);
-
-    for (const wire of restored.wires.filter((entry) => wireIds.has(entry.id))) {
-      console.log(`wire ${wire.id} back at 0°: ${JSON.stringify(wire.points)}`);
+    for (const wire of result.scene.wires) {
       expect(JSON.stringify(wire.points)).toBe(before.get(wire.id));
     }
+
+    expect(Math.abs(entryTerminal.x / planeSettings.gridSpacing - Math.round(entryTerminal.x / planeSettings.gridSpacing)))
+      .toBeLessThan(0.01);
+    expect(Math.abs(entryTerminal.y / planeSettings.gridSpacing - Math.round(entryTerminal.y / planeSettings.gridSpacing)))
+      .toBeLessThan(0.01);
+  });
+
+  it("removes a branch that loses its deleted parent, and only that branch", () => {
+    const start = snapComponentToPlaneGrid(component("XIC"), planeSettings);
+    const parentWire: BuilderWire = {
+      color: "#1d4ed8",
+      endPortId: null,
+      id: "builder-wire-parent",
+      points: [{ x: 324, y: 450 }, { x: 324, y: 540 }, { x: 500, y: 540 }],
+      startPortId: "rotation-XIC:in",
+      thickness: 2
+    };
+    const branchWire: BuilderWire = {
+      color: "#1d4ed8",
+      endPortId: null,
+      id: "builder-wire-branch",
+      points: [{ x: 400, y: 540 }, { x: 400, y: 620 }],
+      startPortId: null,
+      thickness: 2
+    };
+    const unrelatedLooseWire: BuilderWire = {
+      color: "#1d4ed8",
+      endPortId: null,
+      id: "builder-wire-unrelated",
+      points: [{ x: 100, y: 100 }, { x: 100, y: 200 }],
+      startPortId: null,
+      thickness: 2
+    };
+    const scene: BuilderScene = {
+      components: [start],
+      wires: [parentWire, branchWire, unrelatedLooseWire]
+    };
+    const result = rotateComponentInScene(scene, start.id, start.rotation + 1, planeSettings);
+
+    expect(result.removedWireIds).toEqual(expect.arrayContaining([
+      "builder-wire-parent",
+      "builder-wire-branch"
+    ]));
+    expect(result.removedWireIds).not.toContain("builder-wire-unrelated");
+    expect(result.scene.wires.map((wire) => wire.id)).toEqual(["builder-wire-unrelated"]);
+  });
+
+  it("deletes the wires of two connected rotated components in one pass", () => {
+    const first = snapComponentToPlaneGrid(component("XIC"), planeSettings);
+    const second = snapComponentToPlaneGrid({
+      ...component("OTE"),
+      id: "rotation-OTE",
+      x: first.x + 288,
+      y: first.y
+    }, planeSettings);
+    const link: BuilderWire = {
+      color: "#1d4ed8",
+      endPortId: `${second.id}:in`,
+      id: "builder-wire-link",
+      points: [{ x: 468, y: 450 }, { x: 612, y: 450 }],
+      startPortId: `${first.id}:out`,
+      thickness: 2
+    };
+    const scene: BuilderScene = { components: [first, second], wires: [link] };
+
+    const afterFirst = rotateComponentInScene(scene, first.id, first.rotation + 1, planeSettings);
+    const afterSecond = rotateComponentInScene(
+      afterFirst.scene,
+      second.id,
+      second.rotation + 1,
+      planeSettings
+    );
+
+    expect(afterFirst.removedWireIds).toEqual(["builder-wire-link"]);
+    expect(afterSecond.scene.wires).toHaveLength(0);
+    expect(afterSecond.scene.components.map((entry) => entry.rotation)).toEqual([1, 1]);
+  });
+
+  it("formats the removal toast with singular/plural", () => {
+    expect(formatRotationRemovalMessage(1)).toBe("Rotated. 1 wire removed. Undo to restore.");
+    expect(formatRotationRemovalMessage(3)).toBe("Rotated. 3 wires removed. Undo to restore.");
   });
 });

@@ -2422,6 +2422,37 @@
 	max-width: none;
 }
 
+.freeplay-toast {
+	position: fixed;
+	left: 50%;
+	bottom: 28px;
+	z-index: 1200;
+	max-width: min(520px, calc(100vw - 32px));
+	padding: 10px 16px;
+	color: #f8fafc;
+	font-size: 0.82rem;
+	font-weight: 600;
+	text-align: center;
+	background: rgba(15, 23, 42, 0.94);
+	border: 1px solid rgba(148, 163, 184, 0.28);
+	border-radius: 999px;
+	box-shadow: 0 12px 30px rgba(15, 23, 42, 0.24);
+	transform: translateX(-50%);
+	pointer-events: none;
+	animation: freeplay-toast-in 120ms ease-out;
+}
+
+@keyframes freeplay-toast-in {
+	from {
+		opacity: 0;
+		transform: translate(-50%, 6px);
+	}
+	to {
+		opacity: 1;
+		transform: translate(-50%, 0);
+	}
+}
+
 .context-menu {
 	position: fixed;
 	z-index: 1000;

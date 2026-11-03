@@ -219,7 +219,7 @@ describe("context menu row rendering", () => {
         }
 
         const delta = action === "cw" ? 1 : action === "ccw" ? 3 : 2;
-        scene = rotateComponentInScene(scene, componentId, current.rotation + delta, settings);
+        scene = rotateComponentInScene(scene, componentId, current.rotation + delta, settings).scene;
       }
     };
 

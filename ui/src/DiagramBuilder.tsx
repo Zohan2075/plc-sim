@@ -628,8 +628,8 @@ function formatSourceVoltage(component: BuilderComponent): string {
   return `${getSourceVoltage(component)}V${sourceCurrentType.toUpperCase()}`;
 }
 
-function isBreakerClosed(component: BuilderComponent): boolean {
-  return isBreakerType(component.type);
+export function isBreakerClosed(component: BuilderComponent): boolean {
+  return isBreakerType(component.type) ? component.isClosed ?? true : false;
 }
 
 function isMaintainedSwitchClosed(component: BuilderComponent): boolean {
@@ -668,6 +668,32 @@ export function applyMomentaryRelease(components: BuilderComponent[], componentI
       ? { ...component, isPressed: false }
       : component
   );
+}
+
+/**
+ * Toggles the latched state of the manually operated maintained components:
+ * selector/limit/overload contacts and breakers. It deliberately has no
+ * simulator-running dependency; the click handler decides when to call it.
+ */
+export function toggleComponentOperateState(
+  components: BuilderComponent[],
+  componentId: string
+): BuilderComponent[] {
+  return components.map((component) => {
+    if (component.id !== componentId) {
+      return component;
+    }
+
+    if (isBreakerType(component.type)) {
+      return { ...component, isClosed: !isBreakerClosed(component) };
+    }
+
+    if (isMaintainedSwitchType(component.type)) {
+      return { ...component, isClosed: !isMaintainedSwitchClosed(component) };
+    }
+
+    return component;
+  });
 }
 
 function getInstructionTagValue(
@@ -2033,30 +2059,160 @@ function cloneScene(scene: BuilderScene): BuilderScene {
   };
 }
 
+const WIRE_JUNCTION_TOLERANCE = 2;
+
+// Rotation deletes attached wires; the message is used by the fixed toast.
+export function formatRotationRemovalMessage(removedWireCount: number): string {
+  return `Rotated. ${removedWireCount} wire${removedWireCount === 1 ? "" : "s"} removed. Undo to restore.`;
+}
+
+export interface ComponentRotationResult {
+  changed: boolean;
+  removedWireIds: string[];
+  scene: BuilderScene;
+}
+
+function distanceToWireSegment(point: Point, start: Point, end: Point): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+
+  const projection = Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)
+  );
+
+  return Math.hypot(
+    point.x - (start.x + projection * dx),
+    point.y - (start.y + projection * dy)
+  );
+}
+
+function pointTouchesWire(point: Point, wire: BuilderWire): boolean {
+  if (wire.points.some((candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y) <= WIRE_JUNCTION_TOLERANCE)) {
+    return true;
+  }
+
+  for (let index = 1; index < wire.points.length; index += 1) {
+    const start = wire.points[index - 1];
+    const end = wire.points[index];
+
+    if (start && end && distanceToWireSegment(point, start, end) <= WIRE_JUNCTION_TOLERANCE) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function pointTouchesAnyWire(
+  point: Point,
+  wires: readonly BuilderWire[],
+  excludeWireId?: string
+): boolean {
+  return wires.some(
+    (wire) => wire.id !== excludeWireId && pointTouchesWire(point, wire)
+  );
+}
+
+/**
+ * Deletes every wire whose endpoint is a terminal of the rotated component and
+ * then removes branch wires that only survived through a deleted parent. The
+ * surviving wires are returned byte-identical; no route is rebuilt.
+ */
+function removeWiresForRotation(
+  scene: BuilderScene,
+  attachedPortIds: ReadonlySet<string>
+): { removedWireIds: string[]; wires: BuilderWire[] } {
+  const deleted = new Set(
+    scene.wires
+      .filter(
+        (wire) =>
+          (wire.startPortId !== null && attachedPortIds.has(wire.startPortId))
+          || (wire.endPortId !== null && attachedPortIds.has(wire.endPortId))
+      )
+      .map((wire) => wire.id)
+  );
+  let remaining = scene.wires.filter((wire) => !deleted.has(wire.id));
+
+  // A branch may inherit a deleted parent; repeat until no wire loses its
+  // last surviving attachment. This removes transitive orphans without
+  // touching the geometry of the wires that stay.
+  for (;;) {
+    const deletedWires = scene.wires.filter((wire) => deleted.has(wire.id));
+    const kept: BuilderWire[] = [];
+    const newlyDeleted: string[] = [];
+
+    for (const wire of remaining) {
+      const endpoints = [
+        { point: wire.points[0], portId: wire.startPortId },
+        {
+          point: wire.points[wire.points.length - 1],
+          portId: wire.endPortId
+        }
+      ];
+      const orphaned = endpoints.some(({ point, portId }) => {
+        if (!point || portId !== null) {
+          return false;
+        }
+
+        return pointTouchesAnyWire(point, deletedWires)
+          && !pointTouchesAnyWire(point, remaining, wire.id);
+      });
+
+      if (orphaned) {
+        newlyDeleted.push(wire.id);
+        deleted.add(wire.id);
+      } else {
+        kept.push(wire);
+      }
+    }
+
+    remaining = kept;
+
+    if (newlyDeleted.length === 0) {
+      break;
+    }
+  }
+
+  return {
+    removedWireIds: scene.wires
+      .filter((wire) => deleted.has(wire.id))
+      .map((wire) => wire.id),
+    wires: remaining
+  };
+}
+
 /**
  * Rotates one component around its centre (the snap lives in
- * `snapComponentToPlaneGrid`) and re-anchors by its primary terminal. The
- * stored wire polylines are intentionally left untouched: the renderer
- * resolves wire endpoints from `startPortId`/`endPortId` on every frame, so
- * the wires follow the rotated terminals and a 0 -> 90 -> 0 round trip is
- * lossless. Saving reconciles and persists the re-anchored route.
+ * `snapComponentToPlaneGrid`) and re-anchors by its primary terminal. Every
+ * wire attached to one of its terminals is deleted, together with branch wires
+ * that lose their last surviving parent. No wire is re-routed.
  */
 export function rotateComponentInScene(
   scene: BuilderScene,
   componentId: string,
   nextRotation: number,
   planeSettings: BuilderPlaneSettings
-): BuilderScene {
+): ComponentRotationResult {
   const currentComponent = scene.components.find((component) => component.id === componentId);
 
   if (!currentComponent || !Number.isFinite(nextRotation)) {
-    return scene;
+    return { changed: false, removedWireIds: [], scene };
   }
 
   const rotation = normalizeQuarterTurns(nextRotation);
 
   if (!Number.isFinite(rotation)) {
-    return scene;
+    return { changed: false, removedWireIds: [], scene };
+  }
+
+  if (rotation === normalizeQuarterTurns(currentComponent.rotation)) {
+    return { changed: false, removedWireIds: [], scene };
   }
 
   const primaryTerminalId = getDefaultEntryTerminalId(currentComponent.type);
@@ -2071,14 +2227,24 @@ export function rotateComponentInScene(
     || !Number.isFinite(nextComponent.y)
     || !Number.isFinite(nextComponent.rotation)
   ) {
-    return scene;
+    return { changed: false, removedWireIds: [], scene };
   }
 
+  const attachedPortIds = new Set(
+    getComponentTerminals(currentComponent).map((terminal) => terminal.portId)
+  );
+  const nextComponents = scene.components.map((component) =>
+    component.id === componentId ? nextComponent : component
+  );
+  const deletion = removeWiresForRotation(scene, attachedPortIds);
+
   return {
-    components: scene.components.map((component) =>
-      component.id === componentId ? nextComponent : component
-    ),
-    wires: scene.wires
+    changed: true,
+    removedWireIds: deletion.removedWireIds,
+    scene: {
+      components: nextComponents,
+      wires: deletion.wires
+    }
   };
 }
 
@@ -2984,6 +3150,7 @@ function createCanvasComponent(
     ...(isTimedContactType(type) ? { delayMs: clampTimedContactDelayMs(delayMsOverride ?? DEFAULT_TIMED_CONTACT_DELAY_MS) } : {}),
     ...(type === "LAMP" ? { lampGlowColor: DEFAULT_LAMP_GLOW_COLOR } : {}),
     ...(isMaintainedSwitchType(type) ? { isClosed: type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT" } : {}),
+    ...(isBreakerType(type) ? { isClosed: true } : {}),
     ...(isMomentaryPushButtonType(type) ? { isPressed: false } : {}),
     ...(isSourceType(type) ? { sourceVoltage: getDefaultSourceVoltage(type) } : {})
   };
@@ -4138,6 +4305,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   } | null>(null);
   const suppressClickAfterLongPressRef = useRef(false);
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
+  const [rotationToast, setRotationToast] = useState<string | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [canvasZoom, setCanvasZoom] = useState(DEFAULT_CANVAS_ZOOM);
@@ -4163,6 +4331,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   useEffect(() => {
     selectedComponentIdsRef.current = selectedComponentIds;
   }, [selectedComponentIds]);
+
+  useEffect(() => {
+    if (!rotationToast) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setRotationToast(null), 3000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [rotationToast]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -4973,6 +5151,25 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
+  }, []);
+
+  useEffect(() => {
+    function handleWindowBlur() {
+      const active = activePushButtonPressRef.current;
+
+      if (!active) {
+        return;
+      }
+
+      activePushButtonPressRef.current = null;
+      releaseMomentaryPushButton(active.componentId);
+      finalizeComponentDrag(active.componentId);
+      componentDragMovedRef.current = false;
+    }
+
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => window.removeEventListener("blur", handleWindowBlur);
   }, []);
 
   const liveTagValues = running ? tagValues : EMPTY_TAG_VALUES;
@@ -5910,6 +6107,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    setRotationToast(null);
     redoStackRef.current.push(cloneCurrentScene());
     applyHistoryScene(scene);
   }
@@ -5921,6 +6119,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    setRotationToast(null);
     undoStackRef.current.push(cloneCurrentScene());
     applyHistoryScene(scene);
   }
@@ -6075,27 +6274,40 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
-  function applyComponentRotation(componentId: string, nextRotation: number) {
+  function applyComponentRotation(
+    componentId: string,
+    nextRotation: number
+  ): ComponentRotationResult {
     const currentScene: BuilderScene = {
       components: componentsRef.current,
       wires: wiresRef.current
     };
-    const nextScene = rotateComponentInScene(
+    const result = rotateComponentInScene(
       currentScene,
       componentId,
       nextRotation,
       planeSettingsRef.current
     );
 
-    if (nextScene === currentScene) {
+    if (!result.changed) {
+      return result;
+    }
+
+    componentsRef.current = result.scene.components;
+    wiresRef.current = result.scene.wires;
+    setComponents(result.scene.components);
+    setWires(result.scene.wires);
+    setHasCustomLayout(true);
+
+    return result;
+  }
+
+  function showRotationRemovalToast(removedWireCount: number) {
+    if (removedWireCount <= 0) {
       return;
     }
 
-    componentsRef.current = nextScene.components;
-    // The wires are not mutated: resolvedWires re-anchors their endpoints from
-    // the component ports on render, and saving persists the new route.
-    setComponents(nextScene.components);
-    setHasCustomLayout(true);
+    setRotationToast(formatRotationRemovalMessage(removedWireCount));
   }
 
   function getRotationTarget(currentRotation: number, action: RotationAction): number {
@@ -6124,7 +6336,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
-    pushUndoSnapshot();
+    const plans: Array<{ componentId: string; targetRotation: number }> = [];
 
     for (const componentId of componentIds) {
       const component = componentsRef.current.find((candidate) => candidate.id === componentId);
@@ -6133,8 +6345,29 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         continue;
       }
 
-      applyComponentRotation(componentId, getRotationTarget(component.rotation, action));
+      const targetRotation = getRotationTarget(component.rotation, action);
+
+      if (
+        Number.isFinite(targetRotation)
+        && normalizeQuarterTurns(targetRotation) !== normalizeQuarterTurns(component.rotation)
+      ) {
+        plans.push({ componentId, targetRotation });
+      }
     }
+
+    if (plans.length === 0) {
+      return;
+    }
+
+    pushUndoSnapshot();
+    const removedWireIds = new Set<string>();
+
+    for (const plan of plans) {
+      const result = applyComponentRotation(plan.componentId, plan.targetRotation);
+      result.removedWireIds.forEach((wireId) => removedWireIds.add(wireId));
+    }
+
+    showRotationRemovalToast(removedWireIds.size);
   }
 
   function deleteComponentWithHistory(componentId: string) {
@@ -6723,8 +6956,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    const targetRotation = currentComponent.rotation + direction;
+
+    if (normalizeQuarterTurns(targetRotation) === normalizeQuarterTurns(currentComponent.rotation)) {
+      return;
+    }
+
     pushUndoSnapshot();
-    applyComponentRotation(componentId, currentComponent.rotation + direction);
+    const result = applyComponentRotation(componentId, targetRotation);
+    showRotationRemovalToast(result.removedWireIds.length);
   }
 
   function cancelPendingSwitchToggle(componentId?: string) {
@@ -6740,25 +6980,59 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     pendingSwitchToggleRef.current = null;
   }
 
-  function scheduleMaintainedSwitchToggle(componentId: string) {
+  function shouldOperateComponentFromPointer(
+    event: ReactPointerEvent<HTMLDivElement>,
+    component: BuilderComponent
+  ): boolean {
+    if (event.button !== 0) {
+      return false;
+    }
+
+    const target = event.target;
+
+    if (
+      target instanceof Element
+      && target.closest(
+        ".freeplay-port, .freeplay-component__press-target, .context-menu, input, textarea, select, option, button"
+      )
+    ) {
+      return false;
+    }
+
+    if (suppressClickAfterLongPressRef.current) {
+      return false;
+    }
+
+    if (componentDragMovedRef.current) {
+      return false;
+    }
+
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      return false;
+    }
+
+    if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
+      return false;
+    }
+
+    return isMaintainedSwitchType(component.type) || isBreakerType(component.type);
+  }
+
+  function scheduleComponentToggle(componentId: string) {
     cancelPendingSwitchToggle();
 
     pendingSwitchToggleRef.current = {
       componentId,
       timeoutId: window.setTimeout(() => {
         pendingSwitchToggleRef.current = null;
-        toggleMaintainedSwitch(componentId);
+        toggleComponentOperate(componentId);
       }, MAINTAINED_SWITCH_CLICK_DELAY_MS)
     };
   }
 
-  function toggleMaintainedSwitch(componentId: string) {
+  function toggleComponentOperate(componentId: string) {
     setComponents((currentComponents) =>
-      currentComponents.map((component) =>
-        component.id === componentId && isMaintainedSwitchType(component.type)
-          ? { ...component, isClosed: !isMaintainedSwitchClosed(component) }
-          : component
-      )
+      toggleComponentOperateState(currentComponents, componentId)
     );
     selectComponentById(componentId);
     setHasCustomLayout(true);
@@ -7203,7 +7477,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         <strong className="builder-props-value">
                           {isMaintainedSwitchType(selectedComponent.type)
                             ? (isMaintainedSwitchClosed(selectedComponent) ? "Closed" : "Open")
-                            : "Closed"}
+                            : (isBreakerClosed(selectedComponent) ? "Closed" : "Open")}
                         </strong>
                       </>
                     ) : null}
@@ -7317,13 +7591,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   </label>
                 ) : null}
 
-                {isMaintainedSwitchType(selectedComponent.type) ? (
+                {isMaintainedSwitchType(selectedComponent.type) || isBreakerType(selectedComponent.type) ? (
                   <button
                     type="button"
-                    className={`button ${isMaintainedSwitchClosed(selectedComponent) ? "button--secondary" : "button--primary"} builder-selection__action-button`.trim()}
-                    onClick={() => toggleMaintainedSwitch(selectedComponent.id)}
+                    className={`button ${
+                      isBreakerType(selectedComponent.type)
+                        ? isBreakerClosed(selectedComponent) ? "button--secondary" : "button--primary"
+                        : isMaintainedSwitchClosed(selectedComponent) ? "button--secondary" : "button--primary"
+                    } builder-selection__action-button`.trim()}
+                    onClick={() => toggleComponentOperate(selectedComponent.id)}
                   >
-                    {isMaintainedSwitchClosed(selectedComponent) ? "Open switch" : "Close switch"}
+                    {isBreakerType(selectedComponent.type)
+                      ? isBreakerClosed(selectedComponent) ? "Open breaker" : "Close breaker"
+                      : isMaintainedSwitchClosed(selectedComponent) ? "Open switch" : "Close switch"}
                   </button>
                 ) : null}
 
@@ -7809,7 +8089,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         handleComponentHandlePointerDown(event, component.id);
                       }}
                       onPointerMove={(event) => handleComponentHandlePointerMove(event, component.id)}
-                      onPointerUp={(event) => handleComponentHandlePointerRelease(event, component.id)}
+                      onPointerUp={(event) => {
+                        const wasDragged = componentDragMovedRef.current;
+                        handleComponentHandlePointerRelease(event, component.id);
+
+                        if (!wasDragged && shouldOperateComponentFromPointer(event, component)) {
+                          scheduleComponentToggle(component.id);
+                        }
+
+                        componentDragMovedRef.current = false;
+                      }}
                       onDoubleClick={(event) => {
                         const target = event.target;
 
@@ -7824,13 +8113,24 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                         event.stopPropagation();
 
-                        if (isMaintainedSwitchType(component.type)) {
+                        if (isMaintainedSwitchType(component.type) || isBreakerType(component.type)) {
                           cancelPendingSwitchToggle(component.id);
                         }
 
                         rotateComponent(component.id, 1);
                       }}
                       onClick={(event) => {
+                        const target = event.target;
+
+                        if (
+                          target instanceof Element
+                          && target.closest(
+                            ".freeplay-port, .freeplay-component__press-target, .context-menu, input, textarea, select, option, button"
+                          )
+                        ) {
+                          return;
+                        }
+
                         // Un click en la etiqueta/badge tambien selecciona; sin
                         // esto el click sube al canvas y limpia la seleccion
                         // inmediatamente (el panel se encendia y apagaba).
@@ -7841,11 +8141,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           return;
                         }
 
+                        if (componentDragMovedRef.current) {
+                          componentDragMovedRef.current = false;
+                          return;
+                        }
+
+                        const additive = event.shiftKey || event.ctrlKey || event.metaKey;
                         contextMenuRef.current?.close();
-                        selectComponentById(
-                          component.id,
-                          event.shiftKey || event.ctrlKey || event.metaKey
-                        );
+                        setWireReconnectTarget(null);
+                        selectComponentById(component.id, additive);
                       }}
                       onContextMenu={(event) => {
                         event.preventDefault();
@@ -7914,33 +8218,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       <div
                         className={`freeplay-component__glyph-handle ${manualControl ? "freeplay-component__glyph-handle--manual" : ""}`.trim()}
                         style={glyphHitboxStyle}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          contextMenuRef.current?.close();
-
-                          if (suppressClickAfterLongPressRef.current) {
-                            suppressClickAfterLongPressRef.current = false;
-                            return;
-                          }
-
-                          if (componentDragMovedRef.current) {
-                            componentDragMovedRef.current = false;
-                            return;
-                          }
-
-                          const additive = event.shiftKey || event.ctrlKey || event.metaKey;
-                          setWireReconnectTarget(null);
-                          selectComponentById(component.id, additive);
-
-                          if (
-                            !additive
-                            && draftWirePoints.length === 0
-                            && wireReconnectTarget === null
-                            && isMaintainedSwitchType(component.type)
-                          ) {
-                            scheduleMaintainedSwitchToggle(component.id);
-                          }
-                        }}
                       />
                       {isMomentaryPushButtonType(component.type) ? (
                         <button
@@ -7996,15 +8273,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       <div
                         className="freeplay-component__label-row"
                         style={getComponentLabelRowStyle(component.rotation)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          contextMenuRef.current?.close();
-                          setWireReconnectTarget(null);
-                          selectComponentById(
-                            component.id,
-                            event.shiftKey || event.ctrlKey || event.metaKey
-                          );
-                        }}
                       >
                         <span className="freeplay-component__label">{component.label}</span>
                       </div>
@@ -8068,6 +8336,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           )
           : null}
       </div>
+      {rotationToast ? (
+        <div className="freeplay-toast" role="status">
+          {rotationToast}
+        </div>
+      ) : null}
       <ContextMenuLayer
         ref={contextMenuRef}
         actions={{

@@ -56,7 +56,7 @@ from `@plc-sim/plc-engine` (D1).
 
 ### Specs (vitest, `test.include = src/**`)
 
-17 spec files, 947 tests: `diagram/{alignment,contextMenu,contextMenu.render,electrical-latch,grid,interaction,reference-circuit,rotation,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (7), `diagram/rotation.spec.ts` (25), `diagram/interaction.spec.ts` (19), `diagram/snapshot.spec.ts` (13), `diagram/wire-routing.spec.ts` (8), `diagram/short-circuit.spec.ts` (2).
+18 spec files, 954 tests: `diagram/{alignment,contextMenu,contextMenu.render,electrical-latch,grid,interaction,operate,reference-circuit,rotation,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (7), `diagram/rotation.spec.ts` (29), `diagram/interaction.spec.ts` (19), `diagram/operate.spec.ts` (3), `diagram/snapshot.spec.ts` (13), `diagram/wire-routing.spec.ts` (8), `diagram/short-circuit.spec.ts` (2).
 
 ## Key Symbols
 
@@ -89,6 +89,8 @@ from `@plc-sim/plc-engine` (D1).
 | `clampMenuPosition`, `getSubmenuSide`, `getNextMenuIndex`, `isLongPressCancelled` | function | `diagram/contextMenu.tsx:80,109,129,141` | Pure menu helpers: 8 px viewport clamp/flip, submenu side, arrow-key wrap, long-press cancel threshold |
 | `updateComponentSelection`, `resolveCanvasContextMenuAction` | function | `diagram/interaction.ts:6,27` | Additive selection set (Shift/Ctrl/Meta); canvas right-click resolves cancel-wire vs open-menu |
 | `LAMP_GLOW_COLOR_OPTIONS`, `getLampGlowColorValue` | const/function | `DiagramBuilder.tsx:344,490` | 7 lamp colors: red, green, yellow, amber, orange, blue, white (default yellow); maps each to fill/stroke/symbol |
+| `isBreakerClosed`, `toggleComponentOperateState` | function | `DiagramBuilder.tsx:631,678` | Breaker default-closed state and latched operate for breakers + maintained switches; no running dependency |
+| `rotateComponentInScene`, `formatRotationRemovalMessage` | function | `DiagramBuilder.tsx:2196,2065` | Primary-terminal snap, attached-wire + transitive orphan-branch deletion, no re-route; toast text |
 
 ### `src/compiler`
 
