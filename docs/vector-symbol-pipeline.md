@@ -430,7 +430,62 @@ alteración de otros componentes. Compuerta: **ui vitest 194/194**.
 - **Otras glyphs (solo reporte, sin fix)**: XIC/XIO/OTE/LAMP sin anillos, vano de patas 144 (OK);
   PUSH_BUTTON_NC anillos 45/115 span 70 y y=44; ESTOP anillos ~50.6/107.0 span ~56.4 (reposo) y
   ~50.6/107.4 span ~56.8 (accionado); NCTO/NOTC anillos 32/128 span 96 y y=48.5.
-- **Gates**: ui vitest **882/882**; tsc **25**; engine **7/7**; build **OK**.
+- **Gates**: ui vitest **890/890**; tsc **25**; engine **7/7**; build **OK**.
+
+### Router L-first: sin stubs obligatorios (2026-11-02, D53)
+
+- **Síntoma**: dos bornes NO alineados generaban un Z de 2 quiebres en vez de un L de 3 puntos.
+  Ejemplo `(dx,dy)=(5G,3G)`: `(476,450)->(576,450)->(576,504)->(566,504)`; el stub obligatorio del
+  borne final añadía el segundo quiebre.
+- **Causa**: `resolveWireDisplayPoints` calculaba siempre `startStub`/`endStub` y llamaba a
+  `routeBetweenStubs`, que penalizaba salir/entrar fuera del eje del borne. El eje era una
+  restricción, no una preferencia.
+- **Modelo nuevo**: se generan candidatos y se elige por (1) menos quiebres, (2) sin cruzar el
+  cuerpo, (3) preferencia de eje (desempate). Candidatos: recta (si `EPS`), L horizontal-first,
+  L vertical-first, stubs solo si el L directo cruza el cuerpo, y Z/U como fallback. Los endpoints
+  siguen exactos; `collapseWireRoute` sigue siendo la limpieza final.
+- **Cuerpo**: `getComponentBodyBox` usa el vano de bornes y el viewport rotado del glifo, no la caja
+  completa 160×136; así un cable puede salir por su borne sin contar como cruce.
+- **Resultado**: `(5G,3G)->(476,450)->(566,450)->(566,504)`; `(-5G,3G)->(476,450)->(476,504)->(386,504)`;
+  `(3G,-5G)->(476,450)->(530,450)->(530,360)`; `(-3G,5G)->(476,450)->(476,540)->(422,540)`.
+  Los 4 son 3 puntos/1 quiebre. Alineados siguen en 2 puntos; el caso bloqueado usa
+  `(952,450)->(952,550)->(208,550)->(208,650)`.
+- **JSON adjunto**: wires 6,8,10,11,48,64,68 quedan iguales o más simples, nunca más largos;
+  wire-68 (XIO rotado) sigue con 2 quiebres.
+- **Tests**: `wire-routing.spec.ts` (8). Gates: ui vitest **890/890**; tsc **25**; engine **7/7**;
+  build **OK**. Sin cambios de glifos, anclas ni placement.
+
+### Cruce de cable sobre borne ≠ cortocircuito (2026-11-02, D54)
+
+- **Síntoma**: `plc-sim-circuit-20261102-225802.circuit.json` reportaba cortocircuito sin carga.
+  El camino real era `source left -> breaker in-bottom -> out-bottom -> wire-39 elbow (216,324) ->
+  out-top -> in-top -> source right`.
+- **Causa**: `buildElectricalNodeGraph` usaba el mismo nodo global `point:x:y` para **todos** los
+  vértices de todos los cables. El codo interior de `builder-wire-39` en `(216,324)` coincidía con
+  el extremo de `builder-wire-40` en `out-top`; el solver los unía como si fuera una T.
+- **Arreglo**: los vértices **interiores** de cada cable usan un nodo propio
+  (`point:<wireId>:<index>:x:y`); solo los extremos del cable usan el nodo global. La red de
+  seguridad de extremos sueltos usa el nodo específico del otro cable, así las T reales siguen
+  funcionando.
+- **Resultado**: el cruce sobre `out-top` ya no conecta; no hay cortocircuito. Al pulsar
+  `PB-NO` (component-9) se energiza OTE D y los cables del camino (12,15,19,33,36,37,38,39,40)
+  siguen marcados con corriente.
+- **Test**: fixture `breaker2p-wire-crossing.circuit.json` + `short-circuit.spec.ts` (2). Gates:
+  ui vitest **892/892**; tsc **25**; engine **7/7**; build **OK**. Sin cambios de glifos, anclas ni
+  placement.
+
+### Click vs drag en componentes (2026-11-02, D55)
+
+- **Síntoma**: `OL_CONTACT`/switches no se podían togglear y los componentes no rotaban con
+  doble-click; cualquier temblor de 1-2 px iniciaba un drag y suprimía el click.
+- **Causa**: `handleComponentHandleMouseDown` armaba `dragState` y `dragComponentToClientPoint`
+  marcaba `componentDragMovedRef` con el primer movimiento, sin umbral.
+- **Arreglo**: `COMPONENT_DRAG_THRESHOLD = 6` px. El drag solo empieza al superar 6 px; por debajo,
+  el click/doble-click llega intacto al glyph handle. `finalizeComponentDrag` sigue sin mover nada si
+  no hubo drag.
+- **Nota**: la rotación sigue bloqueada mientras el simulador está en `running` (`Move locked`);
+  hay que pulsar Stop antes de rotar.
+- **Gates**: ui vitest **892/892**; tsc **25**; engine **7/7**; build **OK**.
 
 ### Temporizadores al desenergizar la bobina (2026-11-02, D48)
 

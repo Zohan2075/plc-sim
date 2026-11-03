@@ -44,6 +44,21 @@ describe("circuit snapshot v1 fixture (an actual v1 snapshot: version 1, no shee
     expect(byId.size).toBe(source.length);
   });
 
+  it("accepts and preserves amber/orange lamp glow colors", () => {
+    for (const color of ["amber", "orange"] as const) {
+      const raw = JSON.parse(JSON.stringify(rawV1)) as {
+        components: Array<{ lampGlowColor?: string; type: string }>;
+      };
+      const lamp = raw.components.find((component) => component.type === "LAMP");
+
+      expect(lamp).toBeDefined();
+      lamp!.lampGlowColor = color;
+
+      const snapshot = parseCircuitSnapshot(raw);
+      expect(snapshot.components.find((component) => component.type === "LAMP")?.lampGlowColor).toBe(color);
+    }
+  });
+
   it("migrates components, wires, tags and program without loss (v1 -> v2 round trip)", () => {
     const migrated = migrateCircuitSnapshot(rawV1) as Record<string, unknown>;
     const firstParse = parseCircuitSnapshot(rawV1);

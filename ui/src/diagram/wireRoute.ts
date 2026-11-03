@@ -1,10 +1,16 @@
 import {
+  COMPONENT_WIDTH,
+  ROTATION_CENTER_Y,
+  SYMBOL_VIEWPORT_HEIGHT,
+  SYMBOL_VIEWPORT_TOP,
+  getComponentTerminals,
   getPortId,
   getTerminalDefinitions,
   getTerminalPoint
 } from "../DiagramBuilder";
 import type { BuilderComponent, BuilderPlaneSettings, BuilderWire, Point } from "../DiagramBuilder";
 import {
+  clampPointToPlane,
   distanceBetween,
   getSegmentAxis,
   getTerminalOutwardDirection,
@@ -95,6 +101,350 @@ function getStraightSegment(
   return axis === "x"
     ? [{ x: start.x, y: start.y }, { x: start.x, y: end.y }]
     : [{ x: start.x, y: start.y }, { x: end.x, y: start.y }];
+}
+
+interface ComponentBodyBox {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+}
+
+const BODY_INSET = 1;
+
+/**
+ * Caja del CUERPO dibujado, no la caja completa de 160x136: los bornes quedan
+ * sobre el borde del cuerpo. Asi un cable puede salir/entrar por su borne sin
+ * contar como cruce, pero un tramo que se mete hacia el centro si cruza.
+ */
+function getComponentBodyBox(component: BuilderComponent): ComponentBodyBox {
+  const terminals = getComponentTerminals(component);
+  const terminalXs = terminals.map((terminal) => terminal.x);
+  const terminalYs = terminals.map((terminal) => terminal.y);
+  const minTerminalX = Math.min(...terminalXs);
+  const maxTerminalX = Math.max(...terminalXs);
+  const minTerminalY = Math.min(...terminalYs);
+  const maxTerminalY = Math.max(...terminalYs);
+  const rotation = ((component.rotation % 4) + 4) % 4;
+  const centerX = component.x + COMPONENT_WIDTH / 2;
+  const centerY = component.y + ROTATION_CENTER_Y;
+  const halfGlyphWidth = COMPONENT_WIDTH / 2;
+  const halfGlyphHeight = SYMBOL_VIEWPORT_HEIGHT / 2;
+  const glyphLeft = rotation % 2 === 0 ? component.x : centerX - halfGlyphHeight;
+  const glyphRight = rotation % 2 === 0 ? component.x + COMPONENT_WIDTH : centerX + halfGlyphHeight;
+  const glyphTop = rotation % 2 === 0 ? component.y + SYMBOL_VIEWPORT_TOP : centerY - halfGlyphWidth;
+  const glyphBottom = rotation % 2 === 0
+    ? component.y + SYMBOL_VIEWPORT_TOP + SYMBOL_VIEWPORT_HEIGHT
+    : centerY + halfGlyphWidth;
+
+  if (maxTerminalX - minTerminalX >= maxTerminalY - minTerminalY) {
+    return {
+      bottom: glyphBottom,
+      left: minTerminalX,
+      right: maxTerminalX,
+      top: glyphTop
+    };
+  }
+
+  return {
+    bottom: maxTerminalY,
+    left: glyphLeft,
+    right: glyphRight,
+    top: minTerminalY
+  };
+}
+
+function segmentIntersectsBoxInterior(start: Point, end: Point, box: ComponentBodyBox): boolean {
+  const left = box.left + BODY_INSET;
+  const right = box.right - BODY_INSET;
+  const top = box.top + BODY_INSET;
+  const bottom = box.bottom - BODY_INSET;
+
+  if (right <= left || bottom <= top) {
+    return false;
+  }
+
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  let entry = 0;
+  let exit = 1;
+
+  const clip = (origin: number, delta: number, min: number, max: number): boolean => {
+    if (Math.abs(delta) < 0.001) {
+      return origin >= min && origin <= max;
+    }
+
+    let near = (min - origin) / delta;
+    let far = (max - origin) / delta;
+
+    if (near > far) {
+      [near, far] = [far, near];
+    }
+
+    entry = Math.max(entry, near);
+    exit = Math.min(exit, far);
+
+    return entry <= exit;
+  };
+
+  if (!clip(start.x, deltaX, left, right)) {
+    return false;
+  }
+
+  if (!clip(start.y, deltaY, top, bottom)) {
+    return false;
+  }
+
+  return exit - entry > 0.01;
+}
+
+function routeCrossesComponentBody(
+  points: Point[],
+  startComponent: BuilderComponent,
+  endComponent: BuilderComponent
+): boolean {
+  if (points.length < 2) {
+    return false;
+  }
+
+  const boxes = [getComponentBodyBox(startComponent), getComponentBodyBox(endComponent)];
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+
+    if (!start || !end) {
+      continue;
+    }
+
+    for (const box of boxes) {
+      if (segmentIntersectsBoxInterior(start, end, box)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function buildLCandidates(start: Point, end: Point): Point[][] {
+  if (samePoint(start, end)) {
+    return [];
+  }
+
+  return [
+    [start, { x: end.x, y: start.y }, end],
+    [start, { x: start.x, y: end.y }, end]
+  ];
+}
+
+function buildZCandidates(start: Point, end: Point): Point[][] {
+  if (samePoint(start, end)) {
+    return [];
+  }
+
+  const midX = (start.x + end.x) / 2;
+  const midY = (start.y + end.y) / 2;
+
+  return [
+    [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end],
+    [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end]
+  ];
+}
+
+/** Punto de rejilla fuera del cuerpo, en la direccion de salida del borne. */
+function getStubOutsideBody(
+  component: BuilderComponent,
+  anchor: Point,
+  direction: Point,
+  planeSettings: BuilderPlaneSettings
+): Point {
+  const box = getComponentBodyBox(component);
+  const gridSpacing = planeSettings.gridSpacing;
+
+  if (direction.x > 0) {
+    const target = Math.ceil((Math.max(anchor.x, box.right) + 0.001) / gridSpacing) * gridSpacing;
+    const x = target > anchor.x ? target : target + gridSpacing;
+
+    return clampPointToPlane({ x, y: anchor.y }, planeSettings);
+  }
+
+  if (direction.x < 0) {
+    const target = Math.floor((Math.min(anchor.x, box.left) - 0.001) / gridSpacing) * gridSpacing;
+    const x = target < anchor.x ? target : target - gridSpacing;
+
+    return clampPointToPlane({ x, y: anchor.y }, planeSettings);
+  }
+
+  if (direction.y > 0) {
+    const target = Math.ceil((Math.max(anchor.y, box.bottom) + 0.001) / gridSpacing) * gridSpacing;
+    const y = target > anchor.y ? target : target + gridSpacing;
+
+    return clampPointToPlane({ x: anchor.x, y }, planeSettings);
+  }
+
+  if (direction.y < 0) {
+    const target = Math.floor((Math.min(anchor.y, box.top) - 0.001) / gridSpacing) * gridSpacing;
+    const y = target < anchor.y ? target : target - gridSpacing;
+
+    return clampPointToPlane({ x: anchor.x, y }, planeSettings);
+  }
+
+  return anchor;
+}
+
+type RouteCandidateKind = "direct-l" | "stub-l" | "z";
+
+interface RouteCandidate {
+  kind: RouteCandidateKind;
+  points: Point[];
+}
+
+function buildRouteCandidates(
+  startAnchor: Point,
+  endAnchor: Point,
+  startRef: TerminalRef,
+  endRef: TerminalRef,
+  planeSettings: BuilderPlaneSettings
+): RouteCandidate[] {
+  const startStub = getStubOutsideBody(
+    startRef.component,
+    startAnchor,
+    startRef.direction,
+    planeSettings
+  );
+  const endStub = getStubOutsideBody(
+    endRef.component,
+    endAnchor,
+    endRef.direction,
+    planeSettings
+  );
+  const candidates: RouteCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (kind: RouteCandidateKind, points: Point[]): void => {
+    const key = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join("|");
+
+    if (seen.has(key) || points.length < 2) {
+      return;
+    }
+
+    seen.add(key);
+    candidates.push({ kind, points });
+  };
+
+  for (const points of buildLCandidates(startAnchor, endAnchor)) {
+    add("direct-l", points);
+  }
+
+  for (const points of buildLCandidates(startStub, endAnchor)) {
+    add("stub-l", [startAnchor, startStub, ...points.slice(1)]);
+  }
+
+  for (const points of buildLCandidates(startAnchor, endStub)) {
+    add("stub-l", [...points, endAnchor]);
+  }
+
+  for (const points of buildLCandidates(startStub, endStub)) {
+    add("stub-l", [startAnchor, startStub, ...points.slice(1), endAnchor]);
+  }
+
+  for (const points of buildZCandidates(startAnchor, endAnchor)) {
+    add("z", points);
+  }
+
+  for (const points of buildZCandidates(startStub, endAnchor)) {
+    add("z", [startAnchor, startStub, ...points.slice(1)]);
+  }
+
+  for (const points of buildZCandidates(startAnchor, endStub)) {
+    add("z", [...points, endAnchor]);
+  }
+
+  for (const points of buildZCandidates(startStub, endStub)) {
+    add("z", [startAnchor, startStub, ...points.slice(1), endAnchor]);
+  }
+
+  return candidates;
+}
+
+function getRouteBends(points: Point[]): number {
+  return Math.max(points.length - 2, 0);
+}
+
+function getAxisPreference(points: Point[], startDirection: Point, endDirection: Point): number {
+  if (points.length < 2) {
+    return 0;
+  }
+
+  const first = points[0]!;
+  const second = points[1]!;
+  const penultimate = points[points.length - 2]!;
+  const last = points[points.length - 1]!;
+  const firstX = Math.sign(second.x - first.x);
+  const firstY = Math.sign(second.y - first.y);
+  const lastX = Math.sign(last.x - penultimate.x);
+  const lastY = Math.sign(last.y - penultimate.y);
+  let score = 0;
+
+  if (startDirection.x !== 0 && firstX === startDirection.x) {
+    score += 1;
+  }
+
+  if (startDirection.y !== 0 && firstY === startDirection.y) {
+    score += 1;
+  }
+
+  if (endDirection.x !== 0 && lastX === -endDirection.x) {
+    score += 1;
+  }
+
+  if (endDirection.y !== 0 && lastY === -endDirection.y) {
+    score += 1;
+  }
+
+  return score;
+}
+
+function chooseBestCandidate(
+  candidates: RouteCandidate[],
+  startDirection: Point,
+  endDirection: Point,
+  startComponent: BuilderComponent,
+  endComponent: BuilderComponent,
+  gridSpacing: number
+): Point[] {
+  const evaluated = candidates.map((candidate) => {
+    const points = collapseWireRoute(candidate.points, gridSpacing);
+
+    return {
+      ...candidate,
+      points,
+      crossesBody: routeCrossesComponentBody(points, startComponent, endComponent)
+    };
+  });
+  const valid = evaluated.filter((candidate) => !candidate.crossesBody);
+  const pool = valid.length > 0 ? valid : evaluated;
+
+  pool.sort((left, right) => {
+    // (1) Menos quiebres. Un L directo (1) gana a cualquier Z/U (2+).
+    const bendDelta = getRouteBends(left.points) - getRouteBends(right.points);
+
+    if (bendDelta !== 0) {
+      return bendDelta;
+    }
+
+    // (2) Preferencia de eje de salida/entrada; nunca es una restriccion.
+    const axisDelta = getAxisPreference(right.points, startDirection, endDirection)
+      - getAxisPreference(left.points, startDirection, endDirection);
+
+    if (axisDelta !== 0) {
+      return axisDelta;
+    }
+
+    return getRouteLength(left.points) - getRouteLength(right.points);
+  });
+
+  return pool[0]!.points;
 }
 
 function getRoutePenalty(points: Point[], startDirection: Point, endDirection: Point): number {
@@ -231,9 +581,12 @@ export function collapseWireRoute(points: Point[], gridSpacing = 18): Point[] {
         continue;
       }
 
+      // Para borrar un punto colineal se exige alineacion EXACTA en el eje
+      // perpendicular. Usar la tolerancia aqui borraba un stub de 2 px y
+      // convertia el tramo siguiente en diagonal.
       const sameLine = previousAxis === "horizontal"
-        ? Math.abs(previous.y - current.y) <= tolerance && Math.abs(current.y - next.y) <= tolerance
-        : Math.abs(previous.x - current.x) <= tolerance && Math.abs(current.x - next.x) <= tolerance;
+        ? Math.abs(previous.y - current.y) < EPSILON && Math.abs(current.y - next.y) < EPSILON
+        : Math.abs(previous.x - current.x) < EPSILON && Math.abs(current.x - next.x) < EPSILON;
 
       if (!sameLine) {
         continue;
@@ -400,10 +753,9 @@ export function resolveWireDisplayPoints(
       return straight;
     }
 
-    const startStub = getTerminalStubEnd(startAnchor, startRef.direction, planeSettings);
-    const endStub = getTerminalStubEnd(endAnchor, endRef.direction, planeSettings);
-
     if (hasManualBends(wire)) {
+      const startStub = getTerminalStubEnd(startAnchor, startRef.direction, planeSettings);
+      const endStub = getTerminalStubEnd(endAnchor, endRef.direction, planeSettings);
       const interior = wire.points.slice(1, -1);
       let path = [startAnchor, startStub];
       let direction = startRef.direction;
@@ -419,16 +771,17 @@ export function resolveWireDisplayPoints(
       return collapseWireRoute(path, planeSettings.gridSpacing);
     }
 
-    const middle = routeBetweenStubs(
-      startStub,
-      endStub,
-      startRef.direction,
-      endRef.direction,
-      tolerance
-    );
+    const candidates = buildRouteCandidates(startAnchor, endAnchor, startRef, endRef, planeSettings);
 
     return collapseWireRoute(
-      [startAnchor, startStub, ...middle, endStub, endAnchor],
+      chooseBestCandidate(
+        candidates,
+        startRef.direction,
+        endRef.direction,
+        startRef.component,
+        endRef.component,
+        planeSettings.gridSpacing
+      ),
       planeSettings.gridSpacing
     );
   }

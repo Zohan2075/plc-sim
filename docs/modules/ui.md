@@ -38,11 +38,12 @@ from `@plc-sim/plc-engine` (D1).
 | Path | Type | Purpose |
 |------|------|---------|
 | `ui/src/App.tsx` | file | Root: holds the `EngineSession`, run loop, project state, panel/sheet layout |
-| `ui/src/DiagramBuilder.tsx` | file | Canvas editor (~3.6k lines after the phase 2-4 module split): palette, wiring, inspector, snapshot load/save, panel handle |
+| `ui/src/DiagramBuilder.tsx` | file | Canvas editor (~8k lines): palette, wiring, inspector, snapshot load/save, adaptive context-menu integration (`ContextMenuLayer`), multi-select, undo/redo (max 50) and clipboard |
 | `ui/src/TracePanel.tsx` | file | Scan-trace table (reused inside the panel debug drawer) |
 | `ui/src/projectData.ts` | file | `ProjectBundle`/`TagDefinition` types + exported parsers; data-file loaders removed in phase 6 |
 | `ui/src/App.css`, `ui/src/styles.css` | file | Styling (grid gradient removed in phase 4: SVG is the single grid source) |
 | `ui/src/diagram/` | dir | Sheet domain: model, grid, sheet, snapshot, symbols, geometry, palette, terminals, timing, inspection states, constants, electrical graph |
+| `ui/src/diagram/contextMenu.tsx` | file | Portal-based adaptive context menu (`ContextMenuLayer`): fixed screen coords, viewport clamp/flip, submenus, keyboard, long-press helper |
 | `ui/src/compiler/` | dir | Wiring → `Program` compiler + device bindings |
 | `ui/src/solver/` | dir | Read-only electrical view |
 | `ui/src/runtime/` | dir | `EngineSession` (the one engine) |
@@ -55,7 +56,7 @@ from `@plc-sim/plc-engine` (D1).
 
 ### Specs (vitest, `test.include = src/**`)
 
-20 spec files, 501 tests: `projectData.samples`, `compiler/{compileDiagram,compileDiagram.phase3,deviceMapping.phase3}`, `diagram/{alignment,e2eFixtures,grid,inspectionStates,sheet,snapshot,symbolGeometry,symbols,symbols.baseline}`, `panel/{panelControls,panelFlow,SidePanel}`, `parity/parity`, `runtime/{engineSession,olrTripAndRearm}`, `solver/electricalView`.
+17 spec files, 947 tests: `diagram/{alignment,contextMenu,contextMenu.render,electrical-latch,grid,interaction,reference-circuit,rotation,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (7), `diagram/rotation.spec.ts` (25), `diagram/interaction.spec.ts` (19), `diagram/snapshot.spec.ts` (13), `diagram/wire-routing.spec.ts` (8), `diagram/short-circuit.spec.ts` (2).
 
 ## Key Symbols
 
@@ -84,6 +85,10 @@ from `@plc-sim/plc-engine` (D1).
 | `INSPECTION_STATE_OPTIONS`, `getActiveInspectionState`, `applyInspectionState`, `isEngineTripStateType` | const/function | `diagram/inspectionStates.ts:16,40,45,50` | Inspector states: OLR/GUARDAMOTOR `normal|tripped`, FUSE `intacto|fundido`, DISCONNECT `cerrado|abierto` |
 | `buildElectricalNodeGraph`, `collectReachableNodesWithParents`, `collectCurrentFlowPathNodeIds` | function | `diagram/electricalGraph.ts:164,100,123` | Port graph used by both compiler and view |
 | `constants` (`DEFAULT_PLANE_WIDTH/HEIGHT`, `DEFAULT_GRID_SPACING`, zoom/limits, `PALETTE_DRAG_THRESHOLD`) | const | `diagram/constants.ts` | Sheet defaults (1720×940, grid 18 px) and limits |
+| `ContextMenuLayer` | forwardRef component | `diagram/contextMenu.tsx:532` | Portal menu to `document.body` with `position: fixed`; imperative `open`/`close` through `ContextMenuHandle` (`contextMenu.tsx:50`) |
+| `clampMenuPosition`, `getSubmenuSide`, `getNextMenuIndex`, `isLongPressCancelled` | function | `diagram/contextMenu.tsx:80,109,129,141` | Pure menu helpers: 8 px viewport clamp/flip, submenu side, arrow-key wrap, long-press cancel threshold |
+| `updateComponentSelection`, `resolveCanvasContextMenuAction` | function | `diagram/interaction.ts:6,27` | Additive selection set (Shift/Ctrl/Meta); canvas right-click resolves cancel-wire vs open-menu |
+| `LAMP_GLOW_COLOR_OPTIONS`, `getLampGlowColorValue` | const/function | `DiagramBuilder.tsx:344,490` | 7 lamp colors: red, green, yellow, amber, orange, blue, white (default yellow); maps each to fill/stroke/symbol |
 
 ### `src/compiler`
 
@@ -158,6 +163,6 @@ Phase 6 removed the 7 orphan loaders (`loadProjectCatalog`, `loadBuiltInProject`
 ## Inventory Notes
 
 - **Coverage**: full for files and exported symbols; internal helpers of `DiagramBuilder.tsx`
-  (~3652 lines) are described by role, not exhaustively.
+  (~8k lines) are described by role, not exhaustively.
 - **Notes**: derived from the tree on 2026-10-30; gates at that date: `tsc --noEmit` 0 errors,
   vitest 501/501 in 20 files, Playwright 7/7.

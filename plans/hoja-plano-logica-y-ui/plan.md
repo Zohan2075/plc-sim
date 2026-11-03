@@ -397,4 +397,46 @@ Orden estricto: 1 → 2 → 3 → 4 → 5 → 6 → 7. Fase 3 puede empezar tras
 - **Mover anillos**: los anillos 34/94 son los contactos fijos que cierra la barra 38..90; moverlos a 2.285/125.714 rompía el puente. **Rechazado y revertido.**
 - **Estado final**: glifo original de 84 px, anillos 34/94, patas 6..28 / 100..122, barra 38..90; sin wrapper ni pads externos. Anclas PB/ESTOP/OL en 8/152; el cable cae en el extremo exterior de la pata y los anillos quedan dentro. Contenido interno byte-idéntico a `d9e5057` (`ACE595AB…5ADDA5`).
 - **Otras glyphs (reporte, sin fix)**: XIC/XIO/OTE/LAMP sin anillos, vano 144 (OK); PUSH_BUTTON_NC anillos 45/115 span 70 y y=44; ESTOP span ~56.4/56.8; NCTO/NOTC anillos 32/128 span 96 y y=48.5.
-- **Gates**: ui vitest **882/882**; tsc **25**; engine **7/7**; build **OK**.
+- **Gates**: ui vitest **890/890**; tsc **25**; engine **7/7**; build **OK**.
+
+### 2026-11-02 (D53): router L-first, sin stubs obligatorios
+
+- **Causa**: `resolveWireDisplayPoints` imponía stub en ambos bornes y `routeBetweenStubs` penalizaba salir/entrar fuera del eje; dos bornes NO alineados daban un Z de 2 quiebres.
+- **Modelo**: candidatos recta/L-h/L-v/stub-L/Z, elegidos por (1) menos quiebres, (2) sin cruzar el cuerpo, (3) preferencia de eje como desempate. Stub solo si el L directo cruza el cuerpo; endpoints exactos; `collapseWireRoute` sigue de limpieza final.
+- **Cuerpo**: caja basada en el vano de bornes y el viewport rotado, no la caja completa 160×136.
+- **Resultado**: `(5G,3G)`, `(-5G,3G)`, `(3G,-5G)`, `(-3G,5G)` → 3 puntos/1 quiebre; alineados → 2 puntos; bloqueado → `(952,450)->(952,550)->(208,550)->(208,650)`.
+- **JSON**: wires 6,8,10,11,48,64,68 iguales o más simples; wire-68 (XIO rotado) sigue OK.
+- **Tests**: `wire-routing.spec.ts` (8). Gates: ui vitest **890/890**; tsc **25**; engine **7/7**; build **OK**. Sin cambios de glifos, anclas ni placement.
+
+### 2026-11-02 (D54): cruce de cable sobre borne ≠ cortocircuito
+
+- **Causa**: `buildElectricalNodeGraph` compartía el nodo global `point:x:y` entre todos los vértices de todos los cables. El codo interior de `builder-wire-39` en `(216,324)` coincidía con el extremo de `builder-wire-40` en `out-top`; el solver los unía y puenteaba los dos polos del breaker.
+- **Arreglo**: vértices interiores con nodo propio por cable (`point:<wireId>:<index>:x:y`); solo los extremos usan el nodo global. La red de seguridad de extremos sueltos usa el nodo específico del otro cable, así las T reales siguen funcionando.
+- **Resultado**: sin cortocircuito; al pulsar PB-NO se energiza OTE D y los cables del camino siguen con corriente.
+- **Test**: `breaker2p-wire-crossing.circuit.json` + `short-circuit.spec.ts` (2). Gates: ui vitest **892/892**; tsc **25**; engine **7/7**; build **OK**.
+
+### 2026-11-02 (D55): click vs drag en componentes
+
+- **Causa**: cualquier temblor de 1-2 px iniciaba drag y suprimía el click; OL/switch no togglaba y el doble-click no rotaba.
+- **Arreglo**: `COMPONENT_DRAG_THRESHOLD = 6` px; el drag solo empieza al superarlo. Por debajo, click/doble-click llega al glyph handle.
+- **Nota**: la rotación sigue bloqueada mientras el simulador está en `running`; hay que pulsar Stop.
+- **Gates**: ui vitest **892/892**; tsc **25**; engine **7/7**; build **OK**.
+
+### 2026-11-02 (D56): menú contextual adaptable, undo/redo, multiselección y color de lámpara
+
+- **Menú contextual extraído**: el menú sale de `DiagramBuilder` a `ui/src/diagram/contextMenu.tsx`. `ContextMenuLayer` (`:532`) se monta con `createPortal` en `document.body`, usa `position: fixed` en coordenadas de pantalla y `clampMenuPosition` (`:80`) lo mantiene dentro del viewport con margen de **8 px**; si no cabe, lo voltea arriba/izquierda. El submenú abre del lado con más espacio (`getSubmenuSide`, `:109`) y tanto el menú como el submenú limitan `max-height` con scroll.
+- **Estado y rendimiento**: el estado del menú vive en el componente; `open`/`close` son imperativos vía `ContextMenuHandle` (`:50`). Abrir el menú produce **0 renders** del diagrama; click derecho sobre un objetivo no seleccionado renderiza **una vez** porque primero hay que seleccionarlo. Re-seleccionar un componente/cable ya seleccionado es identity-stable (sin render).
+- **Ítems**: componente = submenú **Rotate** (R, Shift+R, 180°, set 0/90/180/270 con check, reset), submenú **Color** solo para `LAMP`, Copy, Duplicate, Rename, Delete; cable = Delete, Simplify, Color, Thickness; canvas = Paste/Undo/Redo solo cuando están disponibles.
+- **Historial, multiselección y portapapeles**: undo/redo con pila máxima **50**, multiselección aditiva con Shift/Ctrl/Meta (`updateComponentSelection`, `ui/src/diagram/interaction.ts:6`), clipboard Copy/Paste y atajos Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y / Ctrl+C, R / Shift+R.
+- **Lámpara**: la unión existente era red/green/yellow/blue/white; **amber** y **orange** se añadieron a la unión (`LampGlowColorOption`, `DiagramBuilder.tsx:77`) y al mapa de glow (`LAMP_GLOW_COLOR_OPTIONS`, `:344`; `getLampGlowColorValue`, `:490`) en el mismo cambio. El default sigue siendo **yellow** (`:315`); los snapshots v1 sin el campo siguen cargando.
+- **Rotación**: el menú reutiliza `applyComponentRotation` (`DiagramBuilder.tsx:6042`; snap al terminal de entrada) y conserva el comportamiento viejo de eliminar los cables conectados. **No** se implementaron re-snap del terminal primario, re-ruteo de cables ni rotación alrededor del centro del grupo: el usuario aprobó "menú solo, mantener la rotación vieja".
+- **Touch/teclado**: long-press **500 ms** con cancelación a **8 px** (`startLongPress`, `DiagramBuilder.tsx:6138`; `isLongPressCancelled`, `contextMenu.tsx:141`), targets de **42 px** con pointer coarse (`App.css:2564`); cierre con Escape/outside/wheel/scroll/resize/blur; Arrow/Home/End/Enter; ArrowRight/Enter entra al submenú y ArrowLeft/Escape vuelve al ítem padre; roles `menu`/`menuitem`; el foco vuelve al canvas al cerrar (`DiagramBuilder.tsx:8051`).
+- **Tests/gates**: ui vitest **923/923** (16 archivos), tsc **25** (baseline pre-existente: miembros duplicados de `BuilderComponent` + errores de `exactOptionalPropertyTypes`), `pnpm -r build` **OK**. Tests nuevos: `contextMenu.spec.ts` **17**, `rotation.spec.ts` **11**.
+- **Verificación**: clamp a 1720x1160 con anclas (0,0)/(1720,0)/(0,1160)/(1720,1160)/(860,0)/(860,1160)/(0,580)/(1720,580) → todas dentro con left 8 o 1472, top 8 o 832; 375x667 → left 8/127, top 8/339, maxWidth 359. Rotación de vuelta completa 0→1→2→3→0 devuelve mundos de terminales idénticos para los 11 tipos de `rotation.spec.ts` (`XIC`, `XIO`, `OTE`, `LAMP`, `PUSH_BUTTON_NC`, `PUSH_BUTTON_NO`, `ESTOP`, `NCTO`, `NOTC`, `BREAKER_1P`, `POWER_SOURCE`), con error < 0.01 y el terminal de entrada en la rejilla en cada paso.
+
+### 2026-11-03 (D57): regresión del menú y de la rotación
+
+- **Menú**: las filas usaban una rejilla de 4 columnas (check, icono, label, shortcut) pero los ítems sin swatch renderizaban solo 3 hijos; la etiqueta caía en la columna de 14 px y el atajo ocupaba la columna flexible. `ContextMenuActionRow`/`ContextMenuSubmenuRow` renderizan siempre los 4 slots. Medido en Chrome: labels 92.3/61.6/96 px (antes 14 px), submenú 191.6/162.2/199.7 px.
+- **Rotación**: la acción sí actualizaba `rotation` (Chrome: 0→1→2→3→0 con el menú y con R), pero `applyComponentRotation` borraba los cables conectados. Ahora `rotateComponentInScene` re-snap por el terminal primario (`getDefaultEntryTerminalId`), rechaza NaN/Infinity y deja los cables intactos: el render resuelve los extremos desde `startPortId`/`endPortId` y el guardado persiste la ruta re-anclada.
+- **Doble click**: `ContextMenuLayer.close()` enfocaba el canvas incluso cuando no había menú abierto; el primer click desplazaba el canvas y el segundo caía en el wrapper, así que el `dblclick` no llegaba al handle del glifo. Ahora `close()` es no-op si no había menú (`shouldRestoreMenuFocus`) y el handler de doble click vive en el wrapper del componente (ignora puertos/botones). Verificado en Chrome: doble click real → `rotate(90deg)`.
+- **Verificación**: `yd-control.circuit.json`, component-9 XIC, wires 10/11: antes `(630,504)-(630,378)` y `(774,504)-(774,378)`; a 90° rutas de 3 puntos que terminan exacto en los bornes rotados; de vuelta a 0° polilíneas idénticas. Gates: ui vitest **947/947** (17 archivos), tsc **25** baseline, build **OK**.

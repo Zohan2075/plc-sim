@@ -3,7 +3,9 @@ import {
   buildDuplicatedComponent,
   closeComponentMenuOnEvent,
   isWireOriginHit,
-  resolveCanvasContextMenuAction
+  resolveCanvasContextMenuAction,
+  resolveDiagramShortcut,
+  updateComponentSelection
 } from "./interaction";
 import type { ComponentMenuCloseEvent, ComponentMenuState } from "./interaction";
 import { getComponentPlaneSnapOffset } from "./grid";
@@ -24,6 +26,39 @@ function makeComponent(overrides: Partial<BuilderComponent> = {}): BuilderCompon
   };
 }
 
+describe("updateComponentSelection", () => {
+  it("replaces the selection on a plain click", () => {
+    expect([...updateComponentSelection(new Set(["a"]), "b", false)]).toEqual(["b"]);
+  });
+
+  it("adds and removes with additive clicks", () => {
+    expect([...updateComponentSelection(new Set(["a"]), "b", true)]).toEqual(["a", "b"]);
+    expect([...updateComponentSelection(new Set(["a", "b"]), "a", true)]).toEqual(["b"]);
+  });
+});
+
+describe("resolveDiagramShortcut", () => {
+  it("maps R and Shift+R to clockwise/counter-clockwise rotation", () => {
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "r", metaKey: false, shiftKey: false }))
+      .toEqual({ direction: "cw", type: "rotate" });
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "R", metaKey: false, shiftKey: true }))
+      .toEqual({ direction: "ccw", type: "rotate" });
+  });
+
+  it("keeps undo/redo/copy on their modifiers and ignores plain letters", () => {
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "z", metaKey: false, shiftKey: false }))
+      .toEqual({ type: "undo" });
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "z", metaKey: true, shiftKey: true }))
+      .toEqual({ type: "redo" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "y", metaKey: false, shiftKey: false }))
+      .toEqual({ type: "redo" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "c", metaKey: false, shiftKey: false }))
+      .toEqual({ type: "copy" });
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "x", metaKey: false, shiftKey: false }))
+      .toBeNull();
+  });
+});
+
 describe("resolveCanvasContextMenuAction", () => {
   it("cancels the wire while a draft is in progress", () => {
     expect(resolveCanvasContextMenuAction({ draftPointCount: 2, hasReconnectTarget: false })).toBe("cancel-wire");
@@ -33,8 +68,8 @@ describe("resolveCanvasContextMenuAction", () => {
     expect(resolveCanvasContextMenuAction({ draftPointCount: 0, hasReconnectTarget: true })).toBe("cancel-wire");
   });
 
-  it("keeps the native context menu when idle", () => {
-    expect(resolveCanvasContextMenuAction({ draftPointCount: 0, hasReconnectTarget: false })).toBe("allow-default");
+  it("opens the custom canvas menu when idle", () => {
+    expect(resolveCanvasContextMenuAction({ draftPointCount: 0, hasReconnectTarget: false })).toBe("open-menu");
   });
 });
 

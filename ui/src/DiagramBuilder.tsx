@@ -16,11 +16,10 @@ import { buildWirePathD, findWireCrossings } from "./diagram/wireHops";
 import type { SheetMetadata } from "./diagram/sheet";
 import {
   buildDuplicatedComponent,
-  closeComponentMenuOnEvent,
   isWireOriginHit,
-  resolveCanvasContextMenuAction
+  resolveDiagramShortcut,
+  updateComponentSelection
 } from "./diagram/interaction";
-import type { ComponentMenuState } from "./diagram/interaction";
 import type { TagDefinition } from "./projectData";
 import {
   clampComponentToPlane,
@@ -57,6 +56,12 @@ import {
 } from "./diagram/grid";
 import { reconcileWireTopology } from "./diagram/wireTopology";
 import { getWireTerminalRoutes, resolveWireDisplayPoints } from "./diagram/wireRoute";
+import { ContextMenuLayer, isLongPressCancelled } from "./diagram/contextMenu";
+import type {
+  ContextMenuHandle,
+  ContextMenuTarget,
+  RotationAction
+} from "./diagram/contextMenu";
 import {
   createCircuitSnapshot,
   createGeneratedInstructionTag,
@@ -70,7 +75,7 @@ import {
 
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
-export type LampGlowColorOption = "red" | "green" | "yellow" | "blue" | "white";
+export type LampGlowColorOption = "red" | "green" | "yellow" | "amber" | "orange" | "blue" | "white";
 export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
@@ -276,13 +281,13 @@ interface DiagramBuilderProps {
 export const COMPONENT_WIDTH = 160;
 export const COMPONENT_HEIGHT = 136;
 const COMPONENT_GLYPH_HEIGHT = 102;
-const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
-const SYMBOL_VIEWPORT_HEIGHT = 84;
+export const SYMBOL_VIEWPORT_WIDTH = COMPONENT_WIDTH;
+export const SYMBOL_VIEWPORT_HEIGHT = 84;
 
 // El glifo se centra en el contenedor de 102 px. Con top=9 las patas de todos
 // los viewBox (64/60/72) caen en y=51, que con componentes sobre la rejilla
 // (y % 18 = 3) da terminales en multiplos de 18. No desplazar por CSS.
-const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2;
+export const SYMBOL_VIEWPORT_TOP = (COMPONENT_GLYPH_HEIGHT - SYMBOL_VIEWPORT_HEIGHT) / 2;
 const SYMBOL_VIEWBOX_WIDTH = 128;
 const DEFAULT_PLANE_WIDTH = 1720;
 const DEFAULT_PLANE_HEIGHT = 940;
@@ -327,6 +332,9 @@ export const TITLE_BLOCK_HEIGHT = 110;
 export const TITLE_BLOCK_PADDING = 12;
 export const TITLE_BLOCK_ROW_HEIGHT = 22;
 const PALETTE_DRAG_THRESHOLD = 6;
+// Un click/doble-click sobre un componente no debe convertirse en drag por 1-2
+// px de temblor: eso suprimia el toggle de OL/switch y la rotacion.
+const COMPONENT_DRAG_THRESHOLD = 6;
 const EMPTY_TAG_VALUES: Readonly<Record<string, boolean>> = {};
 const EMPTY_TIMED_CONTACT_STATES: TimedContactStateByComponentId = {};
 export const DEFAULT_PLANE_SETTINGS: BuilderPlaneSettings = {
@@ -338,6 +346,8 @@ export const LAMP_GLOW_COLOR_OPTIONS: ReadonlyArray<{ label: string; value: Lamp
   { label: "Red", value: "red" },
   { label: "Green", value: "green" },
   { label: "Yellow", value: "yellow" },
+  { label: "Amber", value: "amber" },
+  { label: "Orange", value: "orange" },
   { label: "Blue", value: "blue" },
   { label: "White", value: "white" }
 ];
@@ -484,6 +494,10 @@ function getLampGlowColorValue(color: LampGlowColorOption | undefined): { fill: 
       return { fill: "rgba(248, 113, 113, 0.42)", stroke: "#dc2626", symbol: "#dc2626" };
     case "green":
       return { fill: "rgba(74, 222, 128, 0.42)", stroke: "#16a34a", symbol: "#15803d" };
+    case "amber":
+      return { fill: "rgba(251, 191, 36, 0.42)", stroke: "#d97706", symbol: "#b45309" };
+    case "orange":
+      return { fill: "rgba(251, 146, 60, 0.42)", stroke: "#ea580c", symbol: "#c2410c" };
     case "blue":
       return { fill: "rgba(96, 165, 250, 0.38)", stroke: "#2563eb", symbol: "#1d4ed8" };
     case "white":
@@ -1993,6 +2007,15 @@ function getElectricalPointNodeId(point: Point): string {
   return `point:${getPointKey(point)}`;
 }
 
+/**
+ * Vertice INTERIOR de un cable. No comparte nodo con otros cables ni con
+ * terminales: un cable que pasa por encima de un borne no se conecta a el.
+ * Solo los extremos del cable usan el nodo global y pueden hacer union.
+ */
+function getElectricalWirePointNodeId(wireId: string, pointIndex: number, point: Point): string {
+  return `point:${wireId}:${pointIndex}:${getPointKey(point)}`;
+}
+
 function getElectricalPortNodeId(portId: string): string {
   return `port:${portId}`;
 }
@@ -2007,6 +2030,55 @@ function cloneScene(scene: BuilderScene): BuilderScene {
       ...wire,
       points: wire.points.map((point) => ({ ...point }))
     }))
+  };
+}
+
+/**
+ * Rotates one component around its centre (the snap lives in
+ * `snapComponentToPlaneGrid`) and re-anchors by its primary terminal. The
+ * stored wire polylines are intentionally left untouched: the renderer
+ * resolves wire endpoints from `startPortId`/`endPortId` on every frame, so
+ * the wires follow the rotated terminals and a 0 -> 90 -> 0 round trip is
+ * lossless. Saving reconciles and persists the re-anchored route.
+ */
+export function rotateComponentInScene(
+  scene: BuilderScene,
+  componentId: string,
+  nextRotation: number,
+  planeSettings: BuilderPlaneSettings
+): BuilderScene {
+  const currentComponent = scene.components.find((component) => component.id === componentId);
+
+  if (!currentComponent || !Number.isFinite(nextRotation)) {
+    return scene;
+  }
+
+  const rotation = normalizeQuarterTurns(nextRotation);
+
+  if (!Number.isFinite(rotation)) {
+    return scene;
+  }
+
+  const primaryTerminalId = getDefaultEntryTerminalId(currentComponent.type);
+  const nextComponent = snapComponentToPlaneGrid(
+    { ...currentComponent, rotation },
+    planeSettings,
+    primaryTerminalId
+  );
+
+  if (
+    !Number.isFinite(nextComponent.x)
+    || !Number.isFinite(nextComponent.y)
+    || !Number.isFinite(nextComponent.rotation)
+  ) {
+    return scene;
+  }
+
+  return {
+    components: scene.components.map((component) =>
+      component.id === componentId ? nextComponent : component
+    ),
+    wires: scene.wires
   };
 }
 
@@ -2730,16 +2802,6 @@ function applyWireAnchors(
   return didChange ? nextWires : currentWires;
 }
 
-function removeWiresAttachedToComponent(component: BuilderComponent, wires: BuilderWire[]): BuilderWire[] {
-  const portIds = new Set(getComponentTerminals(component).map((terminal) => terminal.portId));
-
-  return wires.filter(
-    (wire) =>
-      !(wire.startPortId !== null && portIds.has(wire.startPortId))
-      && !(wire.endPortId !== null && portIds.has(wire.endPortId))
-  );
-}
-
 function anchorWireEndpoints(
   points: Point[],
   components: BuilderComponent[],
@@ -3357,7 +3419,11 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
     const resolvedPoints = resolveWirePointsWithMap(wire, portsById);
     resolvedPointsByWire.set(wire.id, resolvedPoints);
 
-    const pointNodeIds = resolvedPoints.map((point) => getElectricalPointNodeId(point));
+    const pointNodeIds = resolvedPoints.map((point, index) =>
+      index === 0 || index === resolvedPoints.length - 1
+        ? getElectricalPointNodeId(point)
+        : getElectricalWirePointNodeId(wire.id, index, point)
+    );
 
     wireNodeIdsByWire.set(wire.id, pointNodeIds);
 
@@ -3432,9 +3498,19 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
 
         const otherPoints = resolvedPointsByWire.get(other.id) ?? [];
 
-        for (const otherPoint of otherPoints) {
+        for (let otherIndex = 0; otherIndex < otherPoints.length; otherIndex += 1) {
+          const otherPoint = otherPoints[otherIndex];
+
+          if (!otherPoint) {
+            continue;
+          }
+
           if (pointsAreClose(endpoint, otherPoint) && distanceBetween(endpoint, otherPoint) < 1.5) {
-            connectGraphNodes(connections, endpointNodeId, getElectricalPointNodeId(otherPoint));
+            const otherNodeId = wireNodeIdsByWire.get(other.id)?.[otherIndex];
+
+            if (otherNodeId) {
+              connectGraphNodes(connections, endpointNodeId, otherNodeId);
+            }
           }
         }
 
@@ -3452,8 +3528,16 @@ function buildElectricalNodeGraph(components: BuilderComponent[], wires: Builder
             continue;
           }
 
-          connectGraphNodes(connections, endpointNodeId, getElectricalPointNodeId(start));
-          connectGraphNodes(connections, endpointNodeId, getElectricalPointNodeId(end));
+          const startNodeId = wireNodeIdsByWire.get(other.id)?.[index];
+          const endNodeId = wireNodeIdsByWire.get(other.id)?.[index + 1];
+
+          if (startNodeId) {
+            connectGraphNodes(connections, endpointNodeId, startNodeId);
+          }
+
+          if (endNodeId) {
+            connectGraphNodes(connections, endpointNodeId, endNodeId);
+          }
         }
       }
     }
@@ -3986,6 +4070,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     offsetX: number;
     offsetY: number;
     pointerPoint: Point;
+    startClientX: number;
+    startClientY: number;
   } | null>(null);
   const paletteDragState = useRef<{
     didDrag: boolean;
@@ -4035,8 +4121,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [isWireAuthoringEnabled, setIsWireAuthoringEnabled] = useState(true);
   const [isPanModeEnabled, setIsPanModeEnabled] = useState(true);
   const [selection, setSelection] = useState<BuilderSelection>(null);
-  const [componentMenu, setComponentMenu] = useState<ComponentMenuState>(null);
-  const [wireMenu, setWireMenu] = useState<{ anchor: Point; wireId: string } | null>(null);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<ReadonlySet<string>>(() => new Set());
+  const selectedComponentIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const runningRef = useRef(running);
+  runningRef.current = running;
+  const contextMenuRef = useRef<ContextMenuHandle>(null);
+  const clipboardRef = useRef<BuilderComponent[]>([]);
+  const undoStackRef = useRef<Array<{ components: BuilderComponent[]; wires: BuilderWire[] }>>([]);
+  const redoStackRef = useRef<Array<{ components: BuilderComponent[]; wires: BuilderWire[] }>>([]);
+  const longPressRef = useRef<{
+    open: () => void;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    timer: number;
+  } | null>(null);
+  const suppressClickAfterLongPressRef = useRef(false);
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -4059,6 +4159,46 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   useEffect(() => {
     wiresRef.current = wires;
   }, [wires]);
+
+  useEffect(() => {
+    selectedComponentIdsRef.current = selectedComponentIds;
+  }, [selectedComponentIds]);
+
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      const state = longPressRef.current;
+
+      if (!state || event.pointerId !== state.pointerId) {
+        return;
+      }
+
+      if (isLongPressCancelled(
+        { x: state.startX, y: state.startY },
+        { x: event.clientX, y: event.clientY },
+        8
+      )) {
+        cancelLongPress();
+      }
+    }
+
+    function handlePointerEnd(event: PointerEvent) {
+      const state = longPressRef.current;
+
+      if (state && event.pointerId === state.pointerId) {
+        cancelLongPress();
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, []);
 
   useEffect(() => {
     planeSettingsRef.current = planeSettings;
@@ -4095,20 +4235,58 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
-        return;
-      }
-
       if (
-        event.target instanceof HTMLInputElement
-        || event.target instanceof HTMLTextAreaElement
-        || event.target instanceof HTMLSelectElement
+        event.target instanceof HTMLElement
+        && event.target.closest("input, textarea, select, [contenteditable='true']")
       ) {
         return;
       }
 
-      setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "escape"));
-        setWireMenu(null);
+      if (event.key === "Escape") {
+        contextMenuRef.current?.close();
+        return;
+      }
+
+      if (runningRef.current) {
+        return;
+      }
+
+      const shortcut = resolveDiagramShortcut(event);
+
+      if (!shortcut) {
+        return;
+      }
+
+      if (shortcut.type === "undo" || shortcut.type === "redo") {
+        event.preventDefault();
+        contextMenuRef.current?.close();
+
+        if (shortcut.type === "undo") {
+          undo();
+        } else {
+          redo();
+        }
+
+        return;
+      }
+
+      if (shortcut.type === "copy") {
+        const ids = [...selectedComponentIdsRef.current];
+
+        if (ids.length > 0) {
+          event.preventDefault();
+          copySelectedComponents(ids);
+        }
+
+        return;
+      }
+
+      const ids = [...selectedComponentIdsRef.current];
+
+      if (ids.length > 0) {
+        event.preventDefault();
+        rotateComponents(ids, shortcut.direction);
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -4311,11 +4489,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       );
     }
 
-    setSelection(
-      reconciled.scene.wires.some((wire) => wire.id === wireId)
-        ? { kind: "wire", id: wireId }
-        : null
-    );
+    if (reconciled.scene.wires.some((wire) => wire.id === wireId)) {
+      selectWireById(wireId);
+    } else {
+      clearSelectionState();
+    }
     setDraftWirePoints([]);
     setCursorPoint(null);
     setHasCustomLayout(true);
@@ -4349,7 +4527,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setComponents(resolvedScene.components);
     setWires(resolvedScene.wires);
     clearWireInteraction();
-    setSelection(null);
+    clearSelectionState();
     setIsWireAuthoringEnabled(true);
     paletteDragState.current = null;
     paletteDragMovedRef.current = false;
@@ -4419,6 +4597,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     if (!drag || !movedComponent) {
       return false;
+    }
+
+    if (!componentDragMovedRef.current) {
+      const distanceFromStart = Math.hypot(
+        clientX - drag.startClientX,
+        clientY - drag.startClientY
+      );
+
+      if (distanceFromStart < COMPONENT_DRAG_THRESHOLD) {
+        return false;
+      }
+
+      componentDragMovedRef.current = true;
     }
 
     drag.pointerPoint = point;
@@ -4641,7 +4832,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         if (didMove) {
           wiresRef.current = nextWires;
           setWires(nextWires);
-          setSelection({ kind: "wire", id: wirePointDragState.current.wireId });
+          selectWireById(wirePointDragState.current.wireId);
           setHasCustomLayout(true);
         }
 
@@ -4666,7 +4857,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           const nextComponent = createComponent(paletteDragState.current.type, point ?? undefined);
 
           setComponents((currentComponents) => [...currentComponents, nextComponent]);
-          setSelection({ kind: "component", id: nextComponent.id });
+          selectComponentById(nextComponent.id);
           setHasCustomLayout(true);
         }
 
@@ -4745,7 +4936,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             setWires(reconciled.scene.wires);
 
             if (!reconciled.scene.wires.some((wire) => wire.id === releasedWire.id)) {
-              setSelection(null);
+              clearSelectionState();
             }
 
             if (reconciled.removedWireIds.length > 0) {
@@ -4913,6 +5104,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     ? electricalState.componentVoltageById.get(selectedComponent.id) ?? 0
     : 0;
   const selectedComponentTerminals = selectedComponent ? getComponentTerminals(selectedComponent) : [];
+  const lampColorMenuOptions = useMemo(
+    () => LAMP_GLOW_COLOR_OPTIONS.map((option) => ({
+      ...option,
+      swatch: getLampGlowColorValue(option.value).stroke
+    })),
+    []
+  );
   const componentPalettePanel = (
     <section className="builder-card builder-card--components builder-card--components-docked builder-card--components-horizontal">
       <div className="builder-card__title">Components</div>
@@ -4933,7 +5131,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
               const nextComponent = createComponent(instruction.type);
               setComponents((currentComponents) => [...currentComponents, nextComponent]);
-              setSelection({ kind: "component", id: nextComponent.id });
+              selectComponentById(nextComponent.id);
               setHasCustomLayout(true);
             }}
           >
@@ -5201,7 +5399,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function appendDraftPoint(point: Point) {
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "wire-start"));
+    contextMenuRef.current?.close();
     setDraftWirePoints((currentPoints) => buildNextDraftPoints(currentPoints, point));
   }
 
@@ -5301,7 +5499,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         };
       })
     );
-    setSelection({ kind: "wire", id: wireId });
+    selectWireById(wireId);
     setHasCustomLayout(true);
   }
 
@@ -5322,7 +5520,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event.stopPropagation();
     wirePointDragState.current = { pointIndex, wireId };
     setWireReconnectTarget(null);
-    setSelection({ kind: "wire", id: wireId });
+    selectWireById(wireId);
   }
 
   function removeWireBendPoint(wireId: string, pointIndex: number) {
@@ -5374,7 +5572,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     wiresRef.current = nextWires;
     setWires(nextWires);
     setWireReconnectTarget(null);
-    setSelection(nextSelectedWire ? { kind: "wire", id: nextSelectedWire.id } : null);
+
+    if (nextSelectedWire) {
+      selectWireById(nextSelectedWire.id);
+    } else {
+      clearSelectionState();
+    }
+
     setHasCustomLayout(true);
   }
 
@@ -5436,13 +5640,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     wirePointDragState.current = null;
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "wire-start"));
+    contextMenuRef.current?.close();
     setWireReconnectTarget((currentTarget) =>
       currentTarget?.wireId === selectedWire.id && currentTarget.endpoint === endpoint
         ? null
         : { endpoint, wireId: selectedWire.id }
     );
-    setSelection({ kind: "wire", id: selectedWire.id });
+    selectWireById(selectedWire.id);
   }
 
   function finishWireReconnect(point: Point) {
@@ -5506,11 +5710,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     wiresRef.current = reconciled.scene.wires;
     setWires(reconciled.scene.wires);
-    setSelection(
-      reconciled.scene.wires.some((wire) => wire.id === wireReconnectTarget.wireId)
-        ? { kind: "wire", id: wireReconnectTarget.wireId }
-        : null
-    );
+    if (reconciled.scene.wires.some((wire) => wire.id === wireReconnectTarget.wireId)) {
+      selectWireById(wireReconnectTarget.wireId);
+    } else {
+      clearSelectionState();
+    }
     setHasCustomLayout(true);
     setWireReconnectTarget(null);
 
@@ -5547,7 +5751,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           : { ...wire, endPortId: null, points: cleanWirePath(nextPoints) };
       })
     );
-    setSelection({ kind: "wire", id: wireId });
+    selectWireById(wireId);
     setHasCustomLayout(true);
     setWireReconnectTarget(null);
   }
@@ -5573,7 +5777,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           : wire
       )
     );
-    setSelection({ kind: "wire", id: selectedWire.id });
+    selectWireById(selectedWire.id);
     setHasCustomLayout(true);
     setWireReconnectTarget(null);
   }
@@ -5661,9 +5865,348 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
+  function cloneCurrentScene(): { components: BuilderComponent[]; wires: BuilderWire[] } {
+    return cloneScene({ components: componentsRef.current, wires: wiresRef.current });
+  }
+
+  function pushUndoSnapshot() {
+    undoStackRef.current.push(cloneCurrentScene());
+
+    if (undoStackRef.current.length > 50) {
+      undoStackRef.current.shift();
+    }
+
+    redoStackRef.current = [];
+  }
+
+  function applyHistoryScene(scene: { components: BuilderComponent[]; wires: BuilderWire[] }) {
+    componentsRef.current = scene.components;
+    wiresRef.current = scene.wires;
+    setComponents(scene.components);
+    setWires(scene.wires);
+    setSelectedComponentIds((current) => {
+      const next = new Set([...current].filter((id) => scene.components.some((component) => component.id === id)));
+
+      return next;
+    });
+    setSelection((current) => {
+      if (current?.kind === "component" && scene.components.some((component) => component.id === current.id)) {
+        return current;
+      }
+
+      if (current?.kind === "wire" && scene.wires.some((wire) => wire.id === current.id)) {
+        return current;
+      }
+
+      return null;
+    });
+    setHasCustomLayout(true);
+  }
+
+  function undo() {
+    const scene = undoStackRef.current.pop();
+
+    if (!scene) {
+      return;
+    }
+
+    redoStackRef.current.push(cloneCurrentScene());
+    applyHistoryScene(scene);
+  }
+
+  function redo() {
+    const scene = redoStackRef.current.pop();
+
+    if (!scene) {
+      return;
+    }
+
+    undoStackRef.current.push(cloneCurrentScene());
+    applyHistoryScene(scene);
+  }
+
+  function selectComponentById(componentId: string, additive = false) {
+    const current = selectedComponentIdsRef.current;
+    const next = updateComponentSelection(current, componentId, additive);
+    const nextIds = [...next];
+    const sameSelection = next.size === current.size && nextIds.every((id) => current.has(id));
+
+    // Re-selecting the same component must keep state identity stable: a
+    // right-click on the active selection then opens the menu without
+    // re-rendering the diagram.
+    if (!additive && sameSelection) {
+      const primaryId = next.has(componentId) ? componentId : nextIds[0] ?? null;
+
+      if (primaryId && !(selection?.kind === "component" && selection.id === primaryId)) {
+        setSelection({ kind: "component", id: primaryId });
+      }
+
+      return;
+    }
+
+    setSelectedComponentIds(next);
+
+    if (next.size === 0) {
+      setSelection(null);
+      return;
+    }
+
+    const primaryId = next.has(componentId) ? componentId : nextIds[0]!;
+    setSelection({ kind: "component", id: primaryId });
+  }
+
+  function selectWireById(wireId: string) {
+    const alreadySelected = selection?.kind === "wire"
+      && selection.id === wireId
+      && selectedComponentIdsRef.current.size === 0;
+
+    if (alreadySelected) {
+      return;
+    }
+
+    if (selectedComponentIdsRef.current.size > 0) {
+      setSelectedComponentIds(new Set());
+    }
+
+    setSelection({ kind: "wire", id: wireId });
+  }
+
+  function clearSelectionState() {
+    setSelectedComponentIds(new Set());
+    setSelection(null);
+  }
+
+  function openComponentContextMenu(component: BuilderComponent, screenPoint: Point) {
+    const useMultiSelection = selectedComponentIds.has(component.id) && selectedComponentIds.size > 1;
+    const selectedIds = useMultiSelection ? [...selectedComponentIds] : [component.id];
+
+    if (!useMultiSelection) {
+      selectComponentById(component.id);
+    }
+
+    contextMenuRef.current?.open({
+      anchor: screenPoint,
+      componentId: component.id,
+      componentLabel: component.label,
+      componentRotation: component.rotation,
+      componentType: component.type,
+      kind: "component",
+      ...(component.lampGlowColor ? { lampGlowColor: component.lampGlowColor } : {}),
+      selectedComponentIds: selectedIds
+    });
+  }
+
+  function openWireContextMenu(wire: BuilderWire, screenPoint: Point) {
+    selectWireById(wire.id);
+    contextMenuRef.current?.open({
+      anchor: screenPoint,
+      kind: "wire",
+      wire: {
+        ...wire,
+        points: wire.points.map((point) => ({ ...point }))
+      }
+    });
+  }
+
+  function openCanvasContextMenu(screenPoint: Point) {
+    contextMenuRef.current?.open({ anchor: screenPoint, kind: "canvas" });
+  }
+
+  function copySelectedComponents(componentIds: string[]) {
+    const selected = componentsRef.current.filter((component) => componentIds.includes(component.id));
+
+    clipboardRef.current = selected.map((component) => ({
+      ...component,
+      ...(component.terminalLabels ? { terminalLabels: { ...component.terminalLabels } } : {})
+    }));
+  }
+
+  function pasteClipboard(anchor: Point) {
+    if (running || clipboardRef.current.length === 0) {
+      return;
+    }
+
+    const point = getCanvasPointFromClient(anchor.x, anchor.y);
+
+    if (!point) {
+      return;
+    }
+
+    pushUndoSnapshot();
+
+    const clipboard = clipboardRef.current;
+    const baseX = Math.min(...clipboard.map((component) => component.x));
+    const baseY = Math.min(...clipboard.map((component) => component.y));
+    const pasted = clipboard.map((component) => {
+      const nextComponent = {
+        ...component,
+        id: createId(nextId, "builder-component"),
+        x: point.x + component.x - baseX,
+        y: point.y + component.y - baseY
+      };
+
+      return snapComponentToPlaneGrid(
+        clampComponentToPlane(nextComponent, planeSettingsRef.current),
+        planeSettingsRef.current
+      );
+    });
+    const nextComponents = [...componentsRef.current, ...pasted];
+
+    componentsRef.current = nextComponents;
+    setComponents(nextComponents);
+    setSelectedComponentIds(new Set(pasted.map((component) => component.id)));
+    setSelection(pasted[0] ? { kind: "component", id: pasted[0].id } : null);
+    setHasCustomLayout(true);
+  }
+
+  function applyLampGlowColor(componentIds: string[], color: LampGlowColorOption) {
+    if (running || componentIds.length === 0) {
+      return;
+    }
+
+    pushUndoSnapshot();
+    setComponents((currentComponents) =>
+      currentComponents.map((component) =>
+        componentIds.includes(component.id) && component.type === "LAMP"
+          ? { ...component, lampGlowColor: color }
+          : component
+      )
+    );
+    setHasCustomLayout(true);
+  }
+
+  function applyComponentRotation(componentId: string, nextRotation: number) {
+    const currentScene: BuilderScene = {
+      components: componentsRef.current,
+      wires: wiresRef.current
+    };
+    const nextScene = rotateComponentInScene(
+      currentScene,
+      componentId,
+      nextRotation,
+      planeSettingsRef.current
+    );
+
+    if (nextScene === currentScene) {
+      return;
+    }
+
+    componentsRef.current = nextScene.components;
+    // The wires are not mutated: resolvedWires re-anchors their endpoints from
+    // the component ports on render, and saving persists the new route.
+    setComponents(nextScene.components);
+    setHasCustomLayout(true);
+  }
+
+  function getRotationTarget(currentRotation: number, action: RotationAction): number {
+    const turns = normalizeQuarterTurns(currentRotation);
+
+    switch (action) {
+      case "cw":
+        return turns + 1;
+      case "ccw":
+        return turns + 3;
+      case "half":
+        return turns + 2;
+      case "angle0":
+        return 0;
+      case "angle90":
+        return 1;
+      case "angle180":
+        return 2;
+      case "angle270":
+        return 3;
+    }
+  }
+
+  function rotateComponents(componentIds: string[], action: RotationAction) {
+    if (running || componentIds.length === 0) {
+      return;
+    }
+
+    pushUndoSnapshot();
+
+    for (const componentId of componentIds) {
+      const component = componentsRef.current.find((candidate) => candidate.id === componentId);
+
+      if (!component) {
+        continue;
+      }
+
+      applyComponentRotation(componentId, getRotationTarget(component.rotation, action));
+    }
+  }
+
+  function deleteComponentWithHistory(componentId: string) {
+    pushUndoSnapshot();
+    deleteComponentById(componentId);
+    const nextIds = new Set(selectedComponentIdsRef.current);
+    nextIds.delete(componentId);
+    setSelectedComponentIds(nextIds);
+    setSelection(nextIds.size > 0 ? { kind: "component", id: [...nextIds][0]! } : null);
+  }
+
+  function duplicateComponentWithHistory(componentId: string) {
+    pushUndoSnapshot();
+    duplicateComponent(componentId);
+  }
+
+  function renameComponentWithHistory(componentId: string, nextLabel: string) {
+    pushUndoSnapshot();
+    applyComponentLabelEdit(componentId, nextLabel);
+  }
+
+  function getMenuAvailability() {
+    return {
+      canPaste: clipboardRef.current.length > 0,
+      canRedo: redoStackRef.current.length > 0,
+      canUndo: undoStackRef.current.length > 0
+    };
+  }
+
+  function startLongPress(event: ReactPointerEvent<Element>, open: () => void) {
+    if (
+      event.pointerType !== "touch"
+      || running
+      || layoutEditingLocked
+      || draftWirePoints.length > 0
+      || wireReconnectTarget !== null
+    ) {
+      return;
+    }
+
+    cancelLongPress();
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const timer = window.setTimeout(() => {
+      longPressRef.current = null;
+      suppressClickAfterLongPressRef.current = true;
+      open();
+      window.setTimeout(() => {
+        suppressClickAfterLongPressRef.current = false;
+      }, 500);
+    }, 500);
+
+    longPressRef.current = { open, pointerId, startX, startY, timer };
+  }
+
+  function cancelLongPress() {
+    if (!longPressRef.current) {
+      return;
+    }
+
+    window.clearTimeout(longPressRef.current.timer);
+    longPressRef.current = null;
+  }
+
   function handleCanvasClick(event: ReactMouseEvent<HTMLDivElement>) {
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
-    setWireMenu(null);
+    contextMenuRef.current?.close();
+
+    if (suppressClickAfterLongPressRef.current) {
+      suppressClickAfterLongPressRef.current = false;
+      return;
+    }
 
     if (performance.now() < suppressCanvasClickUntilRef.current) {
       return;
@@ -5681,7 +6224,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     if (!isWireAuthoringEnabled || draftWirePoints.length === 0) {
-      setSelection(null);
+      clearSelectionState();
       return;
     }
 
@@ -5709,21 +6252,20 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleCanvasContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
-    setWireMenu(null);
+    event.preventDefault();
+    event.stopPropagation();
+    contextMenuRef.current?.close();
 
-    const action = resolveCanvasContextMenuAction({
-      draftPointCount: draftWirePoints.length,
-      hasReconnectTarget: wireReconnectTarget !== null
-    });
-
-    if (action !== "cancel-wire") {
+    if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
+      clearWireInteraction();
       return;
     }
 
-    event.preventDefault();
-    clearWireInteraction();
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "wire-start"));
+    if (running || layoutEditingLocked) {
+      return;
+    }
+
+    openCanvasContextMenu({ x: event.clientX, y: event.clientY });
   }
 
   function handleCanvasMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
@@ -5780,7 +6322,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     setWireReconnectTarget(null);
-    setSelection(null);
+    clearSelectionState();
     setHasCustomLayout(true);
   }
 
@@ -5796,18 +6338,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     componentsRef.current = [...componentsRef.current, duplicated];
     setComponents(componentsRef.current);
-    setSelection({ kind: "component", id: duplicated.id });
+    selectComponentById(duplicated.id);
     setHasCustomLayout(true);
-  }
-
-  function startComponentLabelEdit(componentId: string) {
-    setComponentMenu((menu) => (menu && menu.componentId === componentId ? { ...menu, editingLabel: true } : null));
   }
 
   function applyComponentLabelEdit(componentId: string, nextLabel: string) {
     handlePlaneLabelChange(componentId, nextLabel);
     handlePlaneLabelBlur(componentId);
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
   }
 
   function handleResetCanvas() {
@@ -5822,7 +6359,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setComponents(nextScene.components);
     setWires(nextScene.wires);
     clearWireInteraction();
-    setSelection(null);
+    clearSelectionState();
+    contextMenuRef.current?.close();
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    clipboardRef.current = [];
     setIsWireAuthoringEnabled(true);
     setIsPanModeEnabled(true);
     setIsPanning(false);
@@ -5898,6 +6439,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       };
 
       applySceneState(nextScene, nextProgramSignature, true, nextPlaneSettings);
+      contextMenuRef.current?.close();
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      clipboardRef.current = [];
       setSheetMetadata(snapshot.sheet);
       setCircuitSnapshotStatus(`Loaded ${snapshot.name}.`);
 
@@ -5923,7 +6468,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     if (
       eventTarget instanceof Element
       && eventTarget.closest(
-        ".freeplay-component, .freeplay-wire, .freeplay-component-menu, .freeplay-wire-menu, .freeplay-port, .freeplay-wire__node, .freeplay-wire__hit, input, textarea, select, option, button"
+        ".freeplay-component, .freeplay-wire, .context-menu, .freeplay-port, .freeplay-wire__node, .freeplay-wire__hit, input, textarea, select, option, button"
       )
     ) {
       return;
@@ -5957,7 +6502,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event.preventDefault();
     event.stopPropagation();
     componentDragMovedRef.current = false;
-    setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "drag-start"));
+    contextMenuRef.current?.close();
 
     const component = components.find((entry) => entry.id === componentId);
     const point = getCanvasPointFromClient(event.clientX, event.clientY);
@@ -5970,10 +6515,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       componentId,
       offsetX: point.x - component.x,
       offsetY: point.y - component.y,
-      pointerPoint: point
+      pointerPoint: point,
+      startClientX: event.clientX,
+      startClientY: event.clientY
     };
     setDraggingComponentId(componentId);
-    setSelection({ kind: "component", id: componentId });
+
+    if (!(event.shiftKey || event.ctrlKey || event.metaKey)) {
+      selectComponentById(componentId);
+    }
   }
 
   function handleComponentHandlePointerDown(event: ReactPointerEvent<HTMLDivElement>, componentId: string) {
@@ -6173,30 +6723,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
-    const nextComponent = snapComponentToPlaneGrid(
-      {
-        ...currentComponent,
-        rotation: normalizeQuarterTurns(currentComponent.rotation + direction)
-      },
-      planeSettingsRef.current
-    );
-
-    const nextComponents = componentsRef.current.map((component) =>
-      component.id === componentId ? nextComponent : component
-    );
-    // Al rotar, los cables NO siguen: los que quedarian sueltos se eliminan
-    // para no dejar conexiones falsas ni cables desalineados.
-    const remainingWires = removeWiresAttachedToComponent(currentComponent, wiresRef.current);
-    const reconciled = reconcileWireTopology(
-      { components: nextComponents, wires: remainingWires },
-      planeSettingsRef.current
-    );
-
-    componentsRef.current = reconciled.scene.components;
-    wiresRef.current = reconciled.scene.wires;
-    setComponents(reconciled.scene.components);
-    setWires(reconciled.scene.wires);
-    setHasCustomLayout(true);
+    pushUndoSnapshot();
+    applyComponentRotation(componentId, currentComponent.rotation + direction);
   }
 
   function cancelPendingSwitchToggle(componentId?: string) {
@@ -6232,13 +6760,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           : component
       )
     );
-    setSelection({ kind: "component", id: componentId });
+    selectComponentById(componentId);
     setHasCustomLayout(true);
   }
 
   function pressMomentaryPushButton(componentId: string) {
     setComponents((currentComponents) => applyMomentaryPress(currentComponents, componentId));
-    setSelection({ kind: "component", id: componentId });
+    selectComponentById(componentId);
   }
 
   function releaseMomentaryPushButton(componentId: string) {
@@ -6249,7 +6777,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event.preventDefault();
     event.stopPropagation();
     setWireReconnectTarget(null);
-    setSelection({ kind: "component", id: componentId });
+    selectComponentById(componentId);
     componentDragMovedRef.current = false;
 
     const component = componentsRef.current.find((entry) => entry.id === componentId);
@@ -6260,7 +6788,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         componentId,
         offsetX: point.x - component.x,
         offsetY: point.y - component.y,
-        pointerPoint: point
+        pointerPoint: point,
+        startClientX: event.clientX,
+        startClientY: event.clientY
       };
     }
 
@@ -6368,22 +6898,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleSelectedLampGlowColorChange(nextLampGlowColor: string) {
-    if (!selectedComponent || selectedComponent.type !== "LAMP") {
-      return;
-    }
-
     const resolvedLampGlowColor = LAMP_GLOW_COLOR_OPTIONS.some((option) => option.value === nextLampGlowColor)
       ? nextLampGlowColor as LampGlowColorOption
       : DEFAULT_LAMP_GLOW_COLOR;
-
-    setComponents((currentComponents) =>
-      currentComponents.map((component) =>
-        component.id === selectedComponent.id
-          ? { ...component, lampGlowColor: resolvedLampGlowColor }
-          : component
-      )
+    const selectedIds = selectedComponentIds.size > 0
+      ? [...selectedComponentIds]
+      : selectedComponent
+        ? [selectedComponent.id]
+        : [];
+    const lampIds = selectedIds.filter(
+      (id) => componentsRef.current.find((component) => component.id === id)?.type === "LAMP"
     );
-    setHasCustomLayout(true);
+
+    applyLampGlowColor(lampIds, resolvedLampGlowColor);
   }
 
   return (
@@ -6967,10 +7494,28 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             >
               <div
                 ref={canvasRef}
+                tabIndex={-1}
                 className={`freeplay-canvas ${isWirePointerPreviewVisible ? "freeplay-canvas--wire" : ""} ${isPanModeEnabled ? "freeplay-canvas--pan" : ""} ${isPanning ? "freeplay-canvas--panning" : ""}`.trim()}
                 style={canvasStyle}
                 onClick={handleCanvasClick}
                 onContextMenu={handleCanvasContextMenu}
+                onPointerDown={(event) => {
+                  const target = event.target;
+
+                  if (
+                    target instanceof Element
+                    && target.closest(".freeplay-component, .freeplay-wire__hit")
+                  ) {
+                    return;
+                  }
+
+                  if (event.pointerType === "touch") {
+                    startLongPress(event, () => openCanvasContextMenu({
+                      x: event.clientX,
+                      y: event.clientY
+                    }));
+                  }
+                }}
                 onMouseLeave={() => setCursorPoint(null)}
                 onMouseMove={handleCanvasMouseMove}
               >
@@ -7030,8 +7575,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         className="freeplay-wire__hit"
                         points={pointString}
                         style={{ strokeWidth: hitStrokeWidth }}
+                        onPointerDown={(event) => {
+                          if (event.pointerType === "touch") {
+                            startLongPress(event, () => openWireContextMenu(
+                              wire,
+                              { x: event.clientX, y: event.clientY }
+                            ));
+                          }
+                        }}
                         onClick={(event) => {
                           event.stopPropagation();
+
+                          if (suppressClickAfterLongPressRef.current) {
+                            suppressClickAfterLongPressRef.current = false;
+                            return;
+                          }
 
                           const point = getCanvasPointFromClient(event.clientX, event.clientY);
 
@@ -7046,7 +7604,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           }
 
                           setWireReconnectTarget(null);
-                          setSelection({ kind: "wire", id: wire.id });
+                          selectWireById(wire.id);
                         }}
                         onDoubleClick={(event) => {
                           event.stopPropagation();
@@ -7067,15 +7625,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                             return;
                           }
 
-                          const point = getCanvasPointFromClient(event.clientX, event.clientY);
-
-                          if (!point) {
-                            return;
-                          }
-
-                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
-                          setSelection({ kind: "wire", id: wire.id });
-                          setWireMenu({ anchor: point, wireId: wire.id });
+                          openWireContextMenu(wire, { x: event.clientX, y: event.clientY });
                         }}
                       />
                     </g>
@@ -7127,7 +7677,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         }
 
                         setWireReconnectTarget(null);
-                        setSelection({ kind: "wire", id: primaryOccurrence.wireId });
+                        selectWireById(primaryOccurrence.wireId);
                       }}
                       onDoubleClick={(event) => {
                         if (node.hasEndpoint || node.hasMultipleOccurrences) {
@@ -7136,6 +7686,20 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                         event.stopPropagation();
                         removeWireBendPoint(primaryOccurrence.wireId, primaryOccurrence.pointIndex);
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        if (running || layoutEditingLocked || draftWirePoints.length > 0 || wireReconnectTarget) {
+                          return;
+                        }
+
+                        const wire = wires.find((candidate) => candidate.id === primaryOccurrence.wireId);
+
+                        if (wire) {
+                          openWireContextMenu(wire, { x: event.clientX, y: event.clientY });
+                        }
                       }}
                       onMouseDown={(event) => {
                         if (node.hasMultipleOccurrences) {
@@ -7168,7 +7732,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                 {components.map((component) => {
                   const terminals = getComponentTerminals(component);
-                  const selected = selection?.kind === "component" && selection.id === component.id;
+                  const selected = selectedComponentIds.has(component.id)
+                    || (selection?.kind === "component" && selection.id === component.id);
                   const energized = running && electricalState.energizedComponentIds.has(component.id);
                   const lampGlowColor = component.type === "LAMP"
                     ? getLampGlowColorValue(component.lampGlowColor)
@@ -7228,42 +7793,73 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         if (
                           target instanceof Element
                           && target.closest(
-                            ".freeplay-port, .freeplay-component__press-target, .freeplay-component-menu, .freeplay-wire-menu, input, textarea, select, option, button"
+                            ".freeplay-port, .freeplay-component__press-target, .context-menu, input, textarea, select, option, button"
                           )
                         ) {
                           return;
+                        }
+
+                        if (event.pointerType === "touch") {
+                          startLongPress(event, () => openComponentContextMenu(
+                            component,
+                            { x: event.clientX, y: event.clientY }
+                          ));
                         }
 
                         handleComponentHandlePointerDown(event, component.id);
                       }}
                       onPointerMove={(event) => handleComponentHandlePointerMove(event, component.id)}
                       onPointerUp={(event) => handleComponentHandlePointerRelease(event, component.id)}
+                      onDoubleClick={(event) => {
+                        const target = event.target;
+
+                        if (
+                          target instanceof Element
+                          && target.closest(
+                            ".freeplay-port, .freeplay-component__press-target, .context-menu, input, textarea, select, option, button"
+                          )
+                        ) {
+                          return;
+                        }
+
+                        event.stopPropagation();
+
+                        if (isMaintainedSwitchType(component.type)) {
+                          cancelPendingSwitchToggle(component.id);
+                        }
+
+                        rotateComponent(component.id, 1);
+                      }}
                       onClick={(event) => {
                         // Un click en la etiqueta/badge tambien selecciona; sin
                         // esto el click sube al canvas y limpia la seleccion
                         // inmediatamente (el panel se encendia y apagaba).
                         event.stopPropagation();
-                        setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
-                        setSelection({ kind: "component", id: component.id });
-                      }}
-                      onContextMenu={(event) => {
-                        if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
+
+                        if (suppressClickAfterLongPressRef.current) {
+                          suppressClickAfterLongPressRef.current = false;
                           return;
                         }
 
+                        contextMenuRef.current?.close();
+                        selectComponentById(
+                          component.id,
+                          event.shiftKey || event.ctrlKey || event.metaKey
+                        );
+                      }}
+                      onContextMenu={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
+
+                        if (draftWirePoints.length > 0 || wireReconnectTarget !== null) {
+                          return;
+                        }
 
                         if (running || layoutEditingLocked) {
                           return;
                         }
 
-                        setSelection({ kind: "component", id: component.id });
-                        setComponentMenu({
-                          anchor: { x: component.x + COMPONENT_WIDTH, y: component.y },
-                          componentId: component.id,
-                          editingLabel: false
-                        });
+                        openComponentContextMenu(component, { x: event.clientX, y: event.clientY });
                       }}
                     >
                       {componentBadge ? (
@@ -7281,14 +7877,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         style={{ left: terminal.x - component.x, top: terminal.y - component.y }}
                         onClick={(event) => {
                           event.stopPropagation();
-                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+                          contextMenuRef.current?.close();
 
                           if (wireReconnectTarget) {
                             finishWireReconnect({ x: terminal.x, y: terminal.y });
                             return;
                           }
 
-                          setSelection({ kind: "component", id: component.id });
+                          selectComponentById(
+                            component.id,
+                            event.shiftKey || event.ctrlKey || event.metaKey
+                          );
 
                           if (!isWireAuthoringEnabled) {
                             return;
@@ -7317,28 +7916,30 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         style={glyphHitboxStyle}
                         onClick={(event) => {
                           event.stopPropagation();
-                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
+                          contextMenuRef.current?.close();
+
+                          if (suppressClickAfterLongPressRef.current) {
+                            suppressClickAfterLongPressRef.current = false;
+                            return;
+                          }
 
                           if (componentDragMovedRef.current) {
                             componentDragMovedRef.current = false;
                             return;
                           }
 
+                          const additive = event.shiftKey || event.ctrlKey || event.metaKey;
                           setWireReconnectTarget(null);
-                          setSelection({ kind: "component", id: component.id });
+                          selectComponentById(component.id, additive);
 
-                          if (draftWirePoints.length === 0 && wireReconnectTarget === null && isMaintainedSwitchType(component.type)) {
+                          if (
+                            !additive
+                            && draftWirePoints.length === 0
+                            && wireReconnectTarget === null
+                            && isMaintainedSwitchType(component.type)
+                          ) {
                             scheduleMaintainedSwitchToggle(component.id);
                           }
-                        }}
-                        onDoubleClick={(event) => {
-                          event.stopPropagation();
-
-                          if (isMaintainedSwitchType(component.type)) {
-                            cancelPendingSwitchToggle(component.id);
-                          }
-
-                          rotateComponent(component.id, 1);
                         }}
                       />
                       {isMomentaryPushButtonType(component.type) ? (
@@ -7397,14 +7998,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         style={getComponentLabelRowStyle(component.rotation)}
                         onClick={(event) => {
                           event.stopPropagation();
-                          setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "canvas-click"));
-
-                          if (selected) {
-                            return;
-                          }
-
+                          contextMenuRef.current?.close();
                           setWireReconnectTarget(null);
-                          setSelection({ kind: "component", id: component.id });
+                          selectComponentById(
+                            component.id,
+                            event.shiftKey || event.ctrlKey || event.metaKey
+                          );
                         }}
                       >
                         <span className="freeplay-component__label">{component.label}</span>
@@ -7413,147 +8012,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   );
                 })}
 
-                {componentMenu && !layoutEditingLocked ? (() => {
-                  const menuComponent = components.find((entry) => entry.id === componentMenu.componentId);
 
-                  if (!menuComponent) {
-                    return null;
-                  }
-
-                  return (
-                    <div
-                      className="freeplay-component-menu"
-                      style={{ left: componentMenu.anchor.x, top: componentMenu.anchor.y }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onContextMenu={(event) => event.stopPropagation()}
-                    >
-                      {componentMenu.editingLabel ? (
-                        <input
-                          type="text"
-                          className="freeplay-component__label-input freeplay-component-menu__input"
-                          spellCheck={false}
-                          autoFocus
-                          defaultValue={menuComponent.label}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              applyComponentLabelEdit(menuComponent.id, event.currentTarget.value);
-                            }
-                          }}
-                          onBlur={(event) => applyComponentLabelEdit(menuComponent.id, event.currentTarget.value)}
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="freeplay-component-menu__action"
-                            onClick={() => {
-                              setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
-                              duplicateComponent(menuComponent.id);
-                            }}
-                          >
-                            Duplicar
-                          </button>
-                          <button
-                            type="button"
-                            className="freeplay-component-menu__action"
-                            onClick={() => {
-                              setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
-                              rotateComponent(menuComponent.id, 1);
-                            }}
-                          >
-                            Rotar
-                          </button>
-                          <button
-                            type="button"
-                            className="freeplay-component-menu__action"
-                            onClick={() => {
-                              setComponentMenu((menu) => closeComponentMenuOnEvent(menu, "action-run"));
-                              deleteComponentById(menuComponent.id);
-                              setWireReconnectTarget(null);
-                              setSelection(null);
-                            }}
-                          >
-                            Eliminar
-                          </button>
-                          <button
-                            type="button"
-                            className="freeplay-component-menu__action"
-                            onClick={() => startComponentLabelEdit(menuComponent.id)}
-                          >
-                            Editar etiqueta
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  );
-                })() : null}
-                {wireMenu && !layoutEditingLocked ? (() => {
-                  const menuWire = wires.find((entry) => entry.id === wireMenu.wireId);
-
-                  if (!menuWire) {
-                    return null;
-                  }
-
-                  return (
-                    <div
-                      className="freeplay-component-menu freeplay-wire-menu"
-                      style={{ left: wireMenu.anchor.x, top: wireMenu.anchor.y }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => event.stopPropagation()}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                      onContextMenu={(event) => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        className="freeplay-component-menu__action"
-                        onClick={() => {
-                          setWireMenu(null);
-                          deleteWireById(menuWire.id);
-                        }}
-                      >
-                        Eliminar
-                      </button>
-                      <div className="freeplay-wire-menu__row">
-                        <span className="freeplay-wire-menu__label">Color</span>
-                        <input
-                          type="color"
-                          className="freeplay-wire-menu__color"
-                          value={menuWire.color}
-                          onChange={(event) => updateWireColorById(menuWire.id, event.target.value)}
-                        />
-                      </div>
-                      <div className="freeplay-wire-menu__row">
-                        <span className="freeplay-wire-menu__label">Grosor</span>
-                        <span className="freeplay-wire-menu__thickness">
-                          {[2, 3.5, 5, 7].map((value) => (
-                            <button
-                              key={value}
-                              type="button"
-                              className={`freeplay-wire-menu__thickness-button ${menuWire.thickness === value ? "freeplay-wire-menu__thickness-button--active" : ""}`.trim()}
-                              onClick={() => updateWireThicknessById(menuWire.id, value)}
-                            >
-                              {value}
-                            </button>
-                          ))}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="freeplay-component-menu__action"
-                        onClick={() => {
-                          setWireMenu(null);
-                          simplifyWireById(menuWire.id);
-                        }}
-                      >
-                        Simplificar
-                      </button>
-                    </div>
-                  );
-                })() : null}
                 {showTerminalDebug ? (
                   <svg
                     className="freeplay-debug-overlay"
@@ -7609,6 +8068,28 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           )
           : null}
       </div>
+      <ContextMenuLayer
+        ref={contextMenuRef}
+        actions={{
+          copyComponents: copySelectedComponents,
+          deleteComponent: deleteComponentWithHistory,
+          deleteWire: deleteWireById,
+          duplicateComponent: duplicateComponentWithHistory,
+          paste: pasteClipboard,
+          redo,
+          renameComponent: renameComponentWithHistory,
+          rotateComponents,
+          setLampGlowColor: applyLampGlowColor,
+          setWireColor: updateWireColorById,
+          setWireThickness: updateWireThicknessById,
+          simplifyWire: simplifyWireById,
+          undo
+        }}
+        getAvailability={getMenuAvailability}
+        lampColorOptions={lampColorMenuOptions}
+        locked={layoutEditingLocked}
+        onClose={() => canvasRef.current?.focus()}
+      />
     </section>
   );
 }

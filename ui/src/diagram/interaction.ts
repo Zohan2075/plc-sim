@@ -3,13 +3,63 @@ import type { BuilderComponent, BuilderPlaneSettings, Point } from "../DiagramBu
 
 export const WIRE_ORIGIN_CANCEL_DISTANCE = 6;
 
+export type DiagramShortcut =
+  | { type: "copy" }
+  | { type: "redo" }
+  | { type: "rotate"; direction: "ccw" | "cw" }
+  | { type: "undo" };
+
+export function resolveDiagramShortcut(event: {
+  ctrlKey: boolean;
+  key: string;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): DiagramShortcut | null {
+  const key = event.key.toLowerCase();
+  const modifier = event.ctrlKey || event.metaKey;
+
+  if (modifier && key === "z") {
+    return event.shiftKey ? { type: "redo" } : { type: "undo" };
+  }
+
+  if (modifier && key === "y") {
+    return { type: "redo" };
+  }
+
+  if (modifier && key === "c") {
+    return { type: "copy" };
+  }
+
+  if (!modifier && key === "r") {
+    return { direction: event.shiftKey ? "ccw" : "cw", type: "rotate" };
+  }
+
+  return null;
+}
+
+export function updateComponentSelection(
+  current: ReadonlySet<string>,
+  componentId: string,
+  additive: boolean
+): Set<string> {
+  const next = new Set(additive ? current : []);
+
+  if (additive && next.has(componentId)) {
+    next.delete(componentId);
+  } else {
+    next.add(componentId);
+  }
+
+  return next;
+}
+
 export type CanvasContextMenuState = {
   draftPointCount: number;
   hasReconnectTarget: boolean;
 };
 
-export function resolveCanvasContextMenuAction(state: CanvasContextMenuState): "cancel-wire" | "allow-default" {
-  return state.draftPointCount > 0 || state.hasReconnectTarget ? "cancel-wire" : "allow-default";
+export function resolveCanvasContextMenuAction(state: CanvasContextMenuState): "cancel-wire" | "open-menu" {
+  return state.draftPointCount > 0 || state.hasReconnectTarget ? "cancel-wire" : "open-menu";
 }
 
 /**
