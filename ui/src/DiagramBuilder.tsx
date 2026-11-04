@@ -63,12 +63,31 @@ import {
 } from "./diagram/wireRoute";
 import { renderSelector3Pos, SELECTOR_3POS_RING_CENTERS } from "./diagram/selector3pos";
 import type { Selector3PosPosition } from "./diagram/selector3pos";
+import { SELECTOR_3POS_RING_RADII } from "./diagram/selector3posArt.generated";
+import {
+  SELECTOR_3POS_ZONES,
+  applySelector3PosPositionToComponents,
+  getSelector3PosArtPointFromClientPoint,
+  getSelector3PosZoneAtArtPoint,
+  getSelector3PosZoneAtClientPoint,
+  isSelector3PosRingPoint
+} from "./diagram/selector3posZones";
 import { ContextMenuLayer, isLongPressCancelled } from "./diagram/contextMenu";
 import type {
   ContextMenuHandle,
   ContextMenuTarget,
   RotationAction
 } from "./diagram/contextMenu";
+import { isOperable } from "./diagram/operability";
+import {
+  RibbonBody,
+  RibbonButton,
+  RibbonField,
+  RibbonGroup,
+  RibbonTabBar,
+  useCompactRibbon
+} from "./Ribbon";
+import type { RibbonTab, RibbonTabId } from "./Ribbon";
 import {
   createCircuitSnapshot,
   createGeneratedInstructionTag,
@@ -387,6 +406,8 @@ export const instructionPalette: Array<{
   { type: "OTE", label: "OTE", description: "Output energize coil" }
 ];
 
+const LOGIC_PALETTE_TYPES = new Set<BuilderComponentType>(["XIC", "XIO", "NOTC", "NCTO", "OTE"]);
+
 const fallbackTags: TagDefinition[] = [
   { name: "I:0/0", kind: "input", label: "Input" },
   { name: "O:0/0", kind: "output", label: "Output" },
@@ -645,7 +666,7 @@ function formatSourceVoltage(component: BuilderComponent): string {
 }
 
 export function isBreakerClosed(component: BuilderComponent): boolean {
-  return isBreakerType(component.type) ? component.isClosed ?? true : false;
+  return isBreakerType(component.type);
 }
 
 function isMaintainedSwitchClosed(component: BuilderComponent): boolean {
@@ -687,27 +708,10 @@ export function applyMomentaryRelease(components: BuilderComponent[], componentI
 }
 
 /**
- * Toggles the latched state of the manually operated maintained components:
- * selector/limit/overload contacts and breakers. It deliberately has no
+ * Toggles the latched state of the manually operated maintained switches
+ * (switch, limit and overload contacts). It deliberately has no
  * simulator-running dependency; the click handler decides when to call it.
  */
-export function getNextSelectorPosition(
-  position: Selector3PosPosition,
-  direction: 1 | -1
-): { direction: 1 | -1; position: Selector3PosPosition } {
-  if (position === 1) {
-    return { direction: 1, position: 2 };
-  }
-
-  if (position === 3) {
-    return { direction: -1, position: 2 };
-  }
-
-  return direction > 0
-    ? { direction, position: 3 }
-    : { direction, position: 1 };
-}
-
 export function toggleComponentOperateState(
   components: BuilderComponent[],
   componentId: string
@@ -717,15 +721,11 @@ export function toggleComponentOperateState(
       return component;
     }
 
-    if (isBreakerType(component.type)) {
-      return { ...component, isClosed: !isBreakerClosed(component) };
+    if (isOperable[component.type] !== "toggle" || !isMaintainedSwitchType(component.type)) {
+      return component;
     }
 
-    if (isMaintainedSwitchType(component.type)) {
-      return { ...component, isClosed: !isMaintainedSwitchClosed(component) };
-    }
-
-    return component;
+    return { ...component, isClosed: !isMaintainedSwitchClosed(component) };
   });
 }
 
@@ -853,11 +853,9 @@ function getConductiveTerminalPairs(
 ): Array<[string, string]> {
   switch (component.type) {
     case "BREAKER_1P":
-      return !useLiveTagState || isBreakerClosed(component) ? [["in", "out"]] : [];
+      return [["in", "out"]];
     case "BREAKER_2P":
-      return !useLiveTagState || isBreakerClosed(component)
-        ? [["in-top", "out-top"], ["in-bottom", "out-bottom"]]
-        : [];
+      return [["in-top", "out-top"], ["in-bottom", "out-bottom"]];
     case "SWITCH_1P":
       return !useLiveTagState || isMaintainedSwitchClosed(component) ? [["in", "out"]] : [];
     case "PUSH_BUTTON_NO":
@@ -1327,15 +1325,19 @@ function getDefaultComponentLabel(
   }
 }
 
+function projectSymbolScale(viewBoxHeight: number): number {
+  return Math.min(
+    SYMBOL_VIEWPORT_WIDTH / SYMBOL_VIEWBOX_WIDTH,
+    SYMBOL_VIEWPORT_HEIGHT / viewBoxHeight
+  );
+}
+
 function projectSymbolPoint(
   x: number,
   y: number,
   viewBoxHeight: number
 ): Point {
-  const scale = Math.min(
-    SYMBOL_VIEWPORT_WIDTH / SYMBOL_VIEWBOX_WIDTH,
-    SYMBOL_VIEWPORT_HEIGHT / viewBoxHeight
-  );
+  const scale = projectSymbolScale(viewBoxHeight);
   const offsetX = (SYMBOL_VIEWPORT_WIDTH - SYMBOL_VIEWBOX_WIDTH * scale) / 2;
   const offsetY = SYMBOL_VIEWPORT_TOP + (SYMBOL_VIEWPORT_HEIGHT - viewBoxHeight * scale) / 2;
   const projectedPoint = {
@@ -1455,6 +1457,534 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
       ];
     }
   }
+}
+
+export type HitShape =
+  | { kind: "rect"; x: number; y: number; width: number; height: number }
+  | { kind: "circle"; cx: number; cy: number; r: number }
+  | { kind: "polygon"; points: Point[] };
+
+type TerminalRingShape = Extract<HitShape, { kind: "circle" }>;
+
+export interface HitShapeTableEntry {
+  body: HitShape[];
+  leads: HitShape[];
+}
+
+export interface ComponentHitShapes {
+  body: HitShape[];
+  leads: HitShape[];
+  rings: TerminalRingShape[];
+  padding: number;
+}
+
+export interface ComponentHitBounds {
+  bottom: number;
+  height: number;
+  left: number;
+  right: number;
+  top: number;
+  width: number;
+}
+
+export const HITBOX_PADDING = 4;
+export const HITBOX_COARSE_PADDING = 8;
+export const HITBOX_SPACING = 6;
+export const LABEL_GAP = 8;
+const LEAD_HIT_THICKNESS = 1;
+
+function symbolRect(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  viewBoxHeight: number
+): HitShape {
+  const first = projectSymbolPoint(x, y, viewBoxHeight);
+  const second = projectSymbolPoint(x + width, y + height, viewBoxHeight);
+
+  return {
+    kind: "rect",
+    x: Math.min(first.x, second.x),
+    y: Math.min(first.y, second.y),
+    width: Math.abs(second.x - first.x),
+    height: Math.abs(second.y - first.y)
+  };
+}
+
+function symbolCircle(
+  cx: number,
+  cy: number,
+  r: number,
+  viewBoxHeight: number
+): HitShape {
+  const center = projectSymbolPoint(cx, cy, viewBoxHeight);
+
+  return {
+    kind: "circle",
+    cx: center.x,
+    cy: center.y,
+    r: r * projectSymbolScale(viewBoxHeight)
+  };
+}
+
+function symbolLead(
+  x1: number,
+  x2: number,
+  y: number,
+  viewBoxHeight: number
+): HitShape {
+  const first = projectSymbolPoint(x1, y, viewBoxHeight);
+  const second = projectSymbolPoint(x2, y, viewBoxHeight);
+
+  return {
+    kind: "rect",
+    x: Math.min(first.x, second.x),
+    y: first.y - LEAD_HIT_THICKNESS / 2,
+    width: Math.abs(second.x - first.x),
+    height: LEAD_HIT_THICKNESS
+  };
+}
+
+function localRect(x: number, y: number, width: number, height: number): HitShape {
+  return { kind: "rect", x, y, width, height };
+}
+
+/**
+ * Art-derived hit geometry in component-local (160 x 102) coordinates.
+ * Symbol coordinates are projected through `projectSymbolPoint`; the selector
+ * art is already authored in the 160 x 102 space and uses local rectangles.
+ */
+const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
+  POWER_SOURCE: {
+    body: [symbolRect(30, 18, 68, 46, 64)],
+    leads: [symbolLead(6.4, 48, 32, 64), symbolLead(80, 121.6, 32, 64)]
+  },
+  DC_SOURCE: {
+    body: [symbolCircle(64, 30, 20, 60)],
+    leads: [symbolLead(6, 42, 30, 60), symbolLead(86, 122, 30, 60)]
+  },
+  BREAKER_1P: {
+    body: [
+      symbolRect(34, 8, 60, 24, 64),
+      symbolCircle(34, 32, 5.5, 64),
+      symbolCircle(94, 32, 5.5, 64)
+    ],
+    leads: [symbolLead(6, 28, 32, 64), symbolLead(100, 122, 32, 64)]
+  },
+  BREAKER_2P: {
+    body: [
+      symbolRect(34, -6, 60, 26, 64),
+      symbolRect(34, 38, 60, 26, 64),
+      symbolRect(62, -6, 4, 36.8, 64),
+      symbolCircle(34.4, 3.2, 5.5, 64),
+      symbolCircle(93.6, 3.2, 5.5, 64),
+      symbolCircle(34.4, 46.4, 5.5, 64),
+      symbolCircle(93.6, 46.4, 5.5, 64)
+    ],
+    leads: [
+      symbolLead(6.4, 28.4, 3.2, 64),
+      symbolLead(99.6, 121.6, 3.2, 64),
+      symbolLead(6.4, 28.4, 46.4, 64),
+      symbolLead(99.6, 121.6, 46.4, 64)
+    ]
+  },
+  SWITCH_1P: {
+    body: [symbolRect(24, 16, 80, 48, 64)],
+    leads: [symbolLead(6.4, 28.4, 32, 64), symbolLead(99.6, 121.6, 32, 64)]
+  },
+  PUSH_BUTTON_NO: {
+    body: [
+      symbolRect(36, 6, 56, 40, 72),
+      symbolCircle(34, 36, 5.5, 72),
+      symbolCircle(94, 36, 5.5, 72)
+    ],
+    leads: [symbolLead(6, 28, 36, 72), symbolLead(100, 122, 36, 72)]
+  },
+  PUSH_BUTTON_NC: {
+    body: [
+      symbolRect(26, 6, 76, 44, 72),
+      symbolCircle(34, 30, 5.5, 72),
+      symbolCircle(94, 30, 5.5, 72)
+    ],
+    leads: [symbolLead(6, 28, 36, 72), symbolLead(100, 122, 36, 72)]
+  },
+  ESTOP: {
+    body: [symbolRect(36, 4, 56, 60, 72)],
+    leads: [symbolLead(2.286, 36, 36, 72), symbolLead(92, 125.714, 36, 72)]
+  },
+  SELECTOR_3POS: {
+    body: [localRect(18, 4, 124, 94)],
+    leads: []
+  },
+  LIMIT_SWITCH_NO: {
+    body: [symbolRect(24, 16, 80, 48, 64)],
+    leads: [symbolLead(6.4, 28.4, 32, 64), symbolLead(99.6, 121.6, 32, 64)]
+  },
+  LIMIT_SWITCH_NC: {
+    body: [symbolRect(24, 16, 80, 48, 64)],
+    leads: [symbolLead(6.4, 28.4, 32, 64), symbolLead(99.6, 121.6, 32, 64)]
+  },
+  OL_CONTACT: {
+    body: [symbolRect(52, 12, 24, 44, 72), symbolRect(44, 14, 40, 40, 72)],
+    leads: [symbolLead(2.3, 54, 36, 72), symbolLead(74, 125.7, 36, 72)]
+  },
+  LAMP: {
+    body: [symbolCircle(64, 32, 17.28, 64)],
+    leads: [symbolLead(6.4, 46.72, 32, 64), symbolLead(81.28, 121.6, 32, 64)]
+  },
+  MOTOR: {
+    body: [symbolCircle(64, 32, 22, 64)],
+    leads: [symbolLead(6.4, 38, 32, 64), symbolLead(90, 121.6, 32, 64)]
+  },
+  XIC: {
+    body: [symbolRect(46, 10, 36, 44, 64)],
+    leads: [symbolLead(6.4, 54, 32, 64), symbolLead(74, 121.6, 32, 64)]
+  },
+  XIO: {
+    body: [symbolRect(46, 10, 36, 44, 64)],
+    leads: [symbolLead(6.4, 54, 32, 64), symbolLead(74, 121.6, 32, 64)]
+  },
+  NOTC: {
+    body: [symbolRect(52, 12, 24, 50, 64), symbolRect(32, 18, 64, 44, 64)],
+    leads: [symbolLead(25.6, 52, 30, 64), symbolLead(76, 102.4, 30, 64)]
+  },
+  NCTO: {
+    body: [symbolRect(52, 12, 24, 50, 64), symbolRect(32, 18, 64, 44, 64)],
+    leads: [symbolLead(25.6, 52, 30, 64), symbolLead(76, 102.4, 30, 64)]
+  },
+  OTE: {
+    body: [symbolCircle(64, 30, 20, 60)],
+    leads: [symbolLead(6.4, 44, 30, 60), symbolLead(84, 121.6, 30, 60)]
+  },
+  OTL: {
+    body: [symbolCircle(64, 30, 20, 60)],
+    leads: [symbolLead(6.4, 44, 30, 60), symbolLead(84, 121.6, 30, 60)]
+  },
+  OTU: {
+    body: [symbolCircle(64, 30, 20, 60)],
+    leads: [symbolLead(6.4, 44, 30, 60), symbolLead(84, 121.6, 30, 60)]
+  }
+};
+
+const TERMINAL_RING_RADIUS: Record<BuilderComponentType, number> = {
+  POWER_SOURCE: 9.25,
+  DC_SOURCE: 8,
+  BREAKER_1P: 6.875,
+  BREAKER_2P: 6.875,
+  SWITCH_1P: 7,
+  LIMIT_SWITCH_NO: 7,
+  LIMIT_SWITCH_NC: 7,
+  OL_CONTACT: 6.875,
+  PUSH_BUTTON_NO: 6.875,
+  PUSH_BUTTON_NC: 6.875,
+  ESTOP: 7,
+  SELECTOR_3POS: 12.11,
+  LAMP: 6.875,
+  MOTOR: 6.875,
+  XIC: 6.875,
+  XIO: 6.875,
+  NOTC: 8,
+  NCTO: 8,
+  OTE: 6.875,
+  OTL: 6.875,
+  OTU: 6.875
+};
+
+type SelectorRingId = keyof typeof SELECTOR_3POS_RING_CENTERS;
+const SELECTOR_RING_IDS = ["in1", "out1", "in2", "out2"] as const satisfies readonly SelectorRingId[];
+
+const SELECTOR_3POS_MAX_RING_RADIUS = SELECTOR_RING_IDS.reduce((radii, terminalId) => {
+  const stateRadii = Object.values(SELECTOR_3POS_RING_RADII);
+  radii[terminalId] = Math.max(
+    ...stateRadii.map((state) => Math.max(state[terminalId].outerX, state[terminalId].outerY))
+  );
+
+  return radii;
+}, {} as Record<SelectorRingId, number>);
+
+export function getTerminalRingRadius(type: BuilderComponentType, terminalId: string): number {
+  if (type === "SELECTOR_3POS" && (SELECTOR_RING_IDS as readonly string[]).includes(terminalId)) {
+    return SELECTOR_3POS_MAX_RING_RADIUS[terminalId as SelectorRingId];
+  }
+
+  return TERMINAL_RING_RADIUS[type];
+}
+
+export function getTerminalHitRadius(
+  type: BuilderComponentType,
+  terminalId: string,
+  coarse = false
+): number {
+  return getTerminalRingRadius(type, terminalId)
+    + (coarse ? HITBOX_COARSE_PADDING : HITBOX_PADDING);
+}
+
+function getTerminalRingShapes(type: BuilderComponentType): TerminalRingShape[] {
+  return getTerminalDefinitions(type).map((terminal) => ({
+    kind: "circle" as const,
+    cx: terminal.x,
+    cy: terminal.y,
+    r: getTerminalRingRadius(type, terminal.id)
+  }));
+}
+
+export function getComponentHitShapes(
+  component: BuilderComponent,
+  coarse = false
+): ComponentHitShapes {
+  const entry = HITBOXES[component.type];
+
+  return {
+    body: entry.body,
+    leads: entry.leads,
+    rings: getTerminalRingShapes(component.type),
+    padding: coarse ? HITBOX_COARSE_PADDING : HITBOX_PADDING
+  };
+}
+
+function isPointInPolygon(point: Point, points: Point[]): boolean {
+  let inside = false;
+
+  for (let index = 0, previous = points.length - 1; index < points.length; previous = index, index += 1) {
+    const current = points[index]!;
+    const prior = points[previous]!;
+
+    if (
+      (current.y > point.y) !== (prior.y > point.y)
+      && point.x < ((prior.x - current.x) * (point.y - current.y)) / (prior.y - current.y) + current.x
+    ) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function distanceToSegment(point: Point, start: Point, end: Point): number {
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+
+  const projection = Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * deltaX + (point.y - start.y) * deltaY) / lengthSquared)
+  );
+  const closestX = start.x + projection * deltaX;
+  const closestY = start.y + projection * deltaY;
+
+  return Math.hypot(point.x - closestX, point.y - closestY);
+}
+
+function shapeContainsPoint(shape: HitShape, point: Point, padding: number): boolean {
+  switch (shape.kind) {
+    case "rect":
+      return point.x >= shape.x - padding
+        && point.x <= shape.x + shape.width + padding
+        && point.y >= shape.y - padding
+        && point.y <= shape.y + shape.height + padding;
+    case "circle": {
+      const deltaX = point.x - shape.cx;
+      const deltaY = point.y - shape.cy;
+      const radius = shape.r + padding;
+
+      return deltaX * deltaX + deltaY * deltaY <= radius * radius;
+    }
+    case "polygon": {
+      if (isPointInPolygon(point, shape.points)) {
+        return true;
+      }
+
+      if (padding <= 0) {
+        return false;
+      }
+
+      for (let index = 0; index < shape.points.length; index += 1) {
+        const start = shape.points[index]!;
+        const end = shape.points[(index + 1) % shape.points.length]!;
+
+        if (distanceToSegment(point, start, end) <= padding) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+  }
+}
+
+export function hitTestComponentPoint(
+  component: BuilderComponent,
+  componentLocalPoint: Point,
+  coarse = false
+): "terminal" | "component" | null {
+  const { body, leads, rings, padding } = getComponentHitShapes(component, coarse);
+  const localPoint = rotatePoint(componentLocalPoint, -component.rotation);
+
+  if (rings.some((shape) => shapeContainsPoint(shape, localPoint, padding))) {
+    return "terminal";
+  }
+
+  if ([...body, ...leads].some((shape) => shapeContainsPoint(shape, localPoint, padding))) {
+    return "component";
+  }
+
+  return null;
+}
+
+function getShapeBounds(shape: HitShape): { bottom: number; left: number; right: number; top: number } {
+  switch (shape.kind) {
+    case "rect":
+      return {
+        bottom: shape.y + shape.height,
+        left: shape.x,
+        right: shape.x + shape.width,
+        top: shape.y
+      };
+    case "circle":
+      return {
+        bottom: shape.cy + shape.r,
+        left: shape.cx - shape.r,
+        right: shape.cx + shape.r,
+        top: shape.cy - shape.r
+      };
+    case "polygon": {
+      const xs = shape.points.map((point) => point.x);
+      const ys = shape.points.map((point) => point.y);
+
+      return {
+        bottom: Math.max(...ys),
+        left: Math.min(...xs),
+        right: Math.max(...xs),
+        top: Math.min(...ys)
+      };
+    }
+  }
+}
+
+export function getComponentHitBounds(component: BuilderComponent): ComponentHitBounds {
+  const { body, leads, rings } = getComponentHitShapes(component);
+  const shapes = [...body, ...leads, ...rings];
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+
+  for (const shape of shapes) {
+    const shapeBounds = getShapeBounds(shape);
+    left = Math.min(left, shapeBounds.left);
+    top = Math.min(top, shapeBounds.top);
+    right = Math.max(right, shapeBounds.right);
+    bottom = Math.max(bottom, shapeBounds.bottom);
+  }
+
+  const rotatedCorners = [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom }
+  ].map((corner) => rotatePoint(corner, component.rotation));
+
+  const rotatedLeft = Math.min(...rotatedCorners.map((corner) => corner.x));
+  const rotatedTop = Math.min(...rotatedCorners.map((corner) => corner.y));
+  const rotatedRight = Math.max(...rotatedCorners.map((corner) => corner.x));
+  const rotatedBottom = Math.max(...rotatedCorners.map((corner) => corner.y));
+
+  return {
+    bottom: rotatedBottom,
+    height: rotatedBottom - rotatedTop,
+    left: rotatedLeft,
+    right: rotatedRight,
+    top: rotatedTop,
+    width: rotatedRight - rotatedLeft
+  };
+}
+
+function renderHitShapeElement(
+  shape: HitShape,
+  key: string,
+  props: {
+    className?: string;
+    fill: string;
+    pointerEvents: "all" | "none";
+    stroke: string;
+    strokeDasharray?: string;
+    strokeWidth: number;
+  }
+): ReactNode {
+  const commonProps = {
+    fill: props.fill,
+    stroke: props.stroke,
+    strokeWidth: props.strokeWidth,
+    style: { pointerEvents: props.pointerEvents },
+    ...(props.className ? { className: props.className } : {}),
+    ...(props.strokeDasharray ? { strokeDasharray: props.strokeDasharray } : {})
+  };
+
+  switch (shape.kind) {
+    case "rect":
+      return <rect key={key} x={shape.x} y={shape.y} width={shape.width} height={shape.height} {...commonProps} />;
+    case "circle":
+      return <circle key={key} cx={shape.cx} cy={shape.cy} r={shape.r} {...commonProps} />;
+    case "polygon":
+      return (
+        <polygon
+          key={key}
+          points={shape.points.map((point) => `${point.x},${point.y}`).join(" ")}
+          {...commonProps}
+        />
+      );
+  }
+}
+
+function ComponentHitOverlay({ component, debug }: { component: BuilderComponent; debug: boolean }): ReactNode {
+  const { body, leads, rings, padding } = getComponentHitShapes(component);
+  const interactiveShapes = [...body, ...leads];
+
+  return (
+    <svg
+      className="freeplay-component__hit-shapes"
+      viewBox="0 0 160 102"
+      aria-hidden="true"
+      style={{ overflow: "visible", pointerEvents: "none" }}
+    >
+      {interactiveShapes.map((shape, index) => renderHitShapeElement(shape, `hit-${index}`, {
+        className: "freeplay-component__hit-shape",
+        fill: "transparent",
+        pointerEvents: "all",
+        stroke: "transparent",
+        strokeWidth: padding * 2
+      }))}
+      {debug ? (
+        <g style={{ pointerEvents: "none" }}>
+          {interactiveShapes.map((shape, index) => renderHitShapeElement(shape, `debug-${index}`, {
+            fill: "rgba(37, 99, 235, 0.12)",
+            pointerEvents: "none",
+            stroke: "#2563eb",
+            strokeDasharray: "3 2",
+            strokeWidth: 1
+          }))}
+          {rings.map((shape, index) => (
+            <circle
+              key={`ring-${index}`}
+              cx={shape.cx}
+              cy={shape.cy}
+              r={shape.r + padding}
+              fill="none"
+              stroke="#f59e0b"
+              strokeDasharray="3 2"
+              strokeWidth={1}
+              style={{ pointerEvents: "none" }}
+            />
+          ))}
+        </g>
+      ) : null}
+    </svg>
+  );
 }
 
 function getTerminalCount(type: BuilderComponentType): number {
@@ -1624,6 +2154,7 @@ function renderSymbolGraphic(
     coilActive?: boolean;
     contactActuated?: boolean;
     contactClosed?: boolean;
+    debugZones?: boolean;
     energized?: boolean;
     estopPressed?: boolean;
     label?: string;
@@ -1732,7 +2263,7 @@ function renderSymbolGraphic(
         </svg>
       );
     case "SELECTOR_3POS":
-      return renderSelector3Pos(options.selectorPosition ?? 2, symbolClassName);
+      return renderSelector3Pos(options.selectorPosition ?? 2, symbolClassName, options.debugZones);
     case "SWITCH_1P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
@@ -4163,18 +4694,33 @@ export function computeElectricalState(
   };
 }
 
-function getComponentLabelRowStyle(rotation: number): CSSProperties {
-  const normalizedRotation = normalizeQuarterTurns(rotation);
+export function getComponentLabelLayout(component: BuilderComponent): CSSProperties {
+  const bounds = getComponentHitBounds(component);
+  const normalizedRotation = normalizeQuarterTurns(component.rotation);
+  const baseStyle: CSSProperties = {
+    bottom: "auto",
+    padding: 0,
+    right: "auto",
+    width: "max-content"
+  };
 
   if (normalizedRotation === 1 || normalizedRotation === 3) {
-    return { bottom: "-0.8rem" };
+    return {
+      ...baseStyle,
+      justifyContent: "flex-start",
+      left: bounds.right + LABEL_GAP,
+      top: (bounds.top + bounds.bottom) / 2,
+      transform: "translateY(-50%)"
+    };
   }
 
-  if (normalizedRotation === 2) {
-    return { bottom: "-0.1rem" };
-  }
-
-  return { bottom: "0.25rem" };
+  return {
+    ...baseStyle,
+    justifyContent: "center",
+    left: (bounds.left + bounds.right) / 2,
+    top: bounds.bottom + LABEL_GAP,
+    transform: "translateX(-50%)"
+  };
 }
 
 function getComponentGlyphHitboxStyle(type: BuilderComponentType, rotation: number): CSSProperties {
@@ -4259,6 +4805,11 @@ function getComponentStatusBadge(component: BuilderComponent, running: boolean, 
   return null;
 }
 
+function queryFlag(name: string): boolean {
+  return typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get(name) === "1";
+}
+
 export function DiagramBuilder(props: DiagramBuilderProps) {
   const {
     fault = null,
@@ -4339,6 +4890,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const lastBuilderTagsSignature = useRef("[]");
   const [components, setComponents] = useState<BuilderComponent[]>([]);
   const [draggingComponentId, setDraggingComponentId] = useState<string | null>(null);
+  const [selectorHover, setSelectorHover] = useState<{
+    componentId: string;
+    overRing: boolean;
+    zone: 1 | 2 | 3 | null;
+  } | null>(null);
   const [wires, setWires] = useState<BuilderWire[]>([]);
   const [planeSettings, setPlaneSettings] = useState<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
   const [planeDraft, setPlaneDraft] = useState({
@@ -4361,7 +4917,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [selection, setSelection] = useState<BuilderSelection>(null);
   const [selectedComponentIds, setSelectedComponentIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedComponentIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const selectorDirectionRef = useRef<Map<string, 1 | -1>>(new Map());
   const runningRef = useRef(running);
   runningRef.current = running;
   const contextMenuRef = useRef<ContextMenuHandle>(null);
@@ -4388,6 +4943,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     y: number;
   } | null>(null);
   const [circuitSnapshotStatus, setCircuitSnapshotStatus] = useState<string | null>(null);
+  const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTabId>("home");
+  const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
+  const compactRibbon = useCompactRibbon();
+  const [showTerminalDebug, setShowTerminalDebug] = useState(() => queryFlag("debugTerminals"));
+  const [showHitboxDebug, setShowHitboxDebug] = useState(
+    () => queryFlag("debugHitboxes") || queryFlag("debugTerminals")
+  );
+  const [canvasLayoutVersion, setCanvasLayoutVersion] = useState(0);
   const componentPaletteScrollRef = useRef<HTMLDivElement | null>(null);
   const builderTags = mergeInstructionBindingTags(availableTags, components);
   const builderTagsSignature = JSON.stringify(builderTags);
@@ -4403,6 +4966,28 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   useEffect(() => {
     selectedComponentIdsRef.current = selectedComponentIds;
   }, [selectedComponentIds]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      setCanvasLayoutVersion((currentVersion) => currentVersion + 1);
+    });
+    const canvas = canvasRef.current;
+    const stageScroll = stageScrollRef.current;
+
+    if (canvas) {
+      observer.observe(canvas);
+    }
+
+    if (stageScroll) {
+      observer.observe(stageScroll);
+    }
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!rotationToast) {
@@ -5280,8 +5865,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     })),
     [components, wires]
   );
-  const showTerminalDebug = typeof window !== "undefined"
-    && new URLSearchParams(window.location.search).get("debugTerminals") === "1";
   const terminalDebugNodes = showTerminalDebug
     ? components.flatMap((component) => getComponentTerminals(component))
     : [];
@@ -5296,6 +5879,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     : null;
   const selectedWireInspection = selectedWire ? inspectWire(selectedWire, components, resolvedWires) : null;
   const selectedWireStatus = selectedWireInspection ? getWireStatusMeta(selectedWireInspection.status) : null;
+
+  useEffect(() => {
+    if (activeRibbonTab === "component" && !selectedComponent) {
+      setActiveRibbonTab("home");
+    } else if (activeRibbonTab === "wire" && !selectedWire) {
+      setActiveRibbonTab("home");
+    }
+  }, [activeRibbonTab, selectedComponent, selectedWire]);
+
   const hasActiveWireDraft = draftWirePoints.length > 0;
   const wireTerminalsEnabled = isWireAuthoringEnabled || wireReconnectTarget !== null;
   const isWirePointerPreviewVisible = wireTerminalsEnabled && (hasActiveWireDraft || wireReconnectTarget !== null);
@@ -5419,10 +6011,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 return;
               }
 
-              const nextComponent = createComponent(instruction.type);
-              setComponents((currentComponents) => [...currentComponents, nextComponent]);
-              selectComponentById(nextComponent.id);
-              setHasCustomLayout(true);
+              insertPaletteComponent(instruction.type);
             }}
           >
             <span className={`builder-palette-tile__symbol builder-palette-tile__symbol--${getSymbolCategory(instruction.type)}`}>
@@ -5437,104 +6026,79 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       </div>
     </section>
   );
-  const builderStageStatePanel = (
-    <aside className="builder-stage__state-panel builder-stage__state-panel--sidebar">
-      <div className="builder-stage__state-actions">
-        <button
-          type="button"
-          className={`button ${running ? "button--danger" : "button--primary"} builder-stage__run-button builder-stage__run-button--prominent`.trim()}
-          onClick={onRunToggle}
-          disabled={runDisabled || fault !== null}
-        >
-          {running ? "Stop simulator" : "Run simulator"}
-        </button>
-        {fault && onFaultReset ? (
-          <button
-            type="button"
-            className="button button--ghost builder-stage__run-button builder-stage__run-button--secondary"
-            onClick={onFaultReset}
-          >
-            Reset fault
-          </button>
-        ) : null}
-        <div className="builder-stage__zoom-controls builder-stage__zoom-controls--panel" role="group" aria-label="Canvas zoom">
-          <button
-            type="button"
-            className="button button--ghost builder-stage__zoom-button"
-            onClick={() => updateCanvasZoom(canvasZoom - CANVAS_ZOOM_STEP)}
-            disabled={canvasZoom <= MIN_CANVAS_ZOOM}
-          >
-            Zoom out
-          </button>
-          <span className="status-pill status-pill--neutral builder-stage__zoom-readout">{zoomPercent}%</span>
-          <button
-            type="button"
-            className="button button--ghost builder-stage__zoom-button"
-            onClick={() => updateCanvasZoom(canvasZoom + CANVAS_ZOOM_STEP)}
-            disabled={canvasZoom >= MAX_CANVAS_ZOOM}
-          >
-            Zoom in
-          </button>
-          <button
-            type="button"
-            className="button button--ghost builder-stage__zoom-button"
-            onClick={() => updateCanvasZoom(DEFAULT_CANVAS_ZOOM)}
-            disabled={canvasZoom === DEFAULT_CANVAS_ZOOM}
-          >
-            100%
-          </button>
-        </div>
-      </div>
+  const statusHint = fault
+    ? "Correct the shorted loop, then reset the fault before running the simulator again."
+    : wireReconnectTarget
+    ? `Click a terminal or a free point to reconnect the ${wireReconnectTarget.endpoint} end.`
+    : hasActiveWireDraft
+    ? "Touch a terminal to finish this wire, or click a free point to keep routing it."
+    : isPanModeEnabled && isWireAuthoringEnabled
+    ? "Drag empty space to pan. Touch a terminal to start a wire."
+    : isPanModeEnabled
+    ? "Drag empty space to move around the plane. Components still move directly."
+    : isWireAuthoringEnabled
+    ? "Touch a terminal to start a wire. Drag symbols directly to move them."
+    : selectedComponent
+    ? `${selectedComponent.label || getComponentName(selectedComponent.type)} selected`
+    : selectedWire
+      ? `Wire ${selectedWire.color} selected. Drag points to reshape it.`
+      : "Select a symbol or wire to edit it.";
 
-      <div className="builder-stage__state-copy">
-        <div className="builder-stage__status">
-          {fault ? (
-            <span className="status-pill status-pill--danger">Fault latched</span>
-          ) : null}
-          <span className={`status-pill ${running ? "status-pill--on" : "status-pill--neutral"}`}>
-            {running ? "Running" : "Ready"}
-          </span>
-          <span className={`status-pill ${isWireAuthoringEnabled ? "status-pill--on" : "status-pill--neutral"}`}>
-            {isWireAuthoringEnabled ? "Wire on" : "Wire off"}
-          </span>
-          <span className={`status-pill ${isPanModeEnabled ? "status-pill--on" : "status-pill--neutral"}`}>
-            {isPanModeEnabled ? "Pan on" : "Pan off"}
-          </span>
-          <span className={`status-pill ${layoutEditingLocked ? "status-pill--danger" : "status-pill--neutral"}`}>
-            {layoutEditingLocked ? "Move locked" : "Move ready"}
-          </span>
-          <span className="status-pill status-pill--neutral">Tick {tick}</span>
-          <span className="status-pill status-pill--neutral">{scanIntervalMs} ms</span>
-          <span className="status-pill status-pill--neutral">{derivedState.resolvedWires} connected wires</span>
-          <span className="status-pill status-pill--neutral">{derivedState.unresolvedWires} loose wires</span>
-          {running ? (
-            <span className="status-pill status-pill--neutral">{electricalState.energizedWireIds.size} live wires</span>
-          ) : null}
-        </div>
-        <p className={`builder-stage__notice builder-stage__notice--${simulatorTone}`.trim()}>
+  const statusPills = (
+    <>
+      {fault ? (
+        <span className="status-pill status-pill--danger">Fault latched</span>
+      ) : null}
+      <span className={`status-pill ${running ? "status-pill--on" : "status-pill--neutral"}`}>
+        {running ? "Running" : "Ready"}
+      </span>
+      <span className={`status-pill ${isWireAuthoringEnabled ? "status-pill--on" : "status-pill--neutral"}`}>
+        {isWireAuthoringEnabled ? "Wire on" : "Wire off"}
+      </span>
+      <span className={`status-pill ${isPanModeEnabled ? "status-pill--on" : "status-pill--neutral"}`}>
+        {isPanModeEnabled ? "Pan on" : "Pan off"}
+      </span>
+      <span className={`status-pill ${layoutEditingLocked ? "status-pill--danger" : "status-pill--neutral"}`}>
+        {layoutEditingLocked ? "Move locked" : "Move ready"}
+      </span>
+      <span className="status-pill status-pill--neutral">Tick {tick}</span>
+      <span className="status-pill status-pill--neutral">{scanIntervalMs} ms</span>
+      <span className="status-pill status-pill--neutral">{derivedState.resolvedWires} connected wires</span>
+      <span className="status-pill status-pill--neutral">{derivedState.unresolvedWires} loose wires</span>
+      {running ? (
+        <span className="status-pill status-pill--neutral">{electricalState.energizedWireIds.size} live wires</span>
+      ) : null}
+    </>
+  );
+
+  const statusBarContent = (
+    <>
+      <div className="builder-statusbar__copy">
+        <p className={`builder-statusbar__notice builder-statusbar__notice--${simulatorTone}`.trim()}>
           <strong>{simulatorLabel}:</strong> {simulatorMessage}
         </p>
-        <p className="builder-stage__hint">
-          {fault
-            ? "Correct the shorted loop, then reset the fault before running the simulator again."
-            : wireReconnectTarget
-            ? `Click a terminal or a free point to reconnect the ${wireReconnectTarget.endpoint} end.`
-            : hasActiveWireDraft
-            ? "Touch a terminal to finish this wire, or click a free point to keep routing it."
-            : isPanModeEnabled && isWireAuthoringEnabled
-            ? "Drag empty space to pan. Touch a terminal to start a wire."
-            : isPanModeEnabled
-            ? "Drag empty space to move around the plane. Components still move directly."
-            : isWireAuthoringEnabled
-            ? "Touch a terminal to start a wire. Drag symbols directly to move them."
-            : selectedComponent
-            ? `${selectedComponent.label || getComponentName(selectedComponent.type)} selected`
-            : selectedWire
-              ? `Wire ${selectedWire.color} selected. Drag points to reshape it.`
-              : "Select a symbol or wire to edit it."}
-        </p>
+        <p className="builder-statusbar__hint">{statusHint}</p>
       </div>
-    </aside>
+      <div className="builder-statusbar__group">{statusPills}</div>
+      <div className="builder-statusbar__group">
+        <span className="status-pill status-pill--neutral">{components.length} symbols</span>
+        <span className="status-pill status-pill--neutral">{wires.length} wires</span>
+        <span className="status-pill status-pill--neutral">{derivedState.runnableRungs} runnable rungs</span>
+        <span className="status-pill status-pill--neutral">{zoomPercent}%</span>
+        <span className="status-pill status-pill--neutral">{syncLabel}</span>
+        {circuitSnapshotStatus ? (
+          <span className="status-pill status-pill--neutral">{circuitSnapshotStatus}</span>
+        ) : null}
+        {running && selectedComponent ? (
+          <span className="status-pill status-pill--neutral">
+            {selectedComponentVoltage > 0 ? `${selectedComponentVoltage}V` : "0V"} live
+          </span>
+        ) : null}
+        {selectedWireStatus ? (
+          <span className="status-pill status-pill--neutral">{selectedWireStatus.label}</span>
+        ) : null}
+      </div>
+    </>
   );
 
   useEffect(() => {
@@ -5606,12 +6170,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     );
     const stepX = Math.max(gridSpacing * 8, COMPONENT_WIDTH - gridSpacing * 2);
     const stepY = Math.max(gridSpacing * 6, COMPONENT_HEIGHT - gridSpacing * 3);
-    const occupiedRects = componentsRef.current.map((component) => ({
-      bottom: component.y + COMPONENT_HEIGHT + gridSpacing,
-      left: component.x - gridSpacing,
-      right: component.x + COMPONENT_WIDTH + gridSpacing,
-      top: component.y - gridSpacing
-    }));
+    const occupiedRects = componentsRef.current.map((component) => {
+      const bounds = getComponentHitBounds(component);
+
+      return {
+        bottom: component.y + bounds.bottom + HITBOX_SPACING,
+        left: component.x + bounds.left - HITBOX_SPACING,
+        right: component.x + bounds.right + HITBOX_SPACING,
+        top: component.y + bounds.top - HITBOX_SPACING
+      };
+    });
     const seen = new Set<string>();
     const maxColumns = Math.max(1, Math.ceil((currentPlaneSettings.width - padding * 2) / stepX));
     const maxRows = Math.max(1, Math.ceil((currentPlaneSettings.height - padding * 2) / stepY));
@@ -6354,6 +6922,34 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
+  function pasteClipboardAtViewportCenter() {
+    const stageScroll = stageScrollRef.current;
+
+    if (!stageScroll) {
+      return;
+    }
+
+    const bounds = stageScroll.getBoundingClientRect();
+
+    pasteClipboard({
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2
+    });
+  }
+
+  function insertPaletteComponent(type: BuilderComponentType) {
+    const nextComponent = createComponent(type);
+
+    setComponents((currentComponents) => [...currentComponents, nextComponent]);
+    selectComponentById(nextComponent.id);
+    setHasCustomLayout(true);
+  }
+
+  function handleRibbonTabSelect(tab: RibbonTabId) {
+    setActiveRibbonTab(tab);
+    setRibbonCollapsed(false);
+  }
+
   function applyLampGlowColor(componentIds: string[], color: LampGlowColorOption) {
     if (running || componentIds.length === 0) {
       return;
@@ -7076,6 +7672,81 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     pendingSwitchToggleRef.current = null;
   }
 
+  function clearSelectorHover(componentId: string) {
+    setSelectorHover((current) =>
+      current?.componentId === componentId ? null : current
+    );
+  }
+
+  function updateSelectorHover(
+    event: ReactPointerEvent<HTMLDivElement>,
+    component: BuilderComponent
+  ) {
+    if (!isSelector3PosType(component.type)) {
+      return;
+    }
+
+    if (event.pointerType === "touch") {
+      clearSelectorHover(component.id);
+      return;
+    }
+
+    if (dragState.current || componentDragMovedRef.current) {
+      return;
+    }
+
+    const artPoint = getSelector3PosArtPointFromClientPoint(
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+      canvasZoomRef.current,
+      component.rotation
+    );
+
+    if (!artPoint) {
+      clearSelectorHover(component.id);
+      return;
+    }
+
+    const overRing = isSelector3PosRingPoint(artPoint);
+    const zone = overRing ? null : getSelector3PosZoneAtArtPoint(artPoint);
+
+    setSelectorHover((current) =>
+      current?.componentId === component.id
+        && current.overRing === overRing
+        && current.zone === zone
+        ? current
+        : { componentId: component.id, overRing, zone }
+    );
+  }
+
+  function handleSelectorZonePointerUp(
+    event: ReactPointerEvent<HTMLDivElement>,
+    component: BuilderComponent,
+    wasDragged: boolean
+  ) {
+    if (!isSelector3PosType(component.type) || wasDragged) {
+      return;
+    }
+
+    if (!shouldOperateComponentFromPointer(event, component)) {
+      return;
+    }
+
+    const zone = getSelector3PosZoneAtClientPoint(
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+      canvasZoomRef.current,
+      component.rotation
+    );
+
+    if (zone === null) {
+      return;
+    }
+
+    selectComponentById(component.id);
+    applySelectorPosition([component.id], zone);
+  }
+
   function shouldOperateComponentFromPointer(
     event: ReactPointerEvent<HTMLDivElement>,
     component: BuilderComponent
@@ -7111,9 +7782,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return false;
     }
 
-    return isMaintainedSwitchType(component.type)
-      || isBreakerType(component.type)
-      || isSelector3PosType(component.type);
+    const operability = isOperable[component.type];
+
+    return operability === "toggle" || operability === "position";
   }
 
   function scheduleComponentToggle(componentId: string) {
@@ -7131,21 +7802,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   function toggleComponentOperate(componentId: string) {
     const component = componentsRef.current.find((entry) => entry.id === componentId);
 
-    if (component && isSelector3PosType(component.type)) {
-      const currentPosition = component.selectorPosition ?? 2;
-      const direction = selectorDirectionRef.current.get(componentId) ?? 1;
-      const next = getNextSelectorPosition(currentPosition, direction);
-
-      selectorDirectionRef.current.set(componentId, next.direction);
-      setComponents((currentComponents) =>
-        currentComponents.map((entry) =>
-          entry.id === componentId && isSelector3PosType(entry.type)
-            ? { ...entry, selectorPosition: next.position }
-            : entry
-        )
-      );
-      selectComponentById(componentId);
-      setHasCustomLayout(true);
+    if (!component || isOperable[component.type] !== "toggle") {
       return;
     }
 
@@ -7161,14 +7818,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     position: Selector3PosPosition
   ) {
     const ids = new Set(componentIds);
-
-    setComponents((currentComponents) =>
-      currentComponents.map((component) =>
-        ids.has(component.id) && isSelector3PosType(component.type)
-          ? { ...component, selectorPosition: position }
-          : component
-      )
+    const result = applySelector3PosPositionToComponents(
+      componentsRef.current,
+      ids,
+      position
     );
+
+    if (!result.changed) {
+      return;
+    }
+
+    pushUndoSnapshot();
+    componentsRef.current = result.components;
+    setComponents(result.components);
     setHasCustomLayout(true);
   }
 
@@ -7321,582 +7983,745 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     applyLampGlowColor(lampIds, resolvedLampGlowColor);
   }
 
-  return (
-    <section className="panel panel--builder">
-      <div className="panel__header">
-        <div>
-          <p className="panel__eyebrow">Graphic simulator</p>
-          <h2 className="panel__title">Build and run directly on the drawing</h2>
-          <p className="panel__subtitle">
-            The playground is now the main simulator surface. Place ANSI symbols, wire through explicit
-            terminals, and run the diagram from here instead of using the old dashboard controls.
-          </p>
-        </div>
+  const ribbonTabs: RibbonTab[] = [
+    { id: "file", label: "File" },
+    { id: "home", label: "Home" },
+    { id: "insert", label: "Insert" },
+    { id: "simulation", label: "Simulation" },
+    { id: "view", label: "View" },
+    ...(selectedComponent ? [{ id: "component" as const, label: "Component", contextual: true }] : []),
+    ...(selectedWire ? [{ id: "wire" as const, label: "Wire", contextual: true }] : [])
+  ];
 
-        <div className="control-panel__stats">
-          <span className="status-pill status-pill--neutral">{components.length} symbols</span>
-          <span className="status-pill status-pill--neutral">{wires.length} wires</span>
-          <span className="status-pill status-pill--neutral">{derivedState.runnableRungs} runnable rungs</span>
+  const fileRibbon = (
+    <>
+      <RibbonGroup label="Circuit" compact={compactRibbon}>
+        <RibbonButton icon="⤓" label="Load circuit" onClick={handleLoadCircuitClick} />
+        <RibbonButton icon="⤒" label="Save circuit" onClick={handleSaveCircuit} />
+      </RibbonGroup>
+      <RibbonGroup label="Document" compact={compactRibbon}>
+        <RibbonField label="Project">
+          <input
+            type="text"
+            className="builder-number-input"
+            maxLength={44}
+            value={sheetMetadata.projectName}
+            onChange={(event) => setSheetMetadata((current) => ({ ...current, projectName: event.target.value }))}
+          />
+        </RibbonField>
+        <RibbonField label="Date">
+          <input
+            type="text"
+            className="builder-number-input"
+            maxLength={10}
+            placeholder="YYYY-MM-DD"
+            value={sheetMetadata.date}
+            onChange={(event) => setSheetMetadata((current) => ({ ...current, date: event.target.value }))}
+          />
+        </RibbonField>
+        <RibbonField label="Scale">
+          <input
+            type="text"
+            className="builder-number-input"
+            maxLength={12}
+            value={sheetMetadata.scale}
+            onChange={(event) => setSheetMetadata((current) => ({ ...current, scale: event.target.value }))}
+          />
+        </RibbonField>
+        <RibbonField label="Page">
+          <input
+            type="text"
+            className="builder-number-input"
+            maxLength={6}
+            value={sheetMetadata.page}
+            onChange={(event) => setSheetMetadata((current) => ({ ...current, page: event.target.value }))}
+          />
+        </RibbonField>
+      </RibbonGroup>
+    </>
+  );
+
+  const homeRibbon = (
+    <>
+      <RibbonGroup label="History" compact={compactRibbon}>
+        <RibbonButton icon="↶" label="Undo" shortcut="Ctrl+Z" disabled={layoutEditingLocked} onClick={undo} />
+        <RibbonButton icon="↷" label="Redo" shortcut="Ctrl+Shift+Z" disabled={layoutEditingLocked} onClick={redo} />
+      </RibbonGroup>
+      <RibbonGroup label="Clipboard" compact={compactRibbon}>
+        <RibbonButton
+          icon="⧉"
+          label="Copy"
+          shortcut="Ctrl+C"
+          disabled={selectedComponentIds.size === 0}
+          onClick={() => copySelectedComponents([...selectedComponentIds])}
+        />
+        <RibbonButton
+          icon="📋"
+          label="Paste"
+          disabled={layoutEditingLocked}
+          onClick={pasteClipboardAtViewportCenter}
+        />
+        <RibbonButton
+          icon="⧉"
+          label="Duplicate"
+          disabled={layoutEditingLocked || !selectedComponent}
+          onClick={() => {
+            if (selectedComponent) {
+              duplicateComponentWithHistory(selectedComponent.id);
+            }
+          }}
+        />
+      </RibbonGroup>
+      <RibbonGroup label="Edit" compact={compactRibbon}>
+        <RibbonButton
+          icon="🗑"
+          label="Delete"
+          disabled={layoutEditingLocked || selection === null}
+          onClick={handleDeleteSelection}
+        />
+        <RibbonButton
+          icon="↺"
+          label="Rotate -90"
+          shortcut="Shift+R"
+          disabled={layoutEditingLocked || selectedComponentIds.size === 0}
+          onClick={() => rotateComponents([...selectedComponentIds], "ccw")}
+        />
+        <RibbonButton
+          icon="↻"
+          label="Rotate +90"
+          shortcut="R"
+          disabled={layoutEditingLocked || selectedComponentIds.size === 0}
+          onClick={() => rotateComponents([...selectedComponentIds], "cw")}
+        />
+        <RibbonButton
+          icon="⟲"
+          label="Reset canvas"
+          disabled={layoutEditingLocked}
+          onClick={handleResetCanvas}
+        />
+      </RibbonGroup>
+      <RibbonGroup label="Wiring" compact={compactRibbon}>
+        <RibbonButton
+          icon="⌁"
+          label={isWireAuthoringEnabled ? "Wire on" : "Wire off"}
+          active={isWireAuthoringEnabled}
+          ariaPressed={isWireAuthoringEnabled}
+          onClick={toggleWireAuthoring}
+        />
+        <RibbonField label="Wire color">
+          <input
+            type="color"
+            className="builder-color-input"
+            value={activeWireColor}
+            onChange={(event) => updateWireColor(event.target.value)}
+          />
+        </RibbonField>
+        <RibbonField label="Thickness">
+          <div className="builder-slider-row">
+            <input
+              type="range"
+              min="2"
+              max="12"
+              step="0.5"
+              className="builder-slider-input"
+              value={activeWireThickness}
+              onChange={(event) => updateWireThickness(Number(event.target.value))}
+            />
+            <strong className="builder-slider-value">{activeWireThickness}px</strong>
+          </div>
+        </RibbonField>
+        <RibbonButton
+          icon="✓"
+          label="Finish wire"
+          disabled={draftWirePoints.length < 2}
+          onClick={handleFinishWire}
+        />
+        <RibbonButton
+          icon="✕"
+          label="Cancel"
+          disabled={draftWirePoints.length === 0 && wireReconnectTarget === null}
+          onClick={clearWireInteraction}
+        />
+      </RibbonGroup>
+    </>
+  );
+
+  const insertRibbon = (
+    <>
+      <RibbonGroup label="Electrical" compact={compactRibbon}>
+        {instructionPalette.filter((item) => !LOGIC_PALETTE_TYPES.has(item.type)).map((item) => (
+          <RibbonButton
+            key={item.type}
+            icon="＋"
+            label={item.label}
+            onClick={() => insertPaletteComponent(item.type)}
+          />
+        ))}
+      </RibbonGroup>
+      <RibbonGroup label="Logic" compact={compactRibbon}>
+        {instructionPalette.filter((item) => LOGIC_PALETTE_TYPES.has(item.type)).map((item) => (
+          <RibbonButton
+            key={item.type}
+            icon="＋"
+            label={item.label}
+            onClick={() => insertPaletteComponent(item.type)}
+          />
+        ))}
+      </RibbonGroup>
+    </>
+  );
+
+  const simulationRibbon = (
+    <>
+      <RibbonGroup label="Run" compact={compactRibbon}>
+        <RibbonButton
+          icon={running ? "■" : "▶"}
+          label={running ? "Stop simulator" : "Run simulator"}
+          disabled={runDisabled || fault !== null}
+          onClick={onRunToggle}
+        />
+        {fault && onFaultReset ? (
+          <RibbonButton icon="⟲" label="Reset fault" onClick={onFaultReset} />
+        ) : null}
+      </RibbonGroup>
+      <RibbonGroup label="Status" compact={compactRibbon}>
+        {statusPills}
+      </RibbonGroup>
+    </>
+  );
+
+  const viewRibbon = (
+    <>
+      <RibbonGroup label="Navigate" compact={compactRibbon}>
+        <RibbonButton
+          icon="✋"
+          label={isPanModeEnabled ? "Pan on" : "Pan off"}
+          active={isPanModeEnabled}
+          ariaPressed={isPanModeEnabled}
+          onClick={togglePanMode}
+        />
+      </RibbonGroup>
+      <RibbonGroup label="Zoom" compact={compactRibbon}>
+        <RibbonButton
+          icon="−"
+          label="Zoom out"
+          disabled={canvasZoom <= MIN_CANVAS_ZOOM}
+          onClick={() => updateCanvasZoom(canvasZoom - CANVAS_ZOOM_STEP)}
+        />
+        <span className="status-pill status-pill--neutral">{zoomPercent}%</span>
+        <RibbonButton
+          icon="+"
+          label="Zoom in"
+          disabled={canvasZoom >= MAX_CANVAS_ZOOM}
+          onClick={() => updateCanvasZoom(canvasZoom + CANVAS_ZOOM_STEP)}
+        />
+        <RibbonButton
+          icon="1:1"
+          label="100%"
+          disabled={canvasZoom === DEFAULT_CANVAS_ZOOM}
+          onClick={() => updateCanvasZoom(DEFAULT_CANVAS_ZOOM)}
+        />
+      </RibbonGroup>
+      <RibbonGroup label="Canvas" compact={compactRibbon}>
+        <RibbonField label="Width">
+          <input
+            type="number"
+            min={MIN_PLANE_WIDTH}
+            max={MAX_PLANE_WIDTH}
+            step="40"
+            className="builder-number-input"
+            value={planeDraft.width}
+            disabled={layoutEditingLocked}
+            onChange={(event) => setPlaneDraft((current) => ({ ...current, width: event.target.value }))}
+            onBlur={(event) => commitPlaneDraft("width", event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                event.currentTarget.value = String(planeSettingsRef.current.width);
+                resetPlaneDraftField("width");
+                event.currentTarget.blur();
+              }
+            }}
+          />
+        </RibbonField>
+        <RibbonField label="Height">
+          <input
+            type="number"
+            min={MIN_PLANE_HEIGHT}
+            max={MAX_PLANE_HEIGHT}
+            step="40"
+            className="builder-number-input"
+            value={planeDraft.height}
+            disabled={layoutEditingLocked}
+            onChange={(event) => setPlaneDraft((current) => ({ ...current, height: event.target.value }))}
+            onBlur={(event) => commitPlaneDraft("height", event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                event.currentTarget.value = String(planeSettingsRef.current.height);
+                resetPlaneDraftField("height");
+                event.currentTarget.blur();
+              }
+            }}
+          />
+        </RibbonField>
+        <RibbonField label="Grid spacing">
+          <input
+            type="number"
+            min={MIN_GRID_SPACING}
+            max={MAX_GRID_SPACING}
+            step="2"
+            className="builder-number-input"
+            value={planeDraft.gridSpacing}
+            disabled={layoutEditingLocked}
+            onChange={(event) => setPlaneDraft((current) => ({ ...current, gridSpacing: event.target.value }))}
+            onBlur={(event) => commitPlaneDraft("gridSpacing", event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                event.currentTarget.value = String(planeSettingsRef.current.gridSpacing);
+                resetPlaneDraftField("gridSpacing");
+                event.currentTarget.blur();
+              }
+            }}
+          />
+        </RibbonField>
+      </RibbonGroup>
+      <RibbonGroup label="Debug" compact={compactRibbon}>
+        <RibbonButton
+          icon="⌖"
+          label="Terminal overlays"
+          active={showTerminalDebug}
+          ariaPressed={showTerminalDebug}
+          onClick={() => setShowTerminalDebug((current) => !current)}
+        />
+        <RibbonButton
+          icon="▦"
+          label="Hit/label overlays"
+          active={showHitboxDebug}
+          ariaPressed={showHitboxDebug}
+          onClick={() => setShowHitboxDebug((current) => !current)}
+        />
+      </RibbonGroup>
+    </>
+  );
+
+  const hasComponentParameters = selectedComponent
+    ? isTimedContactType(selectedComponent.type)
+      || isSourceType(selectedComponent.type)
+      || selectedComponent.type === "LAMP"
+      || isMaintainedSwitchType(selectedComponent.type)
+      || isSelector3PosType(selectedComponent.type)
+    : false;
+
+  const componentHint = selectedComponent
+    ? isTimedContactType(selectedComponent.type)
+      ? "Set the on-delay here. Matching OTE and timed-contact labels share the same boolean tag, but each timed contact keeps its own local preset and elapsed state."
+      : componentNeedsTag(selectedComponent.type)
+        ? "Rename and recolor the symbol here. Matching OTE, XIC, XIO, NOTC, and NCTO labels share the same internal logic state automatically."
+        : isSourceType(selectedComponent.type)
+          ? "Set the source voltage here. Closed loops energize from both source sides."
+          : isBreakerType(selectedComponent.type)
+            ? "This breaker stays closed and only rotates on the sheet."
+            : isMaintainedSwitchType(selectedComponent.type)
+              ? "Single-click the switch on the sheet to toggle continuity. Double-click it to rotate."
+              : isMomentaryPushButtonType(selectedComponent.type)
+                ? "Hold the push button cap on the sheet to operate it momentarily. Releasing it restores the path."
+                : isVisualLoadType(selectedComponent.type)
+                  ? "This load reacts when the path is energized."
+                  : "Passive symbol. No runtime tag is needed."
+    : "";
+
+  const componentRibbon = selectedComponent ? (
+    <>
+      <RibbonGroup label="Properties" compact={compactRibbon}>
+        <div className="builder-props-grid">
+          <span className="builder-props-label">Symbol</span>
+          <strong className="builder-props-value">{getComponentName(selectedComponent.type)}</strong>
+          <span className="builder-props-label">{componentNeedsTag(selectedComponent.type) ? "Logic label" : "Plane name"}</span>
+          <strong className="builder-props-value">{selectedComponent.label || "(unnamed)"}</strong>
+          <span className="builder-props-label">Terminals</span>
+          <strong className="builder-props-value">{getTerminalCount(selectedComponent.type)}</strong>
+          <span className="builder-props-label">Rotation</span>
+          <strong className="builder-props-value">{normalizeQuarterTurns(selectedComponent.rotation) * 90}deg</strong>
+          {isTimedContactType(selectedComponent.type) ? (
+            <>
+              <span className="builder-props-label">Delay</span>
+              <strong className="builder-props-value">{formatTimedContactDelaySeconds(getTimedContactDelayMs(selectedComponent))}s</strong>
+            </>
+          ) : null}
+          {isSourceType(selectedComponent.type) ? (
+            <>
+              <span className="builder-props-label">Current</span>
+              <strong className="builder-props-value">{getSourceCurrentType(selectedComponent.type)?.toUpperCase()}</strong>
+              <span className="builder-props-label">Voltage</span>
+              <strong className="builder-props-value">{formatSourceVoltage(selectedComponent)}</strong>
+            </>
+          ) : null}
+          {isBreakerType(selectedComponent.type) || isMaintainedSwitchType(selectedComponent.type) ? (
+            <>
+              <span className="builder-props-label">State</span>
+              <strong className="builder-props-value">
+                {isBreakerType(selectedComponent.type)
+                  ? "Fixed closed"
+                  : (isMaintainedSwitchClosed(selectedComponent) ? "Closed" : "Open")}
+              </strong>
+            </>
+          ) : null}
+          {running ? (
+            <>
+              <span className="builder-props-label">Live</span>
+              <strong className="builder-props-value">{selectedComponentVoltage > 0 ? `${selectedComponentVoltage}V` : "0V"}</strong>
+            </>
+          ) : null}
         </div>
-      </div>
+        <p className="builder-card__copy">{componentHint}</p>
+      </RibbonGroup>
+      <RibbonGroup label="Edit" compact={compactRibbon}>
+        <RibbonButton
+          icon="↺"
+          label="Rotate -90"
+          disabled={layoutEditingLocked}
+          onClick={() => rotateComponent(selectedComponent.id, -1)}
+        />
+        <RibbonButton
+          icon="↻"
+          label="Rotate +90"
+          disabled={layoutEditingLocked}
+          onClick={() => rotateComponent(selectedComponent.id, 1)}
+        />
+        <RibbonField label={componentNeedsTag(selectedComponent.type) ? "Logic label" : "Component label"}>
+          <input
+            type="text"
+            className="builder-text-input"
+            spellCheck={false}
+            value={selectedComponent.label}
+            onBlur={() => handlePlaneLabelBlur(selectedComponent.id)}
+            onChange={(event) => handlePlaneLabelChange(selectedComponent.id, event.target.value)}
+          />
+        </RibbonField>
+      </RibbonGroup>
+      <RibbonGroup label="Terminals" compact={compactRibbon}>
+        {selectedComponentTerminals.length > 2 ? (
+          <details className="ribbon-inline-details">
+            <summary>Terminal labels ({selectedComponentTerminals.length})</summary>
+            <div className="builder-terminal-fields__grid">
+              {selectedComponentTerminals.map((terminal) => (
+                <label key={`${terminal.portId}-pane`} className="builder-terminal-field">
+                  <span className="builder-terminal-field__label">
+                    {formatTerminalLabel(terminal.terminalId)}
+                  </span>
+                  <input
+                    type="text"
+                    className="builder-text-input"
+                    spellCheck={false}
+                    placeholder={terminal.defaultLabel}
+                    value={selectedComponent.terminalLabels?.[terminal.terminalId] ?? terminal.label}
+                    onBlur={() => handleTerminalLabelBlur(selectedComponent.id, terminal.terminalId)}
+                    onChange={(event) => handleTerminalLabelChange(selectedComponent.id, terminal.terminalId, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
+        ) : (
+          <div className="builder-terminal-fields__grid">
+            {selectedComponentTerminals.map((terminal) => (
+              <label key={`${terminal.portId}-pane`} className="builder-terminal-field">
+                <span className="builder-terminal-field__label">
+                  {formatTerminalLabel(terminal.terminalId)}
+                </span>
+                <input
+                  type="text"
+                  className="builder-text-input"
+                  spellCheck={false}
+                  placeholder={terminal.defaultLabel}
+                  value={selectedComponent.terminalLabels?.[terminal.terminalId] ?? terminal.label}
+                  onBlur={() => handleTerminalLabelBlur(selectedComponent.id, terminal.terminalId)}
+                  onChange={(event) => handleTerminalLabelChange(selectedComponent.id, terminal.terminalId, event.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+      </RibbonGroup>
+      {hasComponentParameters ? (
+        <RibbonGroup label="Parameters" compact={compactRibbon}>
+          {isTimedContactType(selectedComponent.type) ? (
+            <RibbonField label="On-delay time (s)">
+              <input
+                type="number"
+                min="0"
+                max={String(MAX_TIMED_CONTACT_DELAY_MS / 1000)}
+                step="0.1"
+                className="builder-number-input"
+                value={formatTimedContactDelaySeconds(getTimedContactDelayMs(selectedComponent))}
+                onChange={(event) => handleSelectedTimedContactDelayChange(Number(event.target.value))}
+              />
+            </RibbonField>
+          ) : null}
+          {isSourceType(selectedComponent.type) ? (
+            <RibbonField label="Source voltage">
+              <input
+                type="number"
+                min="1"
+                max="600"
+                step="1"
+                className="builder-number-input"
+                value={getSourceVoltage(selectedComponent)}
+                onChange={(event) => handleSelectedSourceVoltageChange(Number(event.target.value))}
+              />
+            </RibbonField>
+          ) : null}
+          {selectedComponent.type === "LAMP" ? (
+            <RibbonField label="Lamp glow">
+              <select
+                className="builder-select-input"
+                value={selectedComponent.lampGlowColor ?? DEFAULT_LAMP_GLOW_COLOR}
+                onChange={(event) => handleSelectedLampGlowColorChange(event.target.value)}
+              >
+                {LAMP_GLOW_COLOR_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </RibbonField>
+          ) : null}
+          {isMaintainedSwitchType(selectedComponent.type) ? (
+            <RibbonButton
+              icon={isMaintainedSwitchClosed(selectedComponent) ? "○" : "●"}
+              label={isMaintainedSwitchClosed(selectedComponent) ? "Open switch" : "Close switch"}
+              onClick={() => toggleComponentOperate(selectedComponent.id)}
+            />
+          ) : null}
+          {isSelector3PosType(selectedComponent.type) ? (
+            <div className="ribbon-field">
+              <span className="ribbon-field__label">Selector position</span>
+              <div className="ribbon-button-row">
+                {([1, 2, 3] as const).map((position) => (
+                  <RibbonButton
+                    key={position}
+                    icon={String(position)}
+                    label={position === 2 ? "2 OFF" : String(position)}
+                    active={(selectedComponent.selectorPosition ?? 2) === position}
+                    ariaPressed={(selectedComponent.selectorPosition ?? 2) === position}
+                    disabled={layoutEditingLocked}
+                    onClick={() => applySelectorPosition([selectedComponent.id], position)}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </RibbonGroup>
+      ) : null}
+      <RibbonGroup label="Arrange" compact={compactRibbon}>
+        <RibbonButton
+          icon="⧉"
+          label="Copy"
+          onClick={() => copySelectedComponents([selectedComponent.id])}
+        />
+        <RibbonButton
+          icon="⧉"
+          label="Duplicate"
+          disabled={layoutEditingLocked}
+          onClick={() => duplicateComponentWithHistory(selectedComponent.id)}
+        />
+        <RibbonButton
+          icon="🗑"
+          label="Delete"
+          disabled={layoutEditingLocked}
+          onClick={handleDeleteSelection}
+        />
+      </RibbonGroup>
+    </>
+  ) : null;
+
+  const wireRibbon = selectedWire ? (
+    <>
+      <RibbonGroup label="Status" compact={compactRibbon}>
+        {selectedWireStatus ? (
+          <div className="builder-wire-status">
+            <span className={`status-pill ${selectedWireStatus.className}`}>{selectedWireStatus.label}</span>
+            <span className="detail-chip">
+              {selectedWireInspection?.solverEligible ? "Used by solver" : "Ignored by solver"}
+            </span>
+            {wireReconnectTarget ? (
+              <span className="detail-chip detail-chip--pending">
+                Pick a terminal or a free point for the {wireReconnectTarget.endpoint} end
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="builder-props-grid">
+          <span className="builder-props-label">Wire</span>
+          <strong className="builder-props-value">{selectedWire.points.length} points</strong>
+          <span className="builder-props-label">Color</span>
+          <span className="builder-selection__swatch" style={{ backgroundColor: selectedWire.color }} />
+          <span className="builder-props-label">Thickness</span>
+          <strong className="builder-props-value">{selectedWire.thickness}px</strong>
+          <span className="builder-props-label">Segments</span>
+          <strong className="builder-props-value">{selectedWireInspection?.segments ?? 0}</strong>
+          <span className="builder-props-label">Bends</span>
+          <strong className="builder-props-value">{selectedWireInspection?.bends ?? 0}</strong>
+          <span className="builder-props-label">Length</span>
+          <strong className="builder-props-value">{selectedWireInspection?.length ?? 0}px</strong>
+        </div>
+        <p className="builder-card__copy">
+          {selectedWireStatus?.description ?? "Adjust color and thickness in the Appearance group."} Drag any wire point to reshape it, double-click a bend point to remove it, or double-click a wire segment to cut that span.
+        </p>
+      </RibbonGroup>
+      <RibbonGroup label="Appearance" compact={compactRibbon}>
+        <RibbonField label="Wire color">
+          <input
+            type="color"
+            className="builder-color-input"
+            value={selectedWire.color}
+            onChange={(event) => updateWireColorById(selectedWire.id, event.target.value)}
+          />
+        </RibbonField>
+        <RibbonField label="Thickness">
+          <div className="builder-slider-row">
+            <input
+              type="range"
+              min="2"
+              max="12"
+              step="0.5"
+              className="builder-slider-input"
+              value={selectedWire.thickness}
+              onChange={(event) => updateWireThicknessById(selectedWire.id, Number(event.target.value))}
+            />
+            <strong className="builder-slider-value">{selectedWire.thickness}px</strong>
+          </div>
+        </RibbonField>
+      </RibbonGroup>
+      <RibbonGroup label="Geometry" compact={compactRibbon}>
+        <RibbonButton
+          icon="＋"
+          label="Add bend"
+          disabled={layoutEditingLocked}
+          onClick={addBendToSelectedWire}
+        />
+        <RibbonButton
+          icon="⇄"
+          label="Reverse route"
+          disabled={layoutEditingLocked}
+          onClick={reverseSelectedWire}
+        />
+        <RibbonButton
+          icon="⌁"
+          label="Simplify path"
+          disabled={layoutEditingLocked}
+          onClick={simplifySelectedWire}
+        />
+      </RibbonGroup>
+      <RibbonGroup label="Endpoints" compact={compactRibbon}>
+        <div className="builder-wire-endpoints">
+          {([
+            ["start", selectedWireInspection?.start ?? null],
+            ["end", selectedWireInspection?.end ?? null]
+          ] as const).map(([endpointKey, endpoint]) => {
+            const reconnecting = wireReconnectTarget?.wireId === selectedWire.id && wireReconnectTarget.endpoint === endpointKey;
+            const endpointTitle = endpoint?.component
+              ? endpoint.component.label || getComponentName(endpoint.component.type)
+              : "Free point";
+            const endpointDetail = endpoint?.port
+              ? formatTerminalLabel(endpoint.port.terminalId)
+              : endpoint
+                ? `${Math.round(endpoint.point.x)}, ${Math.round(endpoint.point.y)}`
+                : "Not available";
+
+            return (
+              <div
+                key={endpointKey}
+                className={`builder-wire-endpoint ${endpoint?.port ? "builder-wire-endpoint--connected" : "builder-wire-endpoint--loose"}`.trim()}
+              >
+                <div className="builder-wire-endpoint__header">
+                  <span className="builder-wire-endpoint__label">{endpointKey === "start" ? "Start" : "End"}</span>
+                  <span className={`status-pill ${endpoint?.port ? "status-pill--on" : "status-pill--off"}`}>
+                    {endpoint?.port ? "Snapped" : "Free"}
+                  </span>
+                </div>
+                <strong className="builder-wire-endpoint__title">{endpointTitle}</strong>
+                <p className="builder-wire-endpoint__detail">{endpointDetail}</p>
+                <div className="builder-wire-endpoint__actions">
+                  <button
+                    type="button"
+                    className={`button ${reconnecting ? "button--primary" : "button--ghost"}`.trim()}
+                    onClick={() => startWireReconnect(endpointKey)}
+                    disabled={layoutEditingLocked}
+                  >
+                    {reconnecting ? "Pick point" : "Reconnect"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => disconnectWireEndpoint(selectedWire.id, endpointKey)}
+                    disabled={layoutEditingLocked || !endpoint?.port}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </RibbonGroup>
+      <RibbonGroup label="Edit" compact={compactRibbon}>
+        <RibbonButton
+          icon="🗑"
+          label="Delete"
+          disabled={layoutEditingLocked}
+          onClick={handleDeleteSelection}
+        />
+      </RibbonGroup>
+    </>
+  ) : null;
+
+  return (
+    <section className="panel panel--builder builder-shell">
+      <header className="builder-ribbon">
+        <div className="builder-ribbon__titlebar">
+          <div className="builder-ribbon__brand">PLC Sim <span>Graphic simulator</span></div>
+          <div className="builder-ribbon__context">
+            {selectedComponent
+              ? `${selectedComponent.label || getComponentName(selectedComponent.type)} selected`
+              : selectedWire
+                ? `Wire ${selectedWire.color} selected`
+                : sheetMetadata.projectName}
+          </div>
+        </div>
+        <RibbonTabBar
+          activeTab={activeRibbonTab}
+          collapsed={ribbonCollapsed}
+          onSelect={handleRibbonTabSelect}
+          onToggleCollapse={() => setRibbonCollapsed((current) => !current)}
+          tabs={ribbonTabs}
+        />
+        <RibbonBody collapsed={ribbonCollapsed}>
+          {activeRibbonTab === "file" ? fileRibbon : null}
+          {activeRibbonTab === "home" ? homeRibbon : null}
+          {activeRibbonTab === "insert" ? insertRibbon : null}
+          {activeRibbonTab === "simulation" ? simulationRibbon : null}
+          {activeRibbonTab === "view" ? viewRibbon : null}
+          {activeRibbonTab === "component" ? componentRibbon : null}
+          {activeRibbonTab === "wire" ? wireRibbon : null}
+        </RibbonBody>
+      </header>
+
+      <div className="builder-component-bar">{componentPalettePanel}</div>
 
       <div className="builder-freeplay">
-        <aside className="builder-sidebar">
-          <section className="builder-card builder-card--tools">
-            <div className="builder-card__title">Tools</div>
-
-            <div className="builder-mode-switch" role="group" aria-label="Playground interaction">
-              <span className="status-pill status-pill--neutral">Move ready</span>
-              <button
-                type="button"
-                className={`button ${isPanModeEnabled ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
-                onClick={togglePanMode}
-              >
-                {isPanModeEnabled ? "Pan on" : "Pan off"}
-              </button>
-              <button
-                type="button"
-                className={`button ${isWireAuthoringEnabled ? "button--primary" : "button--ghost"} builder-mode-button`.trim()}
-                onClick={toggleWireAuthoring}
-              >
-                {isWireAuthoringEnabled ? "Wire on" : "Wire off"}
-              </button>
-            </div>
-
-            <div className="builder-wire-settings">
-              <p className="builder-wire-settings__label">
-                {selectedWire ? "Selected wire settings" : "Default wire settings"}
-              </p>
-
-              <label className="builder-color-field">
-                <span className="field__label">Wire color</span>
-                <input
-                  type="color"
-                  className="builder-color-input"
-                  value={activeWireColor}
-                  onChange={(event) => updateWireColor(event.target.value)}
-                />
-              </label>
-
-              <label className="builder-slider-field">
-                <span className="field__label">Thickness</span>
-                <div className="builder-slider-row">
-                  <input
-                    type="range"
-                    min="2"
-                    max="12"
-                    step="0.5"
-                    className="builder-slider-input"
-                    value={activeWireThickness}
-                    onChange={(event) => updateWireThickness(Number(event.target.value))}
-                  />
-                  <strong className="builder-slider-value">{activeWireThickness}px</strong>
-                </div>
-              </label>
-            </div>
-
-            <div className="builder-wire-settings">
-              <p className="builder-wire-settings__label">Plane settings</p>
-
-              <label className="builder-slider-field">
-                <span className="field__label">Width</span>
-                <input
-                  type="number"
-                  min={MIN_PLANE_WIDTH}
-                  max={MAX_PLANE_WIDTH}
-                  step="40"
-                  className="builder-number-input"
-                  value={planeDraft.width}
-                  disabled={layoutEditingLocked}
-                  onChange={(event) => setPlaneDraft((current) => ({ ...current, width: event.target.value }))}
-                  onBlur={(event) => commitPlaneDraft("width", event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      event.currentTarget.value = String(planeSettingsRef.current.width);
-                      resetPlaneDraftField("width");
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-              </label>
-
-              <label className="builder-slider-field">
-                <span className="field__label">Height</span>
-                <input
-                  type="number"
-                  min={MIN_PLANE_HEIGHT}
-                  max={MAX_PLANE_HEIGHT}
-                  step="40"
-                  className="builder-number-input"
-                  value={planeDraft.height}
-                  disabled={layoutEditingLocked}
-                  onChange={(event) => setPlaneDraft((current) => ({ ...current, height: event.target.value }))}
-                  onBlur={(event) => commitPlaneDraft("height", event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      event.currentTarget.value = String(planeSettingsRef.current.height);
-                      resetPlaneDraftField("height");
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-              </label>
-
-              <label className="builder-slider-field">
-                <span className="field__label">Grid spacing</span>
-                <input
-                  type="number"
-                  min={MIN_GRID_SPACING}
-                  max={MAX_GRID_SPACING}
-                  step="2"
-                  className="builder-number-input"
-                  value={planeDraft.gridSpacing}
-                  disabled={layoutEditingLocked}
-                  onChange={(event) => setPlaneDraft((current) => ({ ...current, gridSpacing: event.target.value }))}
-                  onBlur={(event) => commitPlaneDraft("gridSpacing", event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      event.currentTarget.value = String(planeSettingsRef.current.gridSpacing);
-                      resetPlaneDraftField("gridSpacing");
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-              </label>
-            </div>
-
-            <div className="builder-action-row">
-              <button
-                type="button"
-                className="button button--secondary"
-                onClick={handleFinishWire}
-                disabled={draftWirePoints.length < 2}
-              >
-                Finish wire
-              </button>
-              <button
-                type="button"
-                className="button button--ghost"
-                onClick={clearWireInteraction}
-                disabled={draftWirePoints.length === 0 && wireReconnectTarget === null}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="button button--ghost"
-                onClick={handleDeleteSelection}
-                disabled={layoutEditingLocked || selection === null}
-              >
-                Delete
-              </button>
-              <button type="button" className="button button--ghost" onClick={handleResetCanvas} disabled={layoutEditingLocked}>
-                Reset
-              </button>
-              <button type="button" className="button button--secondary" onClick={handleLoadCircuitClick}>
-                Load circuit
-              </button>
-              <button type="button" className="button button--secondary" onClick={handleSaveCircuit}>
-                Save circuit
-              </button>
-            </div>
-
-            <input
-              ref={circuitFileInputRef}
-              type="file"
-              accept=".circuit.json,.json,application/json"
-              hidden
-              onChange={handleLoadCircuitChange}
-            />
-
-            <p className="builder-card__copy">{syncLabel}</p>
-            {circuitSnapshotStatus ? <p className="builder-card__copy">{circuitSnapshotStatus}</p> : null}
-          </section>
-
-          <section className="builder-card builder-card--sheet">
-            <div className="builder-card__title">Sheet</div>
-
-            <label className="builder-slider-field">
-              <span className="field__label">Project</span>
-              <input
-                type="text"
-                className="builder-number-input"
-                maxLength={44}
-                value={sheetMetadata.projectName}
-                onChange={(event) => setSheetMetadata((current) => ({ ...current, projectName: event.target.value }))}
-              />
-            </label>
-
-            <label className="builder-slider-field">
-              <span className="field__label">Date</span>
-              <input
-                type="text"
-                className="builder-number-input"
-                maxLength={10}
-                placeholder="YYYY-MM-DD"
-                value={sheetMetadata.date}
-                onChange={(event) => setSheetMetadata((current) => ({ ...current, date: event.target.value }))}
-              />
-            </label>
-
-            <label className="builder-slider-field">
-              <span className="field__label">Scale</span>
-              <input
-                type="text"
-                className="builder-number-input"
-                maxLength={12}
-                value={sheetMetadata.scale}
-                onChange={(event) => setSheetMetadata((current) => ({ ...current, scale: event.target.value }))}
-              />
-            </label>
-
-            <label className="builder-slider-field">
-              <span className="field__label">Page</span>
-              <input
-                type="text"
-                className="builder-number-input"
-                maxLength={6}
-                value={sheetMetadata.page}
-                onChange={(event) => setSheetMetadata((current) => ({ ...current, page: event.target.value }))}
-              />
-            </label>
-          </section>
-
-          <div className="builder-right-rail">
-            {builderStageStatePanel}
-
-            <section className={`builder-card builder-card--properties ${selection ? "builder-card--active" : ""}`.trim()}>
-              <div className="builder-card__title">Properties</div>
-
-              {selectedComponent ? (
-                <>
-                  <div className="builder-props-grid">
-                    <span className="builder-props-label">Symbol</span>
-                    <strong className="builder-props-value">{getComponentName(selectedComponent.type)}</strong>
-                    <span className="builder-props-label">{componentNeedsTag(selectedComponent.type) ? "Logic label" : "Plane name"}</span>
-                    <strong className="builder-props-value">{selectedComponent.label || "(unnamed)"}</strong>
-                    <span className="builder-props-label">Terminals</span>
-                    <strong className="builder-props-value">{getTerminalCount(selectedComponent.type)}</strong>
-                    <span className="builder-props-label">Rotation</span>
-                    <strong className="builder-props-value">{normalizeQuarterTurns(selectedComponent.rotation) * 90}deg</strong>
-                    {isTimedContactType(selectedComponent.type) ? (
-                      <>
-                        <span className="builder-props-label">Delay</span>
-                        <strong className="builder-props-value">{formatTimedContactDelaySeconds(getTimedContactDelayMs(selectedComponent))}s</strong>
-                      </>
-                    ) : null}
-                    {isSourceType(selectedComponent.type) ? (
-                      <>
-                        <span className="builder-props-label">Current</span>
-                        <strong className="builder-props-value">{getSourceCurrentType(selectedComponent.type)?.toUpperCase()}</strong>
-                        <span className="builder-props-label">Voltage</span>
-                        <strong className="builder-props-value">{formatSourceVoltage(selectedComponent)}</strong>
-                      </>
-                    ) : null}
-                    {isBreakerType(selectedComponent.type) || isMaintainedSwitchType(selectedComponent.type) ? (
-                      <>
-                        <span className="builder-props-label">State</span>
-                        <strong className="builder-props-value">
-                          {isMaintainedSwitchType(selectedComponent.type)
-                            ? (isMaintainedSwitchClosed(selectedComponent) ? "Closed" : "Open")
-                            : (isBreakerClosed(selectedComponent) ? "Closed" : "Open")}
-                        </strong>
-                      </>
-                    ) : null}
-                    {running ? (
-                    <>
-                      <span className="builder-props-label">Live</span>
-                      <strong className="builder-props-value">{selectedComponentVoltage > 0 ? `${selectedComponentVoltage}V` : "0V"}</strong>
-                    </>
-                  ) : null}
-                </div>
-                <div className="builder-selection__actions">
-                  <button
-                    type="button"
-                    className="button button--ghost builder-selection__action-button"
-                    onClick={() => rotateComponent(selectedComponent.id, -1)}
-                    disabled={layoutEditingLocked}
-                  >
-                    Rotate -90
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--ghost builder-selection__action-button"
-                    onClick={() => rotateComponent(selectedComponent.id, 1)}
-                    disabled={layoutEditingLocked}
-                  >
-                    Rotate +90
-                  </button>
-                </div>
-
-                <div className="builder-properties-fields">
-                  <label className="builder-slider-field">
-                    <span className="field__label">{componentNeedsTag(selectedComponent.type) ? "Logic label" : "Component label"}</span>
-                    <input
-                      type="text"
-                      className="builder-text-input"
-                      spellCheck={false}
-                      value={selectedComponent.label}
-                      onBlur={() => handlePlaneLabelBlur(selectedComponent.id)}
-                      onChange={(event) => handlePlaneLabelChange(selectedComponent.id, event.target.value)}
-                    />
-                  </label>
-
-                  {isTimedContactType(selectedComponent.type) ? (
-                    <label className="builder-slider-field">
-                      <span className="field__label">On-delay time (s)</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max={String(MAX_TIMED_CONTACT_DELAY_MS / 1000)}
-                        step="0.1"
-                        className="builder-number-input"
-                        value={formatTimedContactDelaySeconds(getTimedContactDelayMs(selectedComponent))}
-                        onChange={(event) => handleSelectedTimedContactDelayChange(Number(event.target.value))}
-                      />
-                    </label>
-                  ) : null}
-
-
-                  <div className="builder-terminal-fields">
-                    <span className="field__label">Terminal labels</span>
-                    <div className="builder-terminal-fields__grid">
-                      {selectedComponentTerminals.map((terminal) => (
-                        <label key={`${terminal.portId}-pane`} className="builder-terminal-field">
-                          <span className="builder-terminal-field__label">
-                            {formatTerminalLabel(terminal.terminalId)}
-                          </span>
-                          <input
-                            type="text"
-                            className="builder-text-input"
-                            spellCheck={false}
-                            placeholder={terminal.defaultLabel}
-                            value={selectedComponent.terminalLabels?.[terminal.terminalId] ?? terminal.label}
-                            onBlur={() => handleTerminalLabelBlur(selectedComponent.id, terminal.terminalId)}
-                            onChange={(event) => handleTerminalLabelChange(selectedComponent.id, terminal.terminalId, event.target.value)}
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {isSourceType(selectedComponent.type) ? (
-                  <label className="builder-slider-field">
-                    <span className="field__label">Source voltage</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="600"
-                      step="1"
-                      className="builder-number-input"
-                      value={getSourceVoltage(selectedComponent)}
-                      onChange={(event) => handleSelectedSourceVoltageChange(Number(event.target.value))}
-                    />
-                  </label>
-                ) : null}
-
-                {selectedComponent.type === "LAMP" ? (
-                  <label className="builder-slider-field">
-                    <span className="field__label">Lamp glow</span>
-                    <select
-                      className="builder-select-input"
-                      value={selectedComponent.lampGlowColor ?? DEFAULT_LAMP_GLOW_COLOR}
-                      onChange={(event) => handleSelectedLampGlowColorChange(event.target.value)}
-                    >
-                      {LAMP_GLOW_COLOR_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-
-                {isMaintainedSwitchType(selectedComponent.type) || isBreakerType(selectedComponent.type) ? (
-                  <button
-                    type="button"
-                    className={`button ${
-                      isBreakerType(selectedComponent.type)
-                        ? isBreakerClosed(selectedComponent) ? "button--secondary" : "button--primary"
-                        : isMaintainedSwitchClosed(selectedComponent) ? "button--secondary" : "button--primary"
-                    } builder-selection__action-button`.trim()}
-                    onClick={() => toggleComponentOperate(selectedComponent.id)}
-                  >
-                    {isBreakerType(selectedComponent.type)
-                      ? isBreakerClosed(selectedComponent) ? "Open breaker" : "Close breaker"
-                      : isMaintainedSwitchClosed(selectedComponent) ? "Open switch" : "Close switch"}
-                  </button>
-                ) : null}
-
-                {isTimedContactType(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    Set the on-delay here. Matching OTE and timed-contact labels share the same boolean tag,
-                    but each timed contact keeps its own local preset and elapsed state.
-                  </p>
-                ) : componentNeedsTag(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    Rename and recolor the symbol here. Matching OTE, XIC, XIO, NOTC, and NCTO labels now share the
-                    same internal logic state automatically.
-                  </p>
-                ) : isSourceType(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    {getSourceCurrentType(selectedComponent.type) === "ac"
-                      ? "Set the AC source voltage here. Closed loops energize from both source sides."
-                      : "Set the DC source voltage here. Closed loops energize with the DC feed."}
-                  </p>
-                ) : isBreakerType(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    This breaker stays closed and only rotates on the sheet.
-                  </p>
-                ) : isMaintainedSwitchType(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    Single-click the switch on the sheet to toggle continuity. Double-click it to rotate.
-                  </p>
-                ) : isMomentaryPushButtonType(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    {selectedComponent.type === "PUSH_BUTTON_NC" || selectedComponent.type === "ESTOP"
-                      ? "Hold the push button cap on the sheet to open it momentarily. Releasing it closes the path again."
-                      : "Hold the push button cap on the sheet to close it momentarily. Releasing it opens the path again."}
-                  </p>
-                ) : isVisualLoadType(selectedComponent.type) ? (
-                  <p className="builder-card__copy">
-                    {selectedComponent.type === "LAMP"
-                      ? "Lamp symbols light when energized."
-                      : selectedComponent.type === "MOTOR"
-                        ? "Motor symbols spin when energized."
-                        : "This load reacts when the path is energized."}
-                  </p>
-                ) : (
-                  <p className="builder-card__copy">Passive symbol. No runtime tag is needed.</p>
-                )}
-
-                <p className="builder-card__copy">
-                  Double-click a symbol to rotate it. Breakers toggle on single-click and rotate on double-click.
-                </p>
-              </>
-            ) : selectedWire ? (
-              <>
-                {selectedWireStatus ? (
-                  <div className="builder-wire-status">
-                    <span className={`status-pill ${selectedWireStatus.className}`}>{selectedWireStatus.label}</span>
-                    <span className="detail-chip">
-                      {selectedWireInspection?.solverEligible ? "Used by solver" : "Ignored by solver"}
-                    </span>
-                    {wireReconnectTarget ? (
-                      <span className="detail-chip detail-chip--pending">
-                        Pick a terminal or a free point for the {wireReconnectTarget.endpoint} end
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div className="builder-props-grid">
-                  <span className="builder-props-label">Wire</span>
-                  <strong className="builder-props-value">{selectedWire.points.length} points</strong>
-                  <span className="builder-props-label">Color</span>
-                  <span className="builder-selection__swatch" style={{ backgroundColor: selectedWire.color }} />
-                  <span className="builder-props-label">Thickness</span>
-                  <strong className="builder-props-value">{selectedWire.thickness}px</strong>
-                  <span className="builder-props-label">Segments</span>
-                  <strong className="builder-props-value">{selectedWireInspection?.segments ?? 0}</strong>
-                  <span className="builder-props-label">Bends</span>
-                  <strong className="builder-props-value">{selectedWireInspection?.bends ?? 0}</strong>
-                  <span className="builder-props-label">Length</span>
-                  <strong className="builder-props-value">{selectedWireInspection?.length ?? 0}px</strong>
-                </div>
-
-                <div className="builder-wire-endpoints">
-                  {([
-                    ["start", selectedWireInspection?.start ?? null],
-                    ["end", selectedWireInspection?.end ?? null]
-                  ] as const).map(([endpointKey, endpoint]) => {
-                    const reconnecting = wireReconnectTarget?.wireId === selectedWire.id && wireReconnectTarget.endpoint === endpointKey;
-                    const endpointTitle = endpoint?.component
-                      ? endpoint.component.label || getComponentName(endpoint.component.type)
-                      : "Free point";
-                    const endpointDetail = endpoint?.port
-                      ? formatTerminalLabel(endpoint.port.terminalId)
-                      : endpoint
-                        ? `${Math.round(endpoint.point.x)}, ${Math.round(endpoint.point.y)}`
-                        : "Not available";
-
-                    return (
-                      <div
-                        key={endpointKey}
-                        className={`builder-wire-endpoint ${endpoint?.port ? "builder-wire-endpoint--connected" : "builder-wire-endpoint--loose"}`.trim()}
-                      >
-                        <div className="builder-wire-endpoint__header">
-                          <span className="builder-wire-endpoint__label">{endpointKey === "start" ? "Start" : "End"}</span>
-                          <span className={`status-pill ${endpoint?.port ? "status-pill--on" : "status-pill--off"}`}>
-                            {endpoint?.port ? "Snapped" : "Free"}
-                          </span>
-                        </div>
-                        <strong className="builder-wire-endpoint__title">{endpointTitle}</strong>
-                        <p className="builder-wire-endpoint__detail">{endpointDetail}</p>
-                        <div className="builder-wire-endpoint__actions">
-                          <button
-                            type="button"
-                            className={`button ${reconnecting ? "button--primary" : "button--ghost"}`.trim()}
-                            onClick={() => startWireReconnect(endpointKey)}
-                            disabled={layoutEditingLocked}
-                          >
-                            {reconnecting ? "Pick point" : "Reconnect"}
-                          </button>
-                          <button
-                            type="button"
-                            className="button button--ghost"
-                            onClick={() => disconnectWireEndpoint(selectedWire.id, endpointKey)}
-                            disabled={layoutEditingLocked || !endpoint?.port}
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="builder-wire-actions">
-                  <button type="button" className="button button--ghost" onClick={addBendToSelectedWire} disabled={layoutEditingLocked}>
-                    Add bend
-                  </button>
-                  <button type="button" className="button button--ghost" onClick={reverseSelectedWire} disabled={layoutEditingLocked}>
-                    Reverse route
-                  </button>
-                  <button type="button" className="button button--ghost" onClick={simplifySelectedWire} disabled={layoutEditingLocked}>
-                    Simplify path
-                  </button>
-                </div>
-
-                <p className="builder-card__copy">
-                  {selectedWireStatus?.description ?? "Adjust color and thickness in Tools."} Drag any wire point to reshape it, double-click a bend point to remove it, or double-click a wire segment to cut that span.
-                </p>
-              </>
-              ) : (
-                <p className="builder-card__copy">Select a symbol or wire to inspect and adjust it.</p>
-              )}
-            </section>
-          </div>
-        </aside>
-
         <div className="builder-stage">
-          <div className="builder-stage__top-row">
-            {componentPalettePanel}
-          </div>
-
           <div
             ref={stageScrollRef}
             className={`builder-stage__scroll ${isPanModeEnabled ? "builder-stage__scroll--pan" : ""} ${isPanning ? "builder-stage__scroll--panning" : ""}`.trim()}
@@ -7910,6 +8735,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 ref={canvasRef}
                 tabIndex={-1}
                 className={`freeplay-canvas ${isWirePointerPreviewVisible ? "freeplay-canvas--wire" : ""} ${isPanModeEnabled ? "freeplay-canvas--pan" : ""} ${isPanning ? "freeplay-canvas--panning" : ""}`.trim()}
+                data-layout-version={canvasLayoutVersion}
                 style={canvasStyle}
                 onClick={handleCanvasClick}
                 onContextMenu={handleCanvasContextMenu}
@@ -8179,12 +9005,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     && !isMomentaryPushButtonType(component.type)
                     && !isContactType(component.type);
                   const pushButtonPressed = isMomentaryPushButtonType(component.type) && isMomentaryPushButtonPressed(component);
-                  const manualControl = isMaintainedSwitchType(component.type)
-                    || isMomentaryPushButtonType(component.type)
-                    || isSelector3PosType(component.type);
+                  const manualControl = isOperable[component.type] !== "none";
                   const manualControlActive = pushButtonPressed
                     || (isMaintainedSwitchType(component.type) && isMaintainedSwitchClosed(component))
                     || (isSelector3PosType(component.type) && (component.selectorPosition ?? 2) !== 2);
+                  const selectorRingHover = selectorHover?.componentId === component.id
+                    && selectorHover.overRing;
+                  const selectorHoverZone = selectorHover?.componentId === component.id
+                    ? selectorHover.zone
+                    : null;
                   const glyphHitboxStyle = getComponentGlyphHitboxStyle(component.type, component.rotation);
                   const pushButtonPressTargetStyle = isMomentaryPushButtonType(component.type)
                     ? getPushButtonPressTargetStyle(component.rotation)
@@ -8195,6 +9024,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     electricalState.resolvedTagValues,
                     electricalState.timedContactStateByComponentId
                   );
+                  const labelLayout = getComponentLabelLayout(component);
+                  const hitDebugBounds = showHitboxDebug ? getComponentHitBounds(component) : null;
 
                   return (
                     <div
@@ -8207,6 +9038,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         component.type === "MOTOR" && energized ? "freeplay-component--motor-on" : "",
                         manualControl ? "freeplay-component--manual" : "",
                         manualControlActive ? "freeplay-component--manual-active" : "",
+                        selectorRingHover ? "freeplay-component--selector-ring-hover" : "",
                         pushButtonPressed ? "freeplay-component--pushbutton-down" : "",
                         coilActive ? "freeplay-component--coil-on" : ""
                       ].filter(Boolean).join(" ")}
@@ -8221,6 +9053,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       }}
                       onLostPointerCapture={() => handleComponentHandleLostCapture(component.id)}
                       onPointerCancel={(event) => handleComponentHandlePointerRelease(event, component.id)}
+                      onPointerLeave={() => clearSelectorHover(component.id)}
                       onPointerDown={(event) => {
                         const target = event.target;
 
@@ -8242,13 +9075,20 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                         handleComponentHandlePointerDown(event, component.id);
                       }}
-                      onPointerMove={(event) => handleComponentHandlePointerMove(event, component.id)}
+                      onPointerMove={(event) => {
+                        handleComponentHandlePointerMove(event, component.id);
+                        updateSelectorHover(event, component);
+                      }}
                       onPointerUp={(event) => {
                         const wasDragged = componentDragMovedRef.current;
                         handleComponentHandlePointerRelease(event, component.id);
 
-                        if (!wasDragged && shouldOperateComponentFromPointer(event, component)) {
-                          scheduleComponentToggle(component.id);
+                        if (!wasDragged) {
+                          if (isSelector3PosType(component.type)) {
+                            handleSelectorZonePointerUp(event, component, wasDragged);
+                          } else if (shouldOperateComponentFromPointer(event, component)) {
+                            scheduleComponentToggle(component.id);
+                          }
                         }
 
                         componentDragMovedRef.current = false;
@@ -8326,13 +9166,25 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         </div>
                       ) : null}
 
-                    {terminals.map((terminal) => (
+                    {terminals.map((terminal) => {
+                      const terminalHitDiameter = getTerminalHitRadius(
+                        component.type,
+                        terminal.terminalId,
+                        false
+                      ) * 2;
+
+                      return (
                       <button
                         key={terminal.portId}
                         type="button"
                         className={`freeplay-port ${wireTerminalsEnabled ? "freeplay-port--active" : ""}`.trim()}
                         aria-label={`Connect to ${component.label} terminal ${terminal.label || formatTerminalLabel(terminal.terminalId)}`}
-                        style={{ left: terminal.x - component.x, top: terminal.y - component.y }}
+                        style={{
+                          height: terminalHitDiameter,
+                          left: terminal.x - component.x,
+                          top: terminal.y - component.y,
+                          width: terminalHitDiameter
+                        }}
                         onClick={(event) => {
                           event.stopPropagation();
                           contextMenuRef.current?.close();
@@ -8364,7 +9216,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           commitWireFromPoints(buildNextDraftPoints(draftWirePoints, { x: terminal.x, y: terminal.y }));
                         }}
                       />
-                    ))}
+                      );
+                    })}
 
                     <div
                       className={`freeplay-component__glyph ${manualControl ? "freeplay-component__glyph--manual" : ""}`.trim()}
@@ -8398,6 +9251,30 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           </span>
                         </div>
                       ) : null}
+                      {isSelector3PosType(component.type) ? (
+                        <div
+                          className="freeplay-selector-zones"
+                          style={{
+                            ...(normalizeQuarterTurns(component.rotation) === 0
+                              ? {}
+                              : { transform: `rotate(${normalizeQuarterTurns(component.rotation) * 90}deg)` })
+                          }}
+                          aria-hidden="true"
+                        >
+                          {SELECTOR_3POS_ZONES.map((zone) => (
+                            <div
+                              className={`freeplay-selector-zone${
+                                selectorHoverZone === zone.position
+                                  ? " freeplay-selector-zone--hover"
+                                  : ""
+                              }`}
+                              data-selector-position={zone.position}
+                              key={zone.position}
+                              style={{ height: zone.height, top: zone.top }}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                       <div
                         className={`freeplay-component__symbol-rotator freeplay-component__symbol-rotator--${getSymbolCategory(component.type)}`.trim()}
                         style={{
@@ -8413,6 +9290,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           coilActive,
                           contactActuated,
                           contactClosed,
+                          debugZones: showHitboxDebug,
                           energized: visualEnergized,
                           estopPressed: component.type === "ESTOP" && component.isPressed === true,
                           label: component.label,
@@ -8424,15 +9302,28 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {}),
                           ...(isMaintainedSwitchType(component.type) ? { switchClosed: isMaintainedSwitchClosed(component) } : {})
                         })}
+                        <ComponentHitOverlay component={component} debug={showHitboxDebug} />
                       </div>
                     </div>
 
                       <div
-                        className="freeplay-component__label-row"
-                        style={getComponentLabelRowStyle(component.rotation)}
+                        className={`freeplay-component__label-row${showHitboxDebug ? " freeplay-component__label-row--debug" : ""}`}
+                        style={labelLayout}
                       >
                         <span className="freeplay-component__label">{component.label}</span>
                       </div>
+                      {hitDebugBounds ? (
+                        <div
+                          className="freeplay-component__hit-debug-bounds"
+                          style={{
+                            height: hitDebugBounds.height,
+                            left: hitDebugBounds.left,
+                            top: hitDebugBounds.top,
+                            width: hitDebugBounds.width
+                          }}
+                          aria-hidden="true"
+                        />
+                      ) : null}
                     </div>
                   );
                 })}
@@ -8493,6 +9384,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           )
           : null}
       </div>
+
+      <footer className="builder-statusbar">{statusBarContent}</footer>
+
+      <input
+        ref={circuitFileInputRef}
+        type="file"
+        accept=".circuit.json,.json,application/json"
+        hidden
+        onChange={handleLoadCircuitChange}
+      />
+
       {rotationToast ? (
         <div className="freeplay-toast" role="status">
           {rotationToast}

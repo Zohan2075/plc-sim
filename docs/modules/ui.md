@@ -38,7 +38,8 @@ from `@plc-sim/plc-engine` (D1).
 | Path | Type | Purpose |
 |------|------|---------|
 | `ui/src/App.tsx` | file | Root: holds the `EngineSession`, run loop, project state, panel/sheet layout |
-| `ui/src/DiagramBuilder.tsx` | file | Canvas editor (~8k lines): palette, wiring, inspector, snapshot load/save, adaptive context-menu integration (`ContextMenuLayer`), multi-select, undo/redo (max 50) and clipboard |
+| `ui/src/DiagramBuilder.tsx` | file | Canvas editor and ribbon shell: component palette under the ribbon, art-derived hit shapes/labels, wiring, contextual Component/Wire tabs, status bar, snapshot load/save, context-menu integration, multi-select, undo/redo (max 50) and clipboard |
+| `ui/src/Ribbon.tsx` | file | Presentational Word-style ribbon primitives: tabs, groups, compact dropdown groups, icon buttons, fields, collapse behavior and `useCompactRibbon` |
 | `ui/src/TracePanel.tsx` | file | Scan-trace table (reused inside the panel debug drawer) |
 | `ui/src/projectData.ts` | file | `ProjectBundle`/`TagDefinition` types + exported parsers; data-file loaders removed in phase 6 |
 | `ui/src/App.css`, `ui/src/styles.css` | file | Styling (grid gradient removed in phase 4: SVG is the single grid source) |
@@ -46,6 +47,9 @@ from `@plc-sim/plc-engine` (D1).
 | `ui/src/diagram/contextMenu.tsx` | file | Portal-based adaptive context menu (`ContextMenuLayer`): fixed screen coords, viewport clamp/flip, submenus, keyboard, long-press helper |
 | `ui/src/diagram/selector3pos.tsx` | file | `SELECTOR_3POS` art generated from the three supplied SVGs: every element in original order, one wrapper per state, ring centers/anchors, 3.5-unit stroke, generated stem/bar joint filler for states 1/3; `?debugTerminals=1` ring crosshairs |
 | `ui/src/diagram/wireRoute.ts` | file | Display routing: `resolveWireDisplayPoints` plus the SELECTOR_3POS ring-rim endpoint trim (stored wire points and anchors unchanged) |
+| `ui/src/diagram/operability.ts` | file | Single `isOperable` table (`toggle`/`momentary`/`position`/`none`) consumed by pointer operation, menus and cursor/hit code; breakers are `none` |
+| `ui/src/diagram/selector3posZones.ts` | file | Rotation-aware SELECTOR_3POS top/middle/bottom zone math derived from the row anchors (42/60), ring-priority rejection and direct position helper |
+| `ui/src/diagram/ribbonMapping.ts` | file | Static 110-entry audit map from the old panels/canvas controls to ribbon tabs, contextual tabs and status bar |
 | `ui/src/compiler/` | dir | Wiring → `Program` compiler + device bindings |
 | `ui/src/solver/` | dir | Read-only electrical view |
 | `ui/src/runtime/` | dir | `EngineSession` (the one engine) |
@@ -58,7 +62,7 @@ from `@plc-sim/plc-engine` (D1).
 
 ### Specs (vitest, `test.include = src/**`)
 
-21 spec files, 1015 tests: `diagram/{alignment,contextMenu,contextMenu.render,electrical-latch,grid,interaction,operate,reference-circuit,rotation,selector3pos,selector3posArt,selector-wire-trim,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/alignment.spec.ts` (233), `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (8), `diagram/rotation.spec.ts` (31), `diagram/interaction.spec.ts` (19), `diagram/operate.spec.ts` (4), `diagram/selector3pos.spec.ts` (7), `diagram/selector3posArt.spec.ts` (3), `diagram/selector-wire-trim.spec.ts` (2), `diagram/snapshot.spec.ts` (14), `diagram/terminal-alignment.spec.ts` (304), `diagram/wire-routing.spec.ts` (8), `diagram/wire-stubs.spec.ts` (319), `diagram/short-circuit.spec.ts` (2).
+27 spec files, 1063 tests: `Ribbon.spec.tsx`, `diagram/{alignment,breaker,contextMenu,contextMenu.render,electrical-latch,grid,hitboxes,interaction,operate,operability,reference-circuit,ribbonMapping,rotation,selector3pos,selector3posArt,selector3posZones,selector-wire-trim,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/alignment.spec.ts` (233), `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (8), `diagram/rotation.spec.ts` (31), `diagram/interaction.spec.ts` (19), `diagram/operate.spec.ts` (4), `diagram/selector3pos.spec.ts` (7), `diagram/selector3posArt.spec.ts` (3), `diagram/selector-wire-trim.spec.ts` (2), `diagram/snapshot.spec.ts` (14), `diagram/terminal-alignment.spec.ts` (304), `diagram/wire-routing.spec.ts` (8), `diagram/wire-stubs.spec.ts` (319), `diagram/short-circuit.spec.ts` (2), plus the new breaker/operability/hitboxes/selector-zone/ribbon specs (43 tests).
 
 ## Key Symbols
 

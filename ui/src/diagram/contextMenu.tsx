@@ -10,6 +10,7 @@ import {
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { BuilderComponentType, BuilderWire, LampGlowColorOption, Point } from "../DiagramBuilder";
+import { isOperable } from "./operability";
 
 export type RotationAction = "cw" | "ccw" | "half" | "angle0" | "angle90" | "angle180" | "angle270";
 
@@ -243,7 +244,7 @@ export function buildComponentMenu(
     }
   ];
 
-  if (target.componentType === "SELECTOR_3POS") {
+  if (target.componentType && isOperable[target.componentType] === "position") {
     items.push({
       id: "selector-position",
       items: [

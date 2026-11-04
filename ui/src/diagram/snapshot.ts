@@ -48,6 +48,10 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
 
 const circuitSnapshotTagKinds = new Set<TagDefinition["kind"]>(["input", "output", "internal"]);
 
+function isBreakerComponentType(type: BuilderComponentType): boolean {
+  return type === "BREAKER_1P" || type === "BREAKER_2P";
+}
+
 export function normalizeInstructionLabel(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -131,6 +135,7 @@ export function createCircuitSnapshot(
   return {
     components: components.map((component) => ({
       ...component,
+      ...(isBreakerComponentType(component.type) ? { isClosed: true } : {}),
       ...(component.terminalLabels ? { terminalLabels: { ...component.terminalLabels } } : {})
     })),
     name: "PLC Sim circuit",
@@ -382,6 +387,7 @@ function parseCircuitSnapshotComponent(value: unknown, index: number): BuilderCo
   }
 
   const tagValue = component.tag;
+  const breakerComponent = isBreakerComponentType(type as BuilderComponentType);
   const isClosed = expectCircuitSnapshotOptionalBoolean(component.isClosed, `Circuit component ${index} isClosed`);
   const isPressed = expectCircuitSnapshotOptionalBoolean(component.isPressed, `Circuit component ${index} isPressed`);
   const delayMs = component.delayMs !== undefined
@@ -412,7 +418,7 @@ function parseCircuitSnapshotComponent(value: unknown, index: number): BuilderCo
       ? { delayMs: clampTimedContactDelayMs(delayMs ?? DEFAULT_TIMED_CONTACT_DELAY_MS) }
       : {}),
     ...(terminalLabels ? { terminalLabels } : {}),
-    ...(isClosed !== undefined ? { isClosed } : {}),
+    ...(breakerComponent ? { isClosed: true } : isClosed !== undefined ? { isClosed } : {}),
     ...(isPressed !== undefined ? { isPressed } : {}),
     ...(type === "LAMP" && lampGlowColor !== undefined ? { lampGlowColor } : {}),
     ...(selectorPosition !== undefined ? { selectorPosition } : {}),

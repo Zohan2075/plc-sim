@@ -3,7 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CIRCUIT_SNAPSHOT_VERSION } from "../DiagramBuilder";
-import { migrateCircuitSnapshot, parseCircuitSnapshot } from "./snapshot";
+import type { BuilderComponent } from "../DiagramBuilder";
+import {
+  createCircuitSnapshot,
+  migrateCircuitSnapshot,
+  parseCircuitSnapshot
+} from "./snapshot";
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", "snapshot-v1.circuit.json");
 const rawV1 = JSON.parse(readFileSync(fixturePath, "utf8")) as unknown;
@@ -99,6 +104,112 @@ describe("circuit snapshot v1 fixture (an actual v1 snapshot: version 1, no shee
 
     expect(second).toEqual(first);
     expect(second.sheet).toEqual(first.sheet);
+  });
+});
+
+describe("breaker snapshot canonicalization", () => {
+  function rawWithBreakerState(isClosed: boolean | undefined): unknown {
+    const raw = JSON.parse(JSON.stringify(rawV1)) as {
+      components: Array<Record<string, unknown>>;
+    };
+    const breaker = raw.components.find((component) => component.type === "BREAKER_1P");
+
+    expect(breaker).toBeDefined();
+
+    if (isClosed === undefined) {
+      delete breaker!.isClosed;
+    } else {
+      breaker!.isClosed = isClosed;
+    }
+
+    return raw;
+  }
+
+  it("loads old and missing breaker isClosed values as closed", () => {
+    for (const isClosed of [false, undefined] as const) {
+      const snapshot = parseCircuitSnapshot(rawWithBreakerState(isClosed));
+      const breaker = snapshot.components.find((component) => component.type === "BREAKER_1P");
+
+      expect(breaker?.isClosed).toBe(true);
+      expect(breaker && "isClosed" in breaker).toBe(true);
+    }
+  });
+
+  it("saves breakers as closed without changing any other component field", () => {
+    const parsed = parseCircuitSnapshot(rawWithBreakerState(false));
+    const breaker = parsed.components.find((component) => component.type === "BREAKER_1P")!;
+    const componentsWithOldState = parsed.components.map((component) =>
+      component.id === breaker.id ? { ...component, isClosed: false } : component
+    );
+    const snapshot = createCircuitSnapshot(
+      componentsWithOldState,
+      parsed.wires,
+      parsed.program,
+      parsed.tags,
+      parsed.settings.scanIntervalMs,
+      parsed.settings,
+      parsed.sheet
+    );
+    const savedBreaker = snapshot.components.find((component) => component.type === "BREAKER_1P")!;
+
+    expect(savedBreaker.isClosed).toBe(true);
+    expect(savedBreaker).toEqual(breaker);
+    expect(snapshot.wires).toEqual(parsed.wires);
+
+    for (const original of parsed.components) {
+      if (original.id === breaker.id) {
+        continue;
+      }
+
+      expect(snapshot.components.find((component) => component.id === original.id)).toEqual(original);
+    }
+  });
+
+  it("adds isClosed:true when a breaker has no stored state", () => {
+    const parsed = parseCircuitSnapshot(rawWithBreakerState(undefined));
+    const breaker: BuilderComponent = {
+      id: parsed.components.find((component) => component.type === "BREAKER_1P")!.id,
+      label: "Q1",
+      rotation: 0,
+      tag: null,
+      type: "BREAKER_1P",
+      usesCustomLabel: false,
+      x: 100,
+      y: 100
+    };
+    const snapshot = createCircuitSnapshot(
+      [breaker],
+      [],
+      { rungs: [] },
+      [],
+      150,
+      parsed.settings,
+      parsed.sheet
+    );
+
+    expect(snapshot.components[0]?.isClosed).toBe(true);
+    expect(snapshot.components[0] && "isClosed" in snapshot.components[0]).toBe(true);
+  });
+
+  it("round-trips canonical breaker state with identical wire points", () => {
+    const parsed = parseCircuitSnapshot(rawWithBreakerState(false));
+    const componentsWithOldState = parsed.components.map((component) =>
+      component.type === "BREAKER_1P" ? { ...component, isClosed: false } : component
+    );
+    const snapshot = createCircuitSnapshot(
+      componentsWithOldState,
+      parsed.wires,
+      parsed.program,
+      parsed.tags,
+      parsed.settings.scanIntervalMs,
+      parsed.settings,
+      parsed.sheet
+    );
+    const reparsed = parseCircuitSnapshot(JSON.parse(JSON.stringify(snapshot)));
+
+    expect(reparsed.components.find((component) => component.type === "BREAKER_1P")?.isClosed).toBe(true);
+    expect(reparsed.wires).toEqual(snapshot.wires);
+    expect(JSON.stringify(reparsed.wires)).toBe(JSON.stringify(snapshot.wires));
   });
 });
 

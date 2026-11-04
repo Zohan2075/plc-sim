@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   computeElectricalState,
@@ -7,7 +9,7 @@ import {
 } from "../DiagramBuilder";
 import type { BuilderComponent, BuilderComponentType, BuilderPlaneSettings, BuilderWire } from "../DiagramBuilder";
 import { snapComponentToPlaneGrid } from "./grid";
-import { SELECTOR_3POS_RING_CENTERS } from "./selector3pos";
+import { renderSelector3Pos, SELECTOR_3POS_RING_CENTERS } from "./selector3pos";
 import { SELECTOR_3POS_RING_RADII } from "./selector3posArt.generated";
 import { createCircuitSnapshot, parseCircuitSnapshot } from "./snapshot";
 import { createDefaultSheetMetadata } from "./sheet";
@@ -208,4 +210,20 @@ describe("SELECTOR_3POS", () => {
       expect(electrical.energizedComponentIds.has(lampB.id)).toBe(position === 3);
     });
   }
+
+  it("draws selector zone debug only when the debug prop is enabled", () => {
+    const withDebug = renderToStaticMarkup(createElement(
+      "div",
+      null,
+      renderSelector3Pos(2, "diagram-symbol", true)
+    ));
+    const withoutDebug = renderToStaticMarkup(createElement(
+      "div",
+      null,
+      renderSelector3Pos(2, "diagram-symbol", false)
+    ));
+
+    expect(withDebug).toContain("stroke-dasharray");
+    expect(withoutDebug).not.toContain("stroke-dasharray");
+  });
 });

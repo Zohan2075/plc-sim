@@ -279,6 +279,19 @@ describe("context menu row rendering", () => {
     expect(actions.setSelectorPosition).toHaveBeenCalledWith(["builder-component-1"], 1);
   });
 
+  it("does not expose operation or Position entries for breakers", () => {
+    const breakerTarget: ContextMenuTarget = {
+      ...componentTarget,
+      componentId: "builder-component-breaker",
+      componentLabel: "Q1",
+      componentType: "BREAKER_1P"
+    };
+    const items = buildComponentMenu(breakerTarget, createActions(), lampOptions);
+
+    expect(submenuItems(items).map((item) => item.id)).not.toContain("selector-position");
+    expect(actionItems(items).map((item) => item.label)).not.toContain("Operate");
+  });
+
   it("lists all seven lamp colors and marks the current one", () => {
     const items = buildComponentMenu(lampTarget, createActions(), lampOptions);
     const colorMenu = submenuItems(items).find((item) => item.id === "lamp-color");

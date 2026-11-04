@@ -6,17 +6,22 @@ import {
   SELECTOR_3POS_WRAPPERS
 } from "./selector3posArt.generated";
 import type { Selector3PosState } from "./selector3posArt.generated";
+import { SELECTOR_3POS_ART_WIDTH, SELECTOR_3POS_ZONES } from "./selector3posZones";
 
 export type Selector3PosPosition = Selector3PosState;
 export { SELECTOR_3POS_RING_CENTERS };
 
 const SELECTOR_DEBUG_ENABLED = typeof window !== "undefined"
-  && new URLSearchParams(window.location.search).get("debugTerminals") === "1";
+  && (
+    new URLSearchParams(window.location.search).get("debugTerminals") === "1"
+    || new URLSearchParams(window.location.search).get("debugHitboxes") === "1"
+  );
 const RING_IDS = ["in1", "out1", "in2", "out2"] as const;
 
 export function renderSelector3Pos(
   position: Selector3PosPosition = 2,
-  className = "diagram-symbol"
+  className = "diagram-symbol",
+  debugZones = SELECTOR_DEBUG_ENABLED
 ): ReactNode {
   const activePosition = position === 1 || position === 3 ? position : 2;
   const elements = SELECTOR_3POS_STATES[activePosition];
@@ -61,8 +66,33 @@ export function renderSelector3Pos(
           />
         ) : null}
       </g>
-      {SELECTOR_DEBUG_ENABLED ? (
+      {debugZones ? (
         <g pointerEvents="none" aria-hidden="true">
+          {SELECTOR_3POS_ZONES.map((zone) => (
+            <g key={`zone-${zone.position}`}>
+              <rect
+                x={0}
+                y={zone.top}
+                width={SELECTOR_3POS_ART_WIDTH}
+                height={zone.height}
+                fill="rgba(37, 99, 235, 0.05)"
+                stroke="#2563eb"
+                strokeDasharray="3 3"
+                strokeWidth={0.8}
+              />
+              <text
+                x={SELECTOR_3POS_ART_WIDTH / 2}
+                y={zone.top + zone.height / 2}
+                fill="#1d4ed8"
+                fontSize={9}
+                fontWeight={700}
+                textAnchor="middle"
+                dominantBaseline="central"
+              >
+                {zone.position}
+              </text>
+            </g>
+          ))}
           {RING_IDS.map((ringId) => {
             const center = SELECTOR_3POS_RING_CENTERS[ringId];
 
