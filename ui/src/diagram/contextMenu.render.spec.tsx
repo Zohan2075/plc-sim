@@ -37,6 +37,7 @@ function createActions(): ContextMenuActions {
     renameComponent: vi.fn(),
     rotateComponents: vi.fn(),
     setLampGlowColor: vi.fn(),
+    setSelectorPosition: vi.fn(),
     setWireColor: vi.fn(),
     setWireThickness: vi.fn(),
     simplifyWire: vi.fn(),
@@ -252,6 +253,30 @@ describe("context menu row rendering", () => {
       expect(Math.abs(terminal.x - original.x)).toBeLessThan(0.01);
       expect(Math.abs(terminal.y - original.y)).toBeLessThan(0.01);
     }
+  });
+
+  it("adds a Position submenu for SELECTOR_3POS and checks the current position", () => {
+    const actions = createActions();
+    const target: ContextMenuTarget = {
+      ...componentTarget,
+      componentId: "builder-component-selector",
+      componentLabel: "SEL",
+      componentType: "SELECTOR_3POS",
+      selectorPosition: 2
+    };
+    const items = buildComponentMenu(target, actions, lampOptions);
+    const positionMenu = submenuItems(items).find((item) => item.id === "selector-position");
+
+    expect(positionMenu).toBeDefined();
+    expect(actionItems(positionMenu?.items ?? []).map((item) => item.label)).toEqual([
+      "1st contact",
+      "2nd OFF",
+      "3rd contact"
+    ]);
+    expect(actionItems(positionMenu?.items ?? []).find((item) => item.checked)?.label).toBe("2nd OFF");
+
+    actionItems(positionMenu?.items ?? []).find((item) => item.label === "1st contact")?.onSelect();
+    expect(actions.setSelectorPosition).toHaveBeenCalledWith(["builder-component-1"], 1);
   });
 
   it("lists all seven lamp colors and marks the current one", () => {

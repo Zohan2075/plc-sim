@@ -55,7 +55,14 @@ import {
   repositionWireEndpointOrthogonally
 } from "./diagram/grid";
 import { reconcileWireTopology } from "./diagram/wireTopology";
-import { getWireTerminalRoutes, resolveWireDisplayPoints } from "./diagram/wireRoute";
+import {
+  getWireTerminalRoutes,
+  resolveWireDisplayPoints,
+  trimSelectorWireEndpoint,
+  wireHasSelectorEndpoint
+} from "./diagram/wireRoute";
+import { renderSelector3Pos, SELECTOR_3POS_RING_CENTERS } from "./diagram/selector3pos";
+import type { Selector3PosPosition } from "./diagram/selector3pos";
 import { ContextMenuLayer, isLongPressCancelled } from "./diagram/contextMenu";
 import type {
   ContextMenuHandle,
@@ -76,7 +83,7 @@ import {
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
 export type LampGlowColorOption = "red" | "green" | "yellow" | "amber" | "orange" | "blue" | "white";
-export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
+export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
 type WireEndpointKey = "start" | "end";
@@ -98,6 +105,7 @@ export interface BuilderComponent {
   label: string;
   lampGlowColor?: LampGlowColorOption;
   rotation: number;
+  selectorPosition?: Selector3PosPosition;
   sourceVoltage?: number;
   tag: string | null;
   terminalLabels?: Partial<Record<string, string>>;
@@ -126,6 +134,7 @@ export interface BuilderWire {
 }
 
 interface TerminalDefinition {
+  direction?: Point;
   id: string;
   label: string;
   pairId?: string | undefined;
@@ -365,6 +374,7 @@ export const instructionPalette: Array<{
   { type: "PUSH_BUTTON_NO", label: "NO push button", description: "Momentary normally open switch" },
   { type: "PUSH_BUTTON_NC", label: "NC push button", description: "Momentary normally closed switch" },
   { type: "ESTOP", label: "E-stop", description: "Emergency stop, mushroom NC button" },
+  { type: "SELECTOR_3POS", label: "3-pos selector", description: "Three-position selector, 4 terminals" },
   { type: "LIMIT_SWITCH_NO", label: "Limit switch NO", description: "Plunger roller, normally open" },
   { type: "LIMIT_SWITCH_NC", label: "Limit switch NC", description: "Plunger roller, normally closed" },
   { type: "OL_CONTACT", label: "OL contact", description: "Overload contact, toggle from inspector" },
@@ -425,6 +435,7 @@ function isPassThroughType(type: BuilderComponentType): boolean {
   return type === "BREAKER_1P"
     || type === "BREAKER_2P"
     || type === "SWITCH_1P"
+    || type === "SELECTOR_3POS"
     || type === "PUSH_BUTTON_NO"
     || type === "PUSH_BUTTON_NC"
     || type === "ESTOP"
@@ -443,6 +454,10 @@ function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREA
 
 function isMaintainedSwitchType(type: BuilderComponentType): type is "SWITCH_1P" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" {
   return type === "SWITCH_1P" || type === "LIMIT_SWITCH_NO" || type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT";
+}
+
+function isSelector3PosType(type: BuilderComponentType): type is "SELECTOR_3POS" {
+  return type === "SELECTOR_3POS";
 }
 
 function isMomentaryPushButtonType(type: BuilderComponentType): type is "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" {
@@ -465,6 +480,7 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
     case "ESTOP":
+    case "SELECTOR_3POS":
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
     case "OL_CONTACT":
@@ -675,6 +691,23 @@ export function applyMomentaryRelease(components: BuilderComponent[], componentI
  * selector/limit/overload contacts and breakers. It deliberately has no
  * simulator-running dependency; the click handler decides when to call it.
  */
+export function getNextSelectorPosition(
+  position: Selector3PosPosition,
+  direction: 1 | -1
+): { direction: 1 | -1; position: Selector3PosPosition } {
+  if (position === 1) {
+    return { direction: 1, position: 2 };
+  }
+
+  if (position === 3) {
+    return { direction: -1, position: 2 };
+  }
+
+  return direction > 0
+    ? { direction, position: 3 }
+    : { direction, position: 1 };
+}
+
 export function toggleComponentOperateState(
   components: BuilderComponent[],
   componentId: string
@@ -832,6 +865,15 @@ function getConductiveTerminalPairs(
     case "PUSH_BUTTON_NC":
     case "ESTOP":
       return !useLiveTagState || !isMomentaryPushButtonPressed(component) ? [["in", "out"]] : [];
+    case "SELECTOR_3POS": {
+      const position = component.selectorPosition ?? 2;
+
+      return position === 1
+        ? [["in1", "out1"]]
+        : position === 3
+          ? [["in2", "out2"]]
+          : [];
+    }
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
     case "OL_CONTACT":
@@ -1139,6 +1181,8 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--[/PB NC]--";
     case "ESTOP":
       return "--[/ES]--";
+    case "SELECTOR_3POS":
+      return "--[SEL 3P]--";
     case "LIMIT_SWITCH_NO":
       return "--o/ NO o--";
     case "LIMIT_SWITCH_NC":
@@ -1184,6 +1228,8 @@ function getComponentName(type: BuilderComponentType): string {
       return "Push button NC";
     case "ESTOP":
       return "E-stop button";
+    case "SELECTOR_3POS":
+      return "3-pos selector";
     case "LIMIT_SWITCH_NO":
       return "Limit switch NO";
     case "LIMIT_SWITCH_NC":
@@ -1264,6 +1310,8 @@ function getDefaultComponentLabel(
       return "PB-NC";
     case "ESTOP":
       return "ES-1";
+    case "SELECTOR_3POS":
+      return "SEL";
     case "LIMIT_SWITCH_NO":
       return "LS-NO";
     case "LIMIT_SWITCH_NC":
@@ -1300,8 +1348,17 @@ function projectSymbolPoint(
   return projectedPoint;
 }
 
+const SELECTOR_3POS_TERMINALS: TerminalDefinition[] = [
+  { direction: { x: -1, y: 0 }, id: "in1", label: "1", pairId: "row1", role: "input", x: SELECTOR_3POS_RING_CENTERS.in1.x, y: SELECTOR_3POS_RING_CENTERS.in1.y },
+  { direction: { x: 1, y: 0 }, id: "out1", label: "2", pairId: "row1", role: "output", x: SELECTOR_3POS_RING_CENTERS.out1.x, y: SELECTOR_3POS_RING_CENTERS.out1.y },
+  { direction: { x: -1, y: 0 }, id: "in2", label: "3", pairId: "row2", role: "input", x: SELECTOR_3POS_RING_CENTERS.in2.x, y: SELECTOR_3POS_RING_CENTERS.in2.y },
+  { direction: { x: 1, y: 0 }, id: "out2", label: "4", pairId: "row2", role: "output", x: SELECTOR_3POS_RING_CENTERS.out2.x, y: SELECTOR_3POS_RING_CENTERS.out2.y }
+];
+
 export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefinition[] {
   switch (type) {
+    case "SELECTOR_3POS":
+      return SELECTOR_3POS_TERMINALS;
     case "POWER_SOURCE":
 		case "DC_SOURCE": {
       const leftTerminal = projectSymbolPoint(6.4, 32, 64);
@@ -1413,6 +1470,8 @@ export function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
     case "ESTOP":
+    case "SELECTOR_3POS":
+      return type === "SELECTOR_3POS" ? "in1" : "in";
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
     case "OL_CONTACT":
@@ -1439,6 +1498,8 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
       return "right";
     case "BREAKER_2P":
       return "out-top";
+    case "SELECTOR_3POS":
+      return "out1";
     case "BREAKER_1P":
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
@@ -1567,6 +1628,7 @@ function renderSymbolGraphic(
     estopPressed?: boolean;
     label?: string;
     pushButtonPressed?: boolean;
+    selectorPosition?: Selector3PosPosition;
     switchClosed?: boolean;
     terminalLabels?: Partial<Record<string, string>>;
   } = {}
@@ -1669,6 +1731,8 @@ function renderSymbolGraphic(
           <text x="110" y="56.7" textAnchor="middle" className="diagram-symbol__terminal-label">{getTerminalLabelText("out-bottom", "4")}</text>
         </svg>
       );
+    case "SELECTOR_3POS":
+      return renderSelector3Pos(options.selectorPosition ?? 2, symbolClassName);
     case "SWITCH_1P":
       return (
         <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
@@ -3151,6 +3215,7 @@ function createCanvasComponent(
     ...(type === "LAMP" ? { lampGlowColor: DEFAULT_LAMP_GLOW_COLOR } : {}),
     ...(isMaintainedSwitchType(type) ? { isClosed: type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT" } : {}),
     ...(isBreakerType(type) ? { isClosed: true } : {}),
+    ...(isSelector3PosType(type) ? { selectorPosition: 2 as const } : {}),
     ...(isMomentaryPushButtonType(type) ? { isPressed: false } : {}),
     ...(isSourceType(type) ? { sourceVoltage: getDefaultSourceVoltage(type) } : {})
   };
@@ -4122,6 +4187,12 @@ function getComponentGlyphHitboxStyle(type: BuilderComponentType, rotation: numb
       : { height: 92, width: 138 };
   }
 
+  if (type === "SELECTOR_3POS") {
+    return vertical
+      ? { height: 102, width: 158 }
+      : { height: 102, width: 158 };
+  }
+
   switch (getSymbolCategory(type)) {
     case "power":
       return vertical
@@ -4290,6 +4361,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [selection, setSelection] = useState<BuilderSelection>(null);
   const [selectedComponentIds, setSelectedComponentIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedComponentIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const selectorDirectionRef = useRef<Map<string, 1 | -1>>(new Map());
   const runningRef = useRef(running);
   runningRef.current = running;
   const contextMenuRef = useRef<ContextMenuHandle>(null);
@@ -5194,7 +5266,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const resolvedWires = useMemo(
     () => wires.map((wire) => ({
       ...wire,
-      points: resolveWireDisplayPoints(wire, components, planeSettings)
+      points: resolveWireDisplayPoints(wire, components, planeSettings),
+      selectorTrimmed: wireHasSelectorEndpoint(wire, components)
     })),
     [components, planeSettings, wires]
   );
@@ -5241,6 +5314,26 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const previewPoints = draftWirePoints.length > 0 && cursorPoint !== null
     ? [...draftWirePoints, cursorPoint]
     : draftWirePoints;
+  const previewPort = previewPoints.length >= 2
+    ? findNearestPort(previewPoints[0]!, components)
+    : null;
+  const previewComponent = previewPort
+    ? components.find((component) => component.id === previewPort.componentId) ?? null
+    : null;
+  const previewIsSelector = previewPort !== null
+    && previewComponent?.type === "SELECTOR_3POS"
+    && previewPoints.length >= 2;
+  const previewTrimmed = previewIsSelector
+    ? trimSelectorWireEndpoint(
+        previewPoints[0]!,
+        previewPoints[1]!,
+        previewComponent!,
+        previewPort!.terminalId
+      )
+    : null;
+  const previewDisplayPoints = previewIsSelector
+    ? (previewTrimmed ? [previewTrimmed, ...previewPoints.slice(1)] : [])
+    : previewPoints;
   const wireDisplayNodes = Array.from(
     wireNodeWires.reduce((nodesByPointKey, wire) => {
       const isSelected = selection?.kind === "wire" && selection.id === wire.id;
@@ -6191,6 +6284,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       componentType: component.type,
       kind: "component",
       ...(component.lampGlowColor ? { lampGlowColor: component.lampGlowColor } : {}),
+      ...(isSelector3PosType(component.type)
+        ? { selectorPosition: component.selectorPosition ?? 2 }
+        : {}),
       selectedComponentIds: selectedIds
     });
   }
@@ -7015,7 +7111,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return false;
     }
 
-    return isMaintainedSwitchType(component.type) || isBreakerType(component.type);
+    return isMaintainedSwitchType(component.type)
+      || isBreakerType(component.type)
+      || isSelector3PosType(component.type);
   }
 
   function scheduleComponentToggle(componentId: string) {
@@ -7031,10 +7129,46 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function toggleComponentOperate(componentId: string) {
+    const component = componentsRef.current.find((entry) => entry.id === componentId);
+
+    if (component && isSelector3PosType(component.type)) {
+      const currentPosition = component.selectorPosition ?? 2;
+      const direction = selectorDirectionRef.current.get(componentId) ?? 1;
+      const next = getNextSelectorPosition(currentPosition, direction);
+
+      selectorDirectionRef.current.set(componentId, next.direction);
+      setComponents((currentComponents) =>
+        currentComponents.map((entry) =>
+          entry.id === componentId && isSelector3PosType(entry.type)
+            ? { ...entry, selectorPosition: next.position }
+            : entry
+        )
+      );
+      selectComponentById(componentId);
+      setHasCustomLayout(true);
+      return;
+    }
+
     setComponents((currentComponents) =>
       toggleComponentOperateState(currentComponents, componentId)
     );
     selectComponentById(componentId);
+    setHasCustomLayout(true);
+  }
+
+  function applySelectorPosition(
+    componentIds: string[],
+    position: Selector3PosPosition
+  ) {
+    const ids = new Set(componentIds);
+
+    setComponents((currentComponents) =>
+      currentComponents.map((component) =>
+        ids.has(component.id) && isSelector3PosType(component.type)
+          ? { ...component, selectorPosition: position }
+          : component
+      )
+    );
     setHasCustomLayout(true);
   }
 
@@ -7829,6 +7963,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   const energizedCurrentType = electricalState.energizedWireCurrentById.get(wire.id) ?? "ac";
                   const strokeWidth = isSelected ? wire.thickness + 0.75 : wire.thickness;
                   const hitStrokeWidth = Math.max(18, wire.thickness + 10);
+                  const selectorTrimmed = wire.selectorTrimmed;
 
                   return (
                     <g key={wire.id}>
@@ -7836,25 +7971,37 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         className={`freeplay-wire ${isSelected ? "freeplay-wire--selected" : ""}`.trim()}
                         d={wirePathD}
                         stroke={wire.color}
-                        style={{ strokeWidth }}
+                        style={{
+                          strokeWidth,
+                          ...(selectorTrimmed ? { strokeLinecap: "butt" as const } : {})
+                        }}
                       />
                       {isEnergized ? (
                         <path
                           className={`freeplay-wire freeplay-wire--energized freeplay-wire--energized-${energizedCurrentType}`.trim()}
                           d={wirePathD}
-                          style={{ strokeWidth: wire.thickness + 1 }}
+                          style={{
+                            strokeWidth: wire.thickness + 1,
+                            ...(selectorTrimmed ? { strokeLinecap: "butt" as const } : {})
+                          }}
                         />
                       ) : isIdle ? (
                         <path
                           className={`freeplay-wire freeplay-wire--idle freeplay-wire--idle-${idleCurrentType}`.trim()}
                           d={wirePathD}
-                          style={{ strokeWidth: wire.thickness + 0.8 }}
+                          style={{
+                            strokeWidth: wire.thickness + 0.8,
+                            ...(selectorTrimmed ? { strokeLinecap: "butt" as const } : {})
+                          }}
                         />
                       ) : null}
                       <polyline
                         className="freeplay-wire__hit"
                         points={pointString}
-                        style={{ strokeWidth: hitStrokeWidth }}
+                        style={{
+                          strokeWidth: hitStrokeWidth,
+                          ...(selectorTrimmed ? { strokeLinecap: "butt" as const } : {})
+                        }}
                         onPointerDown={(event) => {
                           if (event.pointerType === "touch") {
                             startLongPress(event, () => openWireContextMenu(
@@ -8000,12 +8147,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     r={5}
                   />
                 ) : null}
-                {previewPoints.length >= 1 ? (
+                {previewDisplayPoints.length >= 1 ? (
                   <polyline
                     className="freeplay-wire freeplay-wire--draft"
-                    points={previewPoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                    points={previewDisplayPoints.map((point) => `${point.x},${point.y}`).join(" ")}
                     stroke={wireColor}
-                    style={{ strokeWidth: wireThickness }}
+                    style={{
+                      strokeWidth: wireThickness,
+                      ...(previewIsSelector ? { strokeLinecap: "butt" as const } : {})
+                    }}
                   />
                 ) : null}
                 </svg>
@@ -8029,8 +8179,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     && !isMomentaryPushButtonType(component.type)
                     && !isContactType(component.type);
                   const pushButtonPressed = isMomentaryPushButtonType(component.type) && isMomentaryPushButtonPressed(component);
-                  const manualControl = isMaintainedSwitchType(component.type) || isMomentaryPushButtonType(component.type);
-                  const manualControlActive = pushButtonPressed || (isMaintainedSwitchType(component.type) && isMaintainedSwitchClosed(component));
+                  const manualControl = isMaintainedSwitchType(component.type)
+                    || isMomentaryPushButtonType(component.type)
+                    || isSelector3PosType(component.type);
+                  const manualControlActive = pushButtonPressed
+                    || (isMaintainedSwitchType(component.type) && isMaintainedSwitchClosed(component))
+                    || (isSelector3PosType(component.type) && (component.selectorPosition ?? 2) !== 2);
                   const glyphHitboxStyle = getComponentGlyphHitboxStyle(component.type, component.rotation);
                   const pushButtonPressTargetStyle = isMomentaryPushButtonType(component.type)
                     ? getPushButtonPressTargetStyle(component.rotation)
@@ -8263,6 +8417,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           estopPressed: component.type === "ESTOP" && component.isPressed === true,
                           label: component.label,
                           pushButtonPressed,
+                          ...(isSelector3PosType(component.type)
+                            ? { selectorPosition: component.selectorPosition ?? 2 }
+                            : {}),
                           terminalLabels: component.terminalLabels,
                           ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {}),
                           ...(isMaintainedSwitchType(component.type) ? { switchClosed: isMaintainedSwitchClosed(component) } : {})
@@ -8353,6 +8510,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           renameComponent: renameComponentWithHistory,
           rotateComponents,
           setLampGlowColor: applyLampGlowColor,
+          setSelectorPosition: applySelectorPosition,
           setWireColor: updateWireColorById,
           setWireThickness: updateWireThicknessById,
           simplifyWire: simplifyWireById,

@@ -121,6 +121,23 @@ export function getTerminalOutwardDirection(component: BuilderComponent, termina
     return { x: 0, y: 0 };
   }
 
+  if (terminal.direction) {
+    const turns = ((component.rotation % 4) + 4) % 4;
+    const direction = turns === 0
+      ? terminal.direction
+      : turns === 1
+        ? { x: -terminal.direction.y, y: terminal.direction.x }
+        : turns === 2
+          ? { x: -terminal.direction.x, y: -terminal.direction.y }
+          : { x: terminal.direction.y, y: -terminal.direction.x };
+
+    if (Math.abs(direction.x) >= Math.abs(direction.y)) {
+      return { x: direction.x >= 0 ? 1 : -1, y: 0 };
+    }
+
+    return { x: 0, y: direction.y >= 0 ? 1 : -1 };
+  }
+
   const rotatedPoint = rotatePoint({ x: terminal.x, y: terminal.y }, component.rotation);
   const dx = rotatedPoint.x - ROTATION_CENTER_X;
   const dy = rotatedPoint.y - ROTATION_CENTER_Y;

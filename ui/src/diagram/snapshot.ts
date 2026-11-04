@@ -31,6 +31,7 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
   "PUSH_BUTTON_NO",
   "PUSH_BUTTON_NC",
   "ESTOP",
+  "SELECTOR_3POS",
   "LIMIT_SWITCH_NO",
   "LIMIT_SWITCH_NC",
   "OL_CONTACT",
@@ -341,6 +342,23 @@ function parseCircuitSnapshotWire(value: unknown, index: number, components: Bui
   });
 }
 
+function parseCircuitSnapshotSelectorPosition(
+  value: unknown,
+  index: number
+): 1 | 2 | 3 {
+  if (value === undefined) {
+    return 2;
+  }
+
+  const position = expectCircuitSnapshotNumber(value, `Circuit component ${index} selectorPosition`);
+
+  if (position === 1 || position === 2 || position === 3) {
+    return position;
+  }
+
+  throw new Error(`Circuit component ${index} selectorPosition "${position}" is not supported.`);
+}
+
 function parseCircuitSnapshotLampGlowColor(value: unknown, index: number): LampGlowColorOption | undefined {
   const lampGlowColor = expectCircuitSnapshotOptionalString(value, `Circuit component ${index} lampGlowColor`);
 
@@ -373,6 +391,9 @@ function parseCircuitSnapshotComponent(value: unknown, index: number): BuilderCo
     ? expectCircuitSnapshotNumber(component.sourceVoltage, `Circuit component ${index} sourceVoltage`)
     : undefined;
   const lampGlowColor = parseCircuitSnapshotLampGlowColor(component.lampGlowColor, index);
+  const selectorPosition = type === "SELECTOR_3POS"
+    ? parseCircuitSnapshotSelectorPosition(component.selectorPosition, index)
+    : undefined;
   const terminalLabels = parseCircuitSnapshotTerminalLabels(
     component.terminalLabels,
     `Circuit component ${index} terminalLabels`
@@ -394,6 +415,7 @@ function parseCircuitSnapshotComponent(value: unknown, index: number): BuilderCo
     ...(isClosed !== undefined ? { isClosed } : {}),
     ...(isPressed !== undefined ? { isPressed } : {}),
     ...(type === "LAMP" && lampGlowColor !== undefined ? { lampGlowColor } : {}),
+    ...(selectorPosition !== undefined ? { selectorPosition } : {}),
     ...(sourceVoltage !== undefined ? { sourceVoltage } : {})
   });
 }

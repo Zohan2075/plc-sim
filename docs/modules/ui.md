@@ -44,6 +44,8 @@ from `@plc-sim/plc-engine` (D1).
 | `ui/src/App.css`, `ui/src/styles.css` | file | Styling (grid gradient removed in phase 4: SVG is the single grid source) |
 | `ui/src/diagram/` | dir | Sheet domain: model, grid, sheet, snapshot, symbols, geometry, palette, terminals, timing, inspection states, constants, electrical graph |
 | `ui/src/diagram/contextMenu.tsx` | file | Portal-based adaptive context menu (`ContextMenuLayer`): fixed screen coords, viewport clamp/flip, submenus, keyboard, long-press helper |
+| `ui/src/diagram/selector3pos.tsx` | file | `SELECTOR_3POS` art generated from the three supplied SVGs: every element in original order, one wrapper per state, ring centers/anchors, 3.5-unit stroke, generated stem/bar joint filler for states 1/3; `?debugTerminals=1` ring crosshairs |
+| `ui/src/diagram/wireRoute.ts` | file | Display routing: `resolveWireDisplayPoints` plus the SELECTOR_3POS ring-rim endpoint trim (stored wire points and anchors unchanged) |
 | `ui/src/compiler/` | dir | Wiring → `Program` compiler + device bindings |
 | `ui/src/solver/` | dir | Read-only electrical view |
 | `ui/src/runtime/` | dir | `EngineSession` (the one engine) |
@@ -56,7 +58,7 @@ from `@plc-sim/plc-engine` (D1).
 
 ### Specs (vitest, `test.include = src/**`)
 
-18 spec files, 954 tests: `diagram/{alignment,contextMenu,contextMenu.render,electrical-latch,grid,interaction,operate,reference-circuit,rotation,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (7), `diagram/rotation.spec.ts` (29), `diagram/interaction.spec.ts` (19), `diagram/operate.spec.ts` (3), `diagram/snapshot.spec.ts` (13), `diagram/wire-routing.spec.ts` (8), `diagram/short-circuit.spec.ts` (2).
+21 spec files, 1015 tests: `diagram/{alignment,contextMenu,contextMenu.render,electrical-latch,grid,interaction,operate,reference-circuit,rotation,selector3pos,selector3posArt,selector-wire-trim,sheet,short-circuit,snapshot,terminal-alignment,timer-reset,vertical-wires,wire-routing,wire-stubs,wireHops}`. Key spec counts: `diagram/alignment.spec.ts` (233), `diagram/contextMenu.spec.ts` (18), `diagram/contextMenu.render.spec.tsx` (8), `diagram/rotation.spec.ts` (31), `diagram/interaction.spec.ts` (19), `diagram/operate.spec.ts` (4), `diagram/selector3pos.spec.ts` (7), `diagram/selector3posArt.spec.ts` (3), `diagram/selector-wire-trim.spec.ts` (2), `diagram/snapshot.spec.ts` (14), `diagram/terminal-alignment.spec.ts` (304), `diagram/wire-routing.spec.ts` (8), `diagram/wire-stubs.spec.ts` (319), `diagram/short-circuit.spec.ts` (2).
 
 ## Key Symbols
 
@@ -91,6 +93,9 @@ from `@plc-sim/plc-engine` (D1).
 | `LAMP_GLOW_COLOR_OPTIONS`, `getLampGlowColorValue` | const/function | `DiagramBuilder.tsx:344,490` | 7 lamp colors: red, green, yellow, amber, orange, blue, white (default yellow); maps each to fill/stroke/symbol |
 | `isBreakerClosed`, `toggleComponentOperateState` | function | `DiagramBuilder.tsx:631,678` | Breaker default-closed state and latched operate for breakers + maintained switches; no running dependency |
 | `rotateComponentInScene`, `formatRotationRemovalMessage` | function | `DiagramBuilder.tsx:2196,2065` | Primary-terminal snap, attached-wire + transitive orphan-branch deletion, no re-route; toast text |
+| `renderSelector3Pos`, `Selector3PosPosition` | component/type | `diagram/selector3pos.tsx` | 3-state 4-terminal selector art generated from the supplied SVGs; all elements in original order; per-state wrapper; local ring centers (53,24)/(107,24)/(53,78)/(107,78) = terminal anchors; 3.5-unit stroke; generated stem/bar joint filler for states 1/3; `currentColor` + `diagram-symbol--energized`; `selectorPosition` 1/2/3; `?debugTerminals=1` draws ring crosshairs |
+| `getNextSelectorPosition` | function | `DiagramBuilder.tsx` | Direction-aware 1-2-3-2-1 click cycle for the maintained 3-position selector |
+| `trimSelectorWireEndpoint`, `wireHasSelectorEndpoint` | function | `diagram/wireRoute.ts` | Shortens only the drawn SELECTOR_3POS wire end to the rendered ring outer ellipse; stored points and other components unchanged |
 
 ### `src/compiler`
 

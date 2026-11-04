@@ -44,6 +44,31 @@ describe("circuit snapshot v1 fixture (an actual v1 snapshot: version 1, no shee
     expect(byId.size).toBe(source.length);
   });
 
+  it("defaults a missing selectorPosition to 2 and preserves an explicit 3", () => {
+    const raw = JSON.parse(JSON.stringify(rawV1)) as {
+      components: Array<Record<string, unknown>>;
+    };
+    raw.components.push({
+      id: "builder-component-selector",
+      label: "SEL",
+      rotation: 0,
+      tag: null,
+      type: "SELECTOR_3POS",
+      usesCustomLabel: false,
+      x: 500,
+      y: 300
+    });
+
+    const oldSnapshot = parseCircuitSnapshot(raw);
+    const oldSelector = oldSnapshot.components.find((component) => component.id === "builder-component-selector");
+    expect(oldSelector?.selectorPosition).toBe(2);
+
+    raw.components[raw.components.length - 1]!.selectorPosition = 3;
+    const explicitSnapshot = parseCircuitSnapshot(raw);
+    const explicitSelector = explicitSnapshot.components.find((component) => component.id === "builder-component-selector");
+    expect(explicitSelector?.selectorPosition).toBe(3);
+  });
+
   it("accepts and preserves amber/orange lamp glow colors", () => {
     for (const color of ["amber", "orange"] as const) {
       const raw = JSON.parse(JSON.stringify(rawV1)) as {

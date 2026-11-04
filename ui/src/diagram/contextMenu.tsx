@@ -28,6 +28,7 @@ export interface ContextMenuTarget {
   componentType?: BuilderComponentType;
   lampGlowColor?: LampGlowColorOption;
   selectedComponentIds?: string[];
+  selectorPosition?: 1 | 2 | 3;
   wire?: BuilderWire;
 }
 
@@ -41,6 +42,7 @@ export interface ContextMenuActions {
   renameComponent: (id: string, label: string) => void;
   rotateComponents: (ids: string[], action: RotationAction) => void;
   setLampGlowColor: (ids: string[], color: LampGlowColorOption) => void;
+  setSelectorPosition: (ids: string[], position: 1 | 2 | 3) => void;
   setWireColor: (id: string, color: string) => void;
   setWireThickness: (id: string, thickness: number) => void;
   simplifyWire: (id: string) => void;
@@ -240,6 +242,37 @@ export function buildComponentMenu(
       label: "Rotate"
     }
   ];
+
+  if (target.componentType === "SELECTOR_3POS") {
+    items.push({
+      id: "selector-position",
+      items: [
+        {
+          checked: (target.selectorPosition ?? 2) === 1,
+          id: "selector-position-1",
+          kind: "action",
+          label: "1st contact",
+          onSelect: () => actions.setSelectorPosition(selectedIds, 1)
+        },
+        {
+          checked: (target.selectorPosition ?? 2) === 2,
+          id: "selector-position-2",
+          kind: "action",
+          label: "2nd OFF",
+          onSelect: () => actions.setSelectorPosition(selectedIds, 2)
+        },
+        {
+          checked: (target.selectorPosition ?? 2) === 3,
+          id: "selector-position-3",
+          kind: "action",
+          label: "3rd contact",
+          onSelect: () => actions.setSelectorPosition(selectedIds, 3)
+        }
+      ],
+      kind: "submenu",
+      label: "Position"
+    });
+  }
 
   if (target.componentType === "LAMP") {
     items.push({

@@ -17,6 +17,7 @@ import {
   getTerminalStubEnd,
   simplifyWirePoints
 } from "./grid";
+import { SELECTOR_3POS_RING_RADII } from "./selector3posArt.generated";
 
 const EPSILON = 0.01;
 
@@ -729,7 +730,7 @@ function appendOrthogonal(
  * Ruta VISUAL del cable. Los extremos se recalculan desde el terminal en cada
  * render; la pata corta hasta la rejilla pertenece al cable, no al glifo.
  */
-export function resolveWireDisplayPoints(
+function resolveWireDisplayPointsBase(
   wire: BuilderWire,
   components: readonly BuilderComponent[],
   planeSettings: BuilderPlaneSettings
@@ -849,6 +850,169 @@ export function resolveWireDisplayPoints(
   }
 
   return wire.points;
+}
+
+function getSelectorRingOuterRadius(
+  component: BuilderComponent,
+  terminalId: string,
+  direction: Point
+): number | null {
+  if (component.type !== "SELECTOR_3POS") {
+    return null;
+  }
+
+  const state = component.selectorPosition ?? 2;
+  const radii = SELECTOR_3POS_RING_RADII[state][terminalId as keyof typeof SELECTOR_3POS_RING_RADII[2]];
+
+  if (!radii) {
+    return null;
+  }
+
+  const turns = ((component.rotation % 4) + 4) % 4;
+  let localX = direction.x;
+  let localY = direction.y;
+
+  switch (turns) {
+    case 1:
+      localX = direction.y;
+      localY = -direction.x;
+      break;
+    case 2:
+      localX = -direction.x;
+      localY = -direction.y;
+      break;
+    case 3:
+      localX = -direction.y;
+      localY = direction.x;
+      break;
+    default:
+      break;
+  }
+
+  const length = Math.hypot(localX, localY);
+
+  if (length < EPSILON) {
+    return null;
+  }
+
+  const unitX = localX / length;
+  const unitY = localY / length;
+
+  return 1 / Math.sqrt(
+    (unitX / radii.outerX) ** 2 + (unitY / radii.outerY) ** 2
+  );
+}
+
+export function trimSelectorWireEndpoint(
+  anchor: Point,
+  adjacent: Point,
+  component: BuilderComponent,
+  terminalId: string
+): Point | null {
+  if (component.type !== "SELECTOR_3POS") {
+    return adjacent;
+  }
+
+  const deltaX = adjacent.x - anchor.x;
+  const deltaY = adjacent.y - anchor.y;
+  const length = Math.hypot(deltaX, deltaY);
+
+  if (length < EPSILON) {
+    return null;
+  }
+
+  const radius = getSelectorRingOuterRadius(component, terminalId, { x: deltaX, y: deltaY });
+
+  if (radius === null) {
+    return adjacent;
+  }
+
+  if (length <= radius + EPSILON) {
+    return null;
+  }
+
+  const scale = radius / length;
+
+  return {
+    x: anchor.x + deltaX * scale,
+    y: anchor.y + deltaY * scale
+  };
+}
+
+function trimSelectorWireEnds(
+  points: Point[],
+  wire: BuilderWire,
+  components: readonly BuilderComponent[]
+): Point[] {
+  if (points.length < 2) {
+    return points;
+  }
+
+  const refs = buildTerminalRefs(components);
+  const startRef = resolveAttachedTerminal(wire.startPortId, refs);
+  const endRef = resolveAttachedTerminal(wire.endPortId, refs);
+  let next = points;
+
+  if (startRef?.component.type === "SELECTOR_3POS") {
+    const trimmed = trimSelectorWireEndpoint(
+      startRef.anchor,
+      points[1]!,
+      startRef.component,
+      startRef.terminalId
+    );
+
+    if (!trimmed) {
+      return [];
+    }
+
+    next = points.slice();
+    next[0] = trimmed;
+  }
+
+  if (endRef?.component.type === "SELECTOR_3POS") {
+    const trimmed = trimSelectorWireEndpoint(
+      endRef.anchor,
+      next[next.length - 2]!,
+      endRef.component,
+      endRef.terminalId
+    );
+
+    if (!trimmed) {
+      return [];
+    }
+
+    if (next === points) {
+      next = points.slice();
+    }
+
+    next[next.length - 1] = trimmed;
+  }
+
+  return next;
+}
+
+export function resolveWireDisplayPoints(
+  wire: BuilderWire,
+  components: readonly BuilderComponent[],
+  planeSettings: BuilderPlaneSettings
+): Point[] {
+  return trimSelectorWireEnds(
+    resolveWireDisplayPointsBase(wire, components, planeSettings),
+    wire,
+    components
+  );
+}
+
+export function wireHasSelectorEndpoint(
+  wire: BuilderWire,
+  components: readonly BuilderComponent[]
+): boolean {
+  const refs = buildTerminalRefs(components);
+  const startRef = resolveAttachedTerminal(wire.startPortId, refs);
+  const endRef = resolveAttachedTerminal(wire.endPortId, refs);
+
+  return startRef?.component.type === "SELECTOR_3POS"
+    || endRef?.component.type === "SELECTOR_3POS";
 }
 
 export function getWireTerminalRoutes(

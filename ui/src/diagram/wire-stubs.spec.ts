@@ -9,6 +9,7 @@ import type { BuilderComponent, BuilderComponentType, BuilderPlaneSettings, Buil
 import { clampSceneToPlane, getTerminalOutwardDirection, snapComponentToPlaneGrid } from "./grid";
 import { collapseWireRoute, resolveWireDisplayPoints } from "./wireRoute";
 import { reconcileWireTopology } from "./wireTopology";
+import { SELECTOR_3POS_RING_RADII } from "./selector3posArt.generated";
 
 const planeSettings: BuilderPlaneSettings = { gridSpacing: 18, height: 20000, width: 4200 };
 const Y_POSITIONS = [0, 500, 5000, 20000];
@@ -58,6 +59,41 @@ function wireBetween(
 function expectPointClose(actual: { x: number; y: number }, expected: { x: number; y: number }): void {
   expect(Math.abs(actual.x - expected.x)).toBeLessThan(0.01);
   expect(Math.abs(actual.y - expected.y)).toBeLessThan(0.01);
+}
+
+function selectorOuterRadius(
+  component: BuilderComponent,
+  terminalId: string,
+  direction: Point
+): number {
+  const state = component.selectorPosition ?? 2;
+  const radii = SELECTOR_3POS_RING_RADII[state][terminalId as keyof typeof SELECTOR_3POS_RING_RADII[2]];
+  const turns = ((component.rotation % 4) + 4) % 4;
+  let localX = direction.x;
+  let localY = direction.y;
+
+  switch (turns) {
+    case 1:
+      localX = direction.y;
+      localY = -direction.x;
+      break;
+    case 2:
+      localX = -direction.x;
+      localY = -direction.y;
+      break;
+    case 3:
+      localX = -direction.y;
+      localY = direction.x;
+      break;
+    default:
+      break;
+  }
+
+  const length = Math.hypot(localX, localY);
+
+  return 1 / Math.sqrt(
+    (localX / length / radii.outerX) ** 2 + (localY / length / radii.outerY) ** 2
+  );
 }
 
 describe("original terminal anchors", () => {
@@ -236,8 +272,27 @@ describe("stacked components across large Y and all rotations", () => {
 
           expect(route).toHaveLength(2);
           expect(Math.abs(route[0]!.x - route[1]!.x)).toBeLessThan(0.01);
-          expectPointClose(route[0]!, startTerminal);
-          expectPointClose(route[1]!, endTerminal);
+
+          if (type === "SELECTOR_3POS") {
+            const startDirection = {
+              x: route[1]!.x - startTerminal.x,
+              y: route[1]!.y - startTerminal.y
+            };
+            const endDirection = {
+              x: route[0]!.x - endTerminal.x,
+              y: route[0]!.y - endTerminal.y
+            };
+            const startRadius = selectorOuterRadius(start, terminalId, startDirection);
+            const endRadius = selectorOuterRadius(end, terminalId, endDirection);
+            const startDistance = Math.hypot(route[0]!.x - startTerminal.x, route[0]!.y - startTerminal.y);
+            const endDistance = Math.hypot(route[1]!.x - endTerminal.x, route[1]!.y - endTerminal.y);
+
+            expect(Math.abs(startDistance - startRadius)).toBeLessThan(0.01);
+            expect(Math.abs(endDistance - endRadius)).toBeLessThan(0.01);
+          } else {
+            expectPointClose(route[0]!, startTerminal);
+            expectPointClose(route[1]!, endTerminal);
+          }
         });
       }
     }

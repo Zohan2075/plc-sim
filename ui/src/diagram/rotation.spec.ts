@@ -29,6 +29,7 @@ const TYPES: BuilderComponentType[] = [
   "PUSH_BUTTON_NC",
   "PUSH_BUTTON_NO",
   "ESTOP",
+  "SELECTOR_3POS",
   "NCTO",
   "NOTC",
   "BREAKER_1P",
