@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="347" height="100" viewBox="0 0 347 100">
+  <title>SPST-Switch - Copy.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M140 66 C140 76.493 131.493 85 121 85 C110.507 85 102 76.493 102 66 C102 55.507 110.507 47 121 47 C131.493 47 140 55.507 140 66 Z" fill="#ffffff" fill-rule="evenodd" stroke="#000000" stroke-width="5"/>
+    <path d="M229 66 L322 66 M7 66 L100 66 M138.163 69 L215 69" fill="none" stroke="#000000" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M228 66 C228 76.493 219.493 85 209 85 C198.507 85 190 76.493 190 66 C190 55.507 198.507 47 209 47 C219.493 47 228 55.507 228 66 Z" fill="#ffffff" fill-rule="evenodd" stroke="#000000" stroke-width="5"/>
+  </g>
+</svg>
