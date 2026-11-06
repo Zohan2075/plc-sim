@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 236.058 232.671">
+  <defs>
+    <style>
+      .cls-1{fill:#153047}
+      .cls-2{fill:#ffffff;stroke:#153047;stroke-width:4.375;stroke-linecap:round;stroke-linejoin:round}
+      .cls-3{fill:none;stroke:#153047;stroke-width:4.375;stroke-linecap:round;stroke-linejoin:round}
+    </style>
+  </defs>
+  <title>Preassure switch</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M125.84 167.929 L125.84 157.75 L130.214 157.761 L130.214 167.934 L139.279 167.934 L145.794 189.051 L109.434 189.051 L115.934 167.934 Z M124.743 171.917 C122.797 171.854 120.838 171.909 118.891 171.909 L114.88 185.075 L140.24 185.075 L136.418 171.909 C134.693 171.909 132.949 171.841 131.225 171.929" class="cls-1"/>
+    <circle cx="80.026" cy="132.633" r="8" class="cls-2"/>
+    <circle cx="176.026" cy="132.633" r="8" class="cls-2"/>
+    <line x1="88.026" y1="127.008" x2="160.526" y2="145.758" class="cls-3"/>
+    <line x1="128.026" y1="138.883" x2="128.026" y2="157.633" class="cls-3"/>
+    <circle cx="76.078" cy="66.02" r="8" class="cls-2"/>
+    <circle cx="172.078" cy="66.02" r="8" class="cls-2"/>
+    <line x1="84.078" y1="66.02" x2="164.078" y2="57.27" class="cls-3"/>
+    <line x1="124.078" y1="62.27" x2="124.078" y2="79.822" class="cls-3"/>
+    <path d="M121.874 89.947 L121.888 79.785 L126.265 79.897 L126.251 89.947 L135.292 89.947 L141.807 111.064 L105.447 111.064 L111.947 89.947 Z M120.77 93.931 C118.824 93.867 116.865 93.923 114.918 93.923 L110.907 107.089 L136.267 107.089 L132.445 93.923 C130.72 93.923 128.976 93.854 127.252 93.943" class="cls-1"/>
+  </g>
+</svg>

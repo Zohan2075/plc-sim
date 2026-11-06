@@ -16,6 +16,8 @@ export interface GeneratedSymbolElement {
   fillRule?: "evenodd" | "nonzero";
   stroke?: string;
   strokeWidth?: number;
+  strokeLinecap?: "butt" | "round" | "square";
+  strokeLinejoin?: "miter" | "round" | "bevel";
 }
 
 export interface GeneratedSymbolPoint {
@@ -52,11 +54,11 @@ export const OFF_DELAY_ART: { NCTC: GeneratedSymbol; NOTO: GeneratedSymbol } = {
     tightBounds: {"bottom":92.93350000000001,"left":21.81250000000002,"right":138.1875,"top":37.56249999999999},
     elements: [
       { d: "M200.01 115.4 L199.786 68.674 L204.068 68.674 L204.021 115.282 Z", fill: "currentColor", stroke: "none" },
-      { tag: "line", x1: 214.622, y1: 99.474, x2: 202.122, y2: 114.474, fill: "none", stroke: "currentColor", strokeWidth: 4.375 },
-      { tag: "line", x1: 189.258, y1: 99.479, x2: 201.758, y2: 114.479, fill: "none", stroke: "currentColor", strokeWidth: 4.375 },
+      { tag: "line", x1: 214.622, y1: 99.474, x2: 202.122, y2: 114.474, fill: "none", stroke: "currentColor", strokeWidth: 4.375, strokeLinecap: "round", strokeLinejoin: "round" },
+      { tag: "line", x1: 189.258, y1: 99.479, x2: 201.758, y2: 114.479, fill: "none", stroke: "currentColor", strokeWidth: 4.375, strokeLinecap: "round", strokeLinejoin: "round" },
       { tag: "circle", cx: 152.756, cy: 72.233, r: 8, fill: "#ffffff", stroke: "currentColor", strokeWidth: 4.375 },
       { tag: "circle", cx: 248.756, cy: 72.233, r: 8, fill: "#ffffff", stroke: "currentColor", strokeWidth: 4.375 },
-      { tag: "line", x1: 160.756, y1: 72.233, x2: 240.756, y2: 63.483, fill: "none", stroke: "currentColor", strokeWidth: 4.375 },
+      { tag: "line", x1: 160.756, y1: 72.233, x2: 240.756, y2: 63.483, fill: "none", stroke: "currentColor", strokeWidth: 4.375, strokeLinecap: "round", strokeLinejoin: "round" },
     ]
   },
   NOTO: {
@@ -70,10 +72,10 @@ export const OFF_DELAY_ART: { NCTC: GeneratedSymbol; NOTO: GeneratedSymbol } = {
     elements: [
       { tag: "circle", cx: 152.778, cy: 201.082, r: 8, fill: "#ffffff", stroke: "currentColor", strokeWidth: 4.375 },
       { tag: "circle", cx: 248.747, cy: 201.155, r: 8, fill: "#ffffff", stroke: "currentColor", strokeWidth: 4.375 },
-      { tag: "line", x1: 162.167, y1: 200.639, x2: 239.481, y2: 222.98, fill: "none", stroke: "currentColor", strokeWidth: 4.375 },
+      { tag: "line", x1: 162.167, y1: 200.639, x2: 239.481, y2: 222.98, fill: "none", stroke: "currentColor", strokeWidth: 4.375, strokeLinecap: "round", strokeLinejoin: "round" },
       { d: "M199.469 259.76 L199.245 213.035 L203.527 213.035 L203.48 259.642 Z", fill: "currentColor", stroke: "none" },
-      { tag: "line", x1: 214.081, y1: 243.835, x2: 201.581, y2: 258.835, fill: "none", stroke: "currentColor", strokeWidth: 4.375 },
-      { tag: "line", x1: 188.717, y1: 243.84, x2: 201.217, y2: 258.84, fill: "none", stroke: "currentColor", strokeWidth: 4.375 },
+      { tag: "line", x1: 214.081, y1: 243.835, x2: 201.581, y2: 258.835, fill: "none", stroke: "currentColor", strokeWidth: 4.375, strokeLinecap: "round", strokeLinejoin: "round" },
+      { tag: "line", x1: 188.717, y1: 243.84, x2: 201.217, y2: 258.84, fill: "none", stroke: "currentColor", strokeWidth: 4.375, strokeLinecap: "round", strokeLinejoin: "round" },
     ]
   },
 };

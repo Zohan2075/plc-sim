@@ -16,6 +16,8 @@ export interface GeneratedSymbolElement {
   fillRule?: "evenodd" | "nonzero";
   stroke?: string;
   strokeWidth?: number;
+  strokeLinecap?: "butt" | "round" | "square";
+  strokeLinejoin?: "miter" | "round" | "bevel";
 }
 
 export interface GeneratedSymbolPoint {

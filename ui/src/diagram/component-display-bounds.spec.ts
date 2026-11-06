@@ -11,13 +11,41 @@ import {
 import type { BuilderComponent, BuilderComponentType, Point } from "../DiagramBuilder";
 import { OFF_DELAY_ART } from "./offDelayArt.generated";
 import { LEVEL_SWITCH_ART } from "./levelSwitchArt.generated";
+import { SENSOR_SWITCH_ART } from "./sensorSwitchArt.generated";
+
+const SENSOR_SWITCH_TYPES = [
+  "TEMPERATURE_SWITCH",
+  "FLOW_SWITCH",
+  "PRESSURE_SWITCH"
+] as const;
 
 const RESIZED_TYPES: BuilderComponentType[] = [
   "NOTO",
   "NCTC",
   "LEVEL_SWITCH_NO",
-  "LEVEL_SWITCH_NC"
+  "LEVEL_SWITCH_NC",
+  ...SENSOR_SWITCH_TYPES
 ];
+
+function expectedArt(type: BuilderComponentType, closed = false) {
+  if (type === "NOTO") {
+    return OFF_DELAY_ART.NOTO;
+  }
+
+  if (type === "NCTC") {
+    return OFF_DELAY_ART.NCTC;
+  }
+
+  if (type === "LEVEL_SWITCH_NO" || type === "LEVEL_SWITCH_NC") {
+    return closed ? LEVEL_SWITCH_ART.LEVEL_SWITCH_NC : LEVEL_SWITCH_ART.LEVEL_SWITCH_NO;
+  }
+
+  if (type === "TEMPERATURE_SWITCH" || type === "FLOW_SWITCH" || type === "PRESSURE_SWITCH") {
+    return closed ? SENSOR_SWITCH_ART[type].closed : SENSOR_SWITCH_ART[type].open;
+  }
+
+  throw new Error(`No resized art fixture for ${type}`);
+}
 
 function makeComponent(type: BuilderComponentType, x: number, y: number, rotation: number): BuilderComponent {
   return {
@@ -52,10 +80,7 @@ function expectedRotatedBounds(bounds: { bottom: number; left: number; right: nu
 
 describe("resized component display bounds and logical-frame offsets", () => {
   it.each(RESIZED_TYPES)("%s keeps its tight root and every logical child at the saved origin", (type) => {
-    const art = type === "NOTO" ? OFF_DELAY_ART.NOTO
-      : type === "NCTC" ? OFF_DELAY_ART.NCTC
-        : type === "LEVEL_SWITCH_NO" ? LEVEL_SWITCH_ART.LEVEL_SWITCH_NO
-          : LEVEL_SWITCH_ART.LEVEL_SWITCH_NO;
+    const art = expectedArt(type, false);
 
     for (const rotation of [0, 1, 2, 3]) {
       for (const [x, y] of [[126, 198], [648, 378]] as const) {
@@ -108,6 +133,36 @@ describe("resized component display bounds and logical-frame offsets", () => {
     expect(openBounds).not.toEqual(closedBounds);
     expect(getComponentLogicalStageOffset(openBounds)).toEqual({ left: -openBounds.left, top: -openBounds.top });
     expect(getComponentLogicalStageOffset(closedBounds)).toEqual({ left: -closedBounds.left, top: -closedBounds.top });
+  });
+
+  it("uses the active sensor-switch state (open when unset/false, closed when true)", () => {
+    for (const type of SENSOR_SWITCH_TYPES) {
+      const defaultOpen = makeComponent(type, 342, 324, 0);
+      const explicitOpen = { ...defaultOpen, isClosed: false };
+      const closed = { ...defaultOpen, isClosed: true };
+      const defaultBounds = getComponentDisplayBounds(defaultOpen);
+      const explicitOpenBounds = getComponentDisplayBounds(explicitOpen);
+      const closedBounds = getComponentDisplayBounds(closed);
+      const openArt = SENSOR_SWITCH_ART[type].open;
+      const closedArt = SENSOR_SWITCH_ART[type].closed;
+
+      expect(defaultBounds).toEqual(explicitOpenBounds);
+      expect(explicitOpenBounds).not.toEqual(closedBounds);
+      expect(explicitOpenBounds).toMatchObject(expectedRotatedBounds(openArt.tightBounds, 0));
+      expect(closedBounds).toMatchObject(expectedRotatedBounds(closedArt.tightBounds, 0));
+
+      for (const rotation of [0, 1, 2, 3]) {
+        const openComponent = { ...defaultOpen, rotation };
+        const closedComponent = { ...closed, rotation };
+
+        expect(getComponentDisplayBounds(openComponent)).toMatchObject(
+          expectedRotatedBounds(openArt.tightBounds, rotation)
+        );
+        expect(getComponentDisplayBounds(closedComponent)).toMatchObject(
+          expectedRotatedBounds(closedArt.tightBounds, rotation)
+        );
+      }
+    }
   });
 
   it("does not expose the resized-box helper for selector or older types", () => {

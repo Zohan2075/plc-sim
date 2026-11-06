@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 273.794 210.92">
+  <defs>
+    <style>
+      .cls-1{fill:#153047}
+      .cls-2{fill:#ffffff;stroke:#153047;stroke-width:4.375;stroke-linecap:round;stroke-linejoin:round}
+      .cls-3{fill:none;stroke:#153047;stroke-width:4.375;stroke-linecap:round;stroke-linejoin:round}
+    </style>
+  </defs>
+  <title>Temperature switch</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M75.697 61.593 L75.697 50.173 L80.071 50.186 L80.071 58.438 L89.439 60.455 L89.439 73.537 L59.737 73.537 L59.737 81.02 L78.808 81.02 L78.808 100.704 L74.828 100.704 L74.828 84.995 L55.757 84.995 L55.757 69.487 L85.459 69.487 L85.459 63.616 Z" class="cls-1"/>
+    <circle cx="29.884" cy="32.935" r="8" class="cls-2"/>
+    <circle cx="125.884" cy="32.935" r="8" class="cls-2"/>
+    <line x1="37.884" y1="32.935" x2="117.884" y2="24.185" class="cls-3"/>
+    <line x1="77.884" y1="29.185" x2="77.884" y2="56.685" class="cls-3"/>
+    <circle cx="132.682" cy="111.883" r="8" class="cls-2"/>
+    <circle cx="228.682" cy="111.883" r="8" class="cls-2"/>
+    <line x1="140.682" y1="106.258" x2="213.182" y2="125.008" class="cls-3"/>
+    <line x1="180.682" y1="118.133" x2="180.682" y2="136.883" class="cls-3"/>
+    <path d="M178.494 148.21 L178.494 136.747 L182.867 136.776 L182.867 145.057 L192.378 147.066 L192.378 160.148 L162.676 160.148 L162.676 167.631 L181.747 167.631 L181.747 187.315 L177.767 187.315 L177.767 171.606 L158.696 171.606 L158.696 156.098 L188.398 156.098 L188.398 150.228 Z" class="cls-1"/>
+  </g>
+</svg>

@@ -71,6 +71,9 @@ describe("operate actions (no simulator-running dependency)", () => {
       "LIMIT_SWITCH_NC",
       "LEVEL_SWITCH_NO",
       "LEVEL_SWITCH_NC",
+      "TEMPERATURE_SWITCH",
+      "FLOW_SWITCH",
+      "PRESSURE_SWITCH",
       "OL_CONTACT"
     ] as const) {
       const initial = component(type, { isClosed: false });
@@ -134,6 +137,32 @@ describe("operate actions (no simulator-running dependency)", () => {
       const toggled = toggleComponentOperateState([level], level.id)[0]!;
       const operated = computeElectricalState([source, toggled, coil], wires, true, {});
       expect(operated.resolvedTagValues.M).toBe(type === "LEVEL_SWITCH_NO");
+    }
+  });
+
+  it("toggles process sensor switches open -> closed -> open and changes lamp conduction", () => {
+    for (const type of ["TEMPERATURE_SWITCH", "FLOW_SWITCH", "PRESSURE_SWITCH"] as const) {
+      const source = component("POWER_SOURCE", { id: `sensor-source-${type}`, x: 40, y: 40 });
+      const sensor = component(type, { id: `sensor-${type}`, x: 240, y: 40 });
+      const lamp = component("LAMP", { id: `sensor-lamp-${type}`, tag: "L", x: 440, y: 40 });
+      const wires = [
+        wire(source, "right", sensor, "in"),
+        wire(sensor, "out", lamp, "in"),
+        wire(lamp, "out", source, "left")
+      ];
+
+      const openState = computeElectricalState([source, sensor, lamp], wires, true, {});
+      expect(openState.energizedComponentIds.has(lamp.id)).toBe(false);
+
+      const closed = toggleComponentOperateState([sensor], sensor.id)[0]!;
+      expect(closed.isClosed).toBe(true);
+      const closedState = computeElectricalState([source, closed, lamp], wires, true, {});
+      expect(closedState.energizedComponentIds.has(lamp.id)).toBe(true);
+
+      const reopened = toggleComponentOperateState([closed], closed.id)[0]!;
+      expect(reopened.isClosed).toBe(false);
+      const reopenedState = computeElectricalState([source, reopened, lamp], wires, true, {});
+      expect(reopenedState.energizedComponentIds.has(lamp.id)).toBe(false);
     }
   });
 });

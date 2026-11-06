@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NOTC (normally open, timed-close) current app glyph.
+  Source geometry: ui/src/DiagramBuilder.tsx renderTimedContactGlyph("NOTC")
+  Internal viewBox: 128 x 64. Rendered component viewport: 160 x 84.
+  Terminal circles: centers (25.6,30) and (102.4,30), r=6.4.
+  Component-local terminal anchors: (32,48.5) and (128,48.5).
+  Edit the coordinates below directly; the app's wrapper scale is separate.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="160"
+     height="84"
+     viewBox="0 0 128 64"
+     fill="none"
+     stroke="#153047"
+     stroke-width="3.5"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+  <circle cx="25.6" cy="30" r="6.4" fill="#ffffff" />
+  <circle cx="102.4" cy="30" r="6.4" fill="#ffffff" />
+
+  <!-- NOTC contact arm and timer fork -->
+  <line x1="32" y1="25.5" x2="90" y2="40.5" />
+  <line x1="64" y1="35" x2="64" y2="50" />
+  <line x1="64" y1="50" x2="54" y2="61" />
+  <line x1="64" y1="50" x2="74" y2="61" />
+</svg>

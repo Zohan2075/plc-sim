@@ -624,7 +624,9 @@ function buildElementSymbol(type, elements, leftElement, rightElement, source, o
           y2: Number(element.attrs.y2),
           fill: "none",
           stroke: "currentColor",
-          strokeWidth
+          strokeWidth,
+          strokeLinecap: "round",
+          strokeLinejoin: "round"
         };
       }
 
@@ -668,6 +670,8 @@ function emit(moduleName, symbols, source, note, outputPath, artifactType) {
     "  fillRule?: \"evenodd\" | \"nonzero\";",
     "  stroke?: string;",
     "  strokeWidth?: number;",
+    "  strokeLinecap?: \"butt\" | \"round\" | \"square\";",
+    "  strokeLinejoin?: \"miter\" | \"round\" | \"bevel\";",
     "}",
     "",
     "export interface GeneratedSymbolPoint {",
@@ -725,6 +729,8 @@ function emit(moduleName, symbols, source, note, outputPath, artifactType) {
         fields.push(`fill: ${JSON.stringify(element.fill)}`);
         fields.push(`stroke: ${JSON.stringify(element.stroke)}`);
         fields.push(`strokeWidth: ${element.strokeWidth}`);
+        if (element.strokeLinecap) fields.push(`strokeLinecap: ${JSON.stringify(element.strokeLinecap)}`);
+        if (element.strokeLinejoin) fields.push(`strokeLinejoin: ${JSON.stringify(element.strokeLinejoin)}`);
       } else {
         fields.push(`d: ${JSON.stringify(element.d)}`);
         if (element.fill) fields.push(`fill: ${JSON.stringify(element.fill)}`);

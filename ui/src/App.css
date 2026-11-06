@@ -1364,6 +1364,13 @@
 	height: 74px;
 }
 
+/* The selector nests its own 160x102 component SVG. Constrain it to the
+   same preview height as every other palette glyph instead of letting its
+   inline 102px component height overflow the tile. */
+.builder-palette-tile__symbol .selector3pos-art {
+	height: 74px !important;
+}
+
 .builder-palette-tile__symbol--power,
 .freeplay-component__symbol-rotator--power {
 	color: #b45309;
@@ -1691,6 +1698,10 @@
 .builder-palette-drag-preview__symbol .diagram-symbol {
 	height: 78px;
 	width: 100%;
+}
+
+.builder-palette-drag-preview__symbol .selector3pos-art {
+	height: 78px !important;
 }
 
 .builder-palette-drag-preview__label {
@@ -3148,6 +3159,9 @@
 }
 
 .builder-ribbon__brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
 	font-family: var(--font-display);
 	font-size: 0.92rem;
 	font-weight: 800;
@@ -3156,8 +3170,16 @@
 	white-space: nowrap;
 }
 
+.builder-ribbon__brand-mark {
+	width: 32px;
+	height: 32px;
+	flex: 0 0 auto;
+	border-radius: 7px;
+	object-fit: contain;
+}
+
 .builder-ribbon__brand span {
-	margin-left: 0.5rem;
+	margin-left: 0;
 	color: var(--text-soft);
 	font-family: inherit;
 	font-size: 0.68rem;
@@ -3558,6 +3580,10 @@
 
 .builder-component-bar .builder-palette-tile__symbol .diagram-symbol {
 	height: 46px;
+}
+
+.builder-component-bar .builder-palette-tile__symbol .selector3pos-art {
+	height: 46px !important;
 }
 
 .builder-freeplay {

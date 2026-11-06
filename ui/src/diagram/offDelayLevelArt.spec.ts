@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parsePathBounds } from "../../../scripts/generate-off-delay-level-art.mjs";
 import { OFF_DELAY_ART } from "./offDelayArt.generated";
 import { LEVEL_SWITCH_ART } from "./levelSwitchArt.generated";
+import { SENSOR_SWITCH_ART } from "./sensorSwitchArt.generated";
 
 function readReferencePaths(relativePath: string): string[] {
   const raw = readFileSync(new URL(`../../../reference/${relativePath}`, import.meta.url), "utf8");
@@ -18,7 +19,7 @@ function readReferenceElements(relativePath: string) {
 
   return [...raw.matchAll(/<(path|circle|line)\b[^>]*\/>/g)].map((match) => {
     const attrs: Record<string, string> = {};
-    for (const attr of match[0].matchAll(/([a-zA-Z-]+)="([^"]*)"/g)) {
+    for (const attr of match[0].matchAll(/([a-zA-Z0-9-]+)="([^"]*)"/g)) {
       if (attr[1] && attr[2] !== undefined) {
         attrs[attr[1]] = attr[2];
       }
@@ -35,6 +36,50 @@ const offDelayPaths = readReferencePaths("Off delays contacts (on and off).svg")
 const offDelayElements = readReferenceElements("Off delays contacts (on and off).svg");
 const levelSwitchElements = readReferenceElements("Liquid level switch (on and off).svg");
 const limitSwitchPaths = new Set(readReferencePaths("NO limit switch.svg"));
+
+const SENSOR_SWITCH_SOURCES = [
+  { type: "TEMPERATURE_SWITCH", source: "Temperature switch.svg", openRange: [5, 10], closedRange: [0, 5] },
+  { type: "FLOW_SWITCH", source: "Flow switch.svg", openRange: [5, 10], closedRange: [0, 5] },
+  { type: "PRESSURE_SWITCH", source: "Pressure switch.svg", openRange: [0, 5], closedRange: [5, 10] }
+] as const;
+
+type SourceElement = ReturnType<typeof readReferenceElements>[number];
+type GeneratedSensorElement = (typeof SENSOR_SWITCH_ART)[
+  typeof SENSOR_SWITCH_SOURCES[number]["type"]
+]["open"]["elements"][number];
+
+function sourceGeometrySignature(element: SourceElement): string {
+  const { attrs, tag } = element;
+
+  if (tag === "circle") {
+    return `circle:${Number(attrs.cx)}:${Number(attrs.cy)}:${Number(attrs.r)}`;
+  }
+
+  if (tag === "line") {
+    return `line:${Number(attrs.x1)}:${Number(attrs.y1)}:${Number(attrs.x2)}:${Number(attrs.y2)}`;
+  }
+
+  return `path:${attrs.d}`;
+}
+
+function generatedGeometrySignature(element: GeneratedSensorElement): string {
+  if (element.tag === "circle") {
+    return `circle:${element.cx}:${element.cy}:${element.r}`;
+  }
+
+  if (element.tag === "line") {
+    return `line:${element.x1}:${element.y1}:${element.x2}:${element.y2}`;
+  }
+
+  return `path:${element.d}`;
+}
+
+const sensorSwitchSourceElements = new Map(
+  SENSOR_SWITCH_SOURCES.map((definition) => [
+    definition.type,
+    readReferenceElements(definition.source)
+  ])
+);
 
 describe("off-delay generated art", () => {
   it("copies the new SVG paths, lines and terminal circles without redrawing", () => {
@@ -59,6 +104,10 @@ describe("off-delay generated art", () => {
     expect(noto[3]?.d).toBe(offDelayElements[9]!.attrs.d);
     expect(noto[4]).toMatchObject({ tag: "line", x1: 214.081, y1: 243.835, x2: 201.581, y2: 258.835 });
     expect(noto[5]).toMatchObject({ tag: "line", x1: 188.717, y1: 243.84, x2: 201.217, y2: 258.84 });
+
+    for (const element of [...nctc, ...noto].filter((entry) => entry.tag === "line")) {
+      expect(element).toMatchObject({ strokeLinecap: "round", strokeLinejoin: "round" });
+    }
 
     for (const element of [...nctc, ...noto]) {
       if (element.d) {
@@ -163,6 +212,80 @@ describe("generated path parser and resized metadata", () => {
       expect(symbol.tightBounds.right - symbol.tightBounds.left).toBeGreaterThan(100);
       expect(symbol.tightBounds.right - symbol.tightBounds.left).toBeLessThan(140);
       expect(Object.values(symbol.tightBounds).every(Number.isFinite)).toBe(true);
+    }
+  });
+});
+
+describe("sensor-switch generated art", () => {
+  it("copies exactly five source elements per state with 1:1 geometry hashes", () => {
+    for (const definition of SENSOR_SWITCH_SOURCES) {
+      const sourceElements = sensorSwitchSourceElements.get(definition.type)!;
+
+      expect(sourceElements).toHaveLength(10);
+
+      for (const state of ["open", "closed"] as const) {
+        const range = state === "open" ? definition.openRange : definition.closedRange;
+        const symbol = SENSOR_SWITCH_ART[definition.type][state];
+
+        expect(symbol.elements).toHaveLength(5);
+
+        symbol.elements.forEach((element, index) => {
+          const source = sourceElements[range[0] + index]!;
+
+          const generatedHash = sha256(generatedGeometrySignature(element));
+          const sourceHash = sha256(sourceGeometrySignature(source));
+
+          expect(element.tag).toBe(source.tag);
+          expect(generatedHash).toBe(sourceHash);
+
+          if (element.tag === "circle" || element.tag === "line") {
+            expect(element.strokeLinecap).toBe("round");
+            expect(element.strokeLinejoin).toBe("round");
+          }
+
+          if (source.tag === "path") {
+            expect(element.d).toBe(source.attrs.d);
+          } else if (source.tag === "circle") {
+            expect(element).toMatchObject({
+              cx: Number(source.attrs.cx),
+              cy: Number(source.attrs.cy),
+              r: Number(source.attrs.r)
+            });
+          } else {
+            expect(element).toMatchObject({
+              x1: Number(source.attrs.x1),
+              y1: Number(source.attrs.y1),
+              x2: Number(source.attrs.x2),
+              y2: Number(source.attrs.y2)
+            });
+          }
+        });
+      }
+    }
+  });
+
+  it("maps every sensor state to the 96 pitch and 80,48.5 pair midpoint", () => {
+    for (const definition of SENSOR_SWITCH_SOURCES) {
+      for (const state of ["open", "closed"] as const) {
+        const symbol = SENSOR_SWITCH_ART[definition.type][state];
+        const [left, right] = symbol.ringCenters;
+        const projectedLeft = { x: left.x * 1.25, y: left.y * 1.25 + 11 };
+        const projectedRight = { x: right.x * 1.25, y: right.y * 1.25 + 11 };
+
+        expect(symbol.elements).toHaveLength(5);
+        expect(projectedLeft.x).toBeCloseTo(32, 8);
+        expect(projectedRight.x).toBeCloseTo(128, 8);
+        expect(projectedLeft.y).toBeCloseTo(48.5, 8);
+        expect(projectedRight.y).toBeCloseTo(48.5, 8);
+        expect(Math.hypot(projectedRight.x - projectedLeft.x, projectedRight.y - projectedLeft.y)).toBeCloseTo(96, 8);
+        expect((projectedLeft.x + projectedRight.x) / 2).toBeCloseTo(80, 8);
+        expect((projectedLeft.y + projectedRight.y) / 2).toBeCloseTo(48.5, 8);
+        expect(symbol.ringRadii[0]).toBeCloseTo(10.19, 1);
+        expect(symbol.ringRadii[1]).toBeCloseTo(10.19, 1);
+        expect(symbol.underDiscRadius).toBeCloseTo(6.72, 1);
+        expect(symbol.strokeWidth).toBe(0);
+        expect(Object.values(symbol.tightBounds).every(Number.isFinite)).toBe(true);
+      }
     }
   });
 });

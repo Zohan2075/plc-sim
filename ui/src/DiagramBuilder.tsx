@@ -1,4 +1,4 @@
-import {
+﻿import {
   type ChangeEvent as ReactChangeEvent,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
@@ -85,6 +85,7 @@ import { renderSelector3Pos, SELECTOR_3POS_RING_CENTERS } from "./diagram/select
 import type { Selector3PosPosition } from "./diagram/selector3pos";
 import { OFF_DELAY_ART } from "./diagram/offDelayArt.generated";
 import { LEVEL_SWITCH_ART } from "./diagram/levelSwitchArt.generated";
+import { SENSOR_SWITCH_ART } from "./diagram/sensorSwitchArt.generated";
 import { FUSE_ART } from "./diagram/fuseArt.generated";
 import { SELECTOR_3POS_RING_RADII } from "./diagram/selector3posArt.generated";
 import {
@@ -124,14 +125,22 @@ import {
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
 export type LampGlowColorOption = "red" | "green" | "yellow" | "amber" | "orange" | "blue" | "white";
-export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "FUSE" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
-type ResizedSymbolType = "NOTO" | "NCTC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC";
+export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "FUSE" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "TEMPERATURE_SWITCH" | "FLOW_SWITCH" | "PRESSURE_SWITCH" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
+type SensorSwitchType = "TEMPERATURE_SWITCH" | "FLOW_SWITCH" | "PRESSURE_SWITCH";
+type ResizedSymbolType = "NOTO" | "NCTC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | SensorSwitchType;
+
+function isSensorSwitchType(type: BuilderComponentType): type is SensorSwitchType {
+  return type === "TEMPERATURE_SWITCH"
+    || type === "FLOW_SWITCH"
+    || type === "PRESSURE_SWITCH";
+}
 
 function isResizedSymbolType(type: BuilderComponentType): type is ResizedSymbolType {
   return type === "NOTO"
     || type === "NCTC"
     || type === "LEVEL_SWITCH_NO"
-    || type === "LEVEL_SWITCH_NC";
+    || type === "LEVEL_SWITCH_NC"
+    || isSensorSwitchType(type);
 }
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
@@ -357,7 +366,7 @@ export const MAX_PLANE_HEIGHT = 2400;
 export const MIN_GRID_SPACING = 8;
 export const MAX_GRID_SPACING = 96;
 const SNAP_DISTANCE = 18;
-// Unión deliberada a un cable existente: hay que soltar el punto practicamente
+// UniÃ³n deliberada a un cable existente: hay que soltar el punto practicamente
 // encima del cable (SNAP_DISTANCE se usa para terminales, que es mas permisivo).
 const WIRE_ANCHOR_DISTANCE = 4;
 const DEFAULT_WIRE_COLOR = "#111827";
@@ -434,7 +443,7 @@ export const COMPONENT_CATEGORIES: readonly ComponentCategory[] = [
   { id: "protection", label: "Protection", types: ["BREAKER_1P", "BREAKER_2P", "FUSE", "OL_CONTACT"] },
   { id: "operators", label: "Pushbuttons & operators", types: ["PUSH_BUTTON_NO", "PUSH_BUTTON_NC", "ESTOP"] },
   { id: "selectors", label: "Selectors & switches", types: ["SELECTOR_3POS", "SWITCH_1P"] },
-  { id: "sensors", label: "Sensors & limit switches", types: ["LIMIT_SWITCH_NO", "LIMIT_SWITCH_NC", "LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC"] },
+  { id: "sensors", label: "Sensors & limit switches", types: ["LIMIT_SWITCH_NO", "LIMIT_SWITCH_NC", "LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC", "TEMPERATURE_SWITCH", "FLOW_SWITCH", "PRESSURE_SWITCH"] },
   { id: "contacts", label: "Contacts", types: ["XIC", "XIO"] },
   { id: "timers", label: "Timers", types: ["NOTC", "NCTO", "NOTO", "NCTC"] },
   { id: "outputs", label: "Outputs & loads", types: ["OTE", "LAMP", "MOTOR"] },
@@ -456,6 +465,9 @@ const PALETTE_ENTRY_BY_TYPE: Partial<Record<BuilderComponentType, { description:
   LIMIT_SWITCH_NC: { label: "Limit switch NC", description: "Plunger roller, normally closed" },
   LEVEL_SWITCH_NO: { label: "Level switch NO", description: "Liquid level switch, normally open" },
   LEVEL_SWITCH_NC: { label: "Level switch NC", description: "Liquid level switch, normally closed" },
+  TEMPERATURE_SWITCH: { label: "Temperature switch", description: "Process temperature switch, toggle open/closed" },
+  FLOW_SWITCH: { label: "Flow switch", description: "Process flow switch, toggle open/closed" },
+  PRESSURE_SWITCH: { label: "Pressure switch", description: "Process pressure switch, toggle open/closed" },
   OL_CONTACT: { label: "OL contact", description: "Overload contact, toggle from inspector" },
   XIC: { label: "XIC", description: "Normally open contact" },
   XIO: { label: "XIO", description: "Normally closed contact" },
@@ -563,6 +575,9 @@ function isPassThroughType(type: BuilderComponentType): boolean {
     || type === "LIMIT_SWITCH_NC"
     || type === "LEVEL_SWITCH_NO"
     || type === "LEVEL_SWITCH_NC"
+    || type === "TEMPERATURE_SWITCH"
+    || type === "FLOW_SWITCH"
+    || type === "PRESSURE_SWITCH"
     || type === "OL_CONTACT"
     || type === "XIC"
     || type === "XIO"
@@ -578,12 +593,13 @@ function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREA
 
 function isMaintainedSwitchType(
   type: BuilderComponentType
-): type is "SWITCH_1P" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "OL_CONTACT" {
+): type is "SWITCH_1P" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | SensorSwitchType | "OL_CONTACT" {
   return type === "SWITCH_1P"
     || type === "LIMIT_SWITCH_NO"
     || type === "LIMIT_SWITCH_NC"
     || type === "LEVEL_SWITCH_NO"
     || type === "LEVEL_SWITCH_NC"
+    || isSensorSwitchType(type)
     || type === "OL_CONTACT";
 }
 
@@ -617,6 +633,9 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
     case "LIMIT_SWITCH_NC":
     case "LEVEL_SWITCH_NO":
     case "LEVEL_SWITCH_NC":
+    case "TEMPERATURE_SWITCH":
+    case "FLOW_SWITCH":
+    case "PRESSURE_SWITCH":
     case "OL_CONTACT":
       return "contact";
     case "LAMP":
@@ -1075,6 +1094,9 @@ function getConductiveTerminalPairs(
     case "LIMIT_SWITCH_NC":
     case "LEVEL_SWITCH_NO":
     case "LEVEL_SWITCH_NC":
+    case "TEMPERATURE_SWITCH":
+    case "FLOW_SWITCH":
+    case "PRESSURE_SWITCH":
     case "OL_CONTACT":
       return !useLiveTagState || isMaintainedSwitchClosed(component) ? [["in", "out"]] : [];
     case "XIC":
@@ -1394,6 +1416,12 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--o/ LVL o--";
     case "LEVEL_SWITCH_NC":
       return "--o/ LVLC o--";
+    case "TEMPERATURE_SWITCH":
+      return "--o/ TS o--";
+    case "FLOW_SWITCH":
+      return "--o/ FS o--";
+    case "PRESSURE_SWITCH":
+      return "--o/ PS o--";
     case "OL_CONTACT":
       return "--[/OL]--";
     case "LAMP":
@@ -1451,6 +1479,12 @@ function getComponentName(type: BuilderComponentType): string {
       return "Level switch NO";
     case "LEVEL_SWITCH_NC":
       return "Level switch NC";
+    case "TEMPERATURE_SWITCH":
+      return "Temperature switch";
+    case "FLOW_SWITCH":
+      return "Flow switch";
+    case "PRESSURE_SWITCH":
+      return "Pressure switch";
     case "OL_CONTACT":
       return "OL contact";
     case "LAMP":
@@ -1546,6 +1580,12 @@ function getDefaultComponentLabel(
       return "LVL-NO";
     case "LEVEL_SWITCH_NC":
       return "LVL-NC";
+    case "TEMPERATURE_SWITCH":
+      return "TS-1";
+    case "FLOW_SWITCH":
+      return "FS-1";
+    case "PRESSURE_SWITCH":
+      return "PS-1";
     case "OL_CONTACT":
       return "OL-1";
     case "NOTO":
@@ -1582,11 +1622,16 @@ function projectSymbolPoint(
   };
 
   // El terminal local es la proyeccion EXACTA del arte; no se snapea a la
-  // retícula (eso movia los bornes de viewBox 72 ~4.3 px respecto al glifo).
+  // retÃ­cula (eso movia los bornes de viewBox 72 ~4.3 px respecto al glifo).
   return projectedPoint;
 }
 
 function getResizedSymbolArt(type: ResizedSymbolType, contactClosed?: boolean) {
+  if (isSensorSwitchType(type)) {
+    const closed = contactClosed ?? false;
+    return closed ? SENSOR_SWITCH_ART[type].closed : SENSOR_SWITCH_ART[type].open;
+  }
+
   if (type === "LEVEL_SWITCH_NO" || type === "LEVEL_SWITCH_NC") {
     const closed = contactClosed ?? type === "LEVEL_SWITCH_NC";
     return closed ? LEVEL_SWITCH_ART.LEVEL_SWITCH_NC : LEVEL_SWITCH_ART.LEVEL_SWITCH_NO;
@@ -1594,6 +1639,17 @@ function getResizedSymbolArt(type: ResizedSymbolType, contactClosed?: boolean) {
 
   const closed = contactClosed ?? type === "NCTC";
   return closed ? OFF_DELAY_ART.NCTC : OFF_DELAY_ART.NOTO;
+}
+
+function getSensorSwitchPreviewViewBox(type: SensorSwitchType): string {
+  const states = [SENSOR_SWITCH_ART[type].open.localBounds, SENSOR_SWITCH_ART[type].closed.localBounds];
+  const padding = 2;
+  const left = Math.min(...states.map((bounds) => bounds.left)) - padding;
+  const top = Math.min(...states.map((bounds) => bounds.top)) - padding;
+  const right = Math.max(...states.map((bounds) => bounds.right)) + padding;
+  const bottom = Math.max(...states.map((bounds) => bounds.bottom)) + padding;
+
+  return `${left.toFixed(3)} ${top.toFixed(3)} ${(right - left).toFixed(3)} ${(bottom - top).toFixed(3)}`;
 }
 
 const SELECTOR_3POS_TERMINALS: TerminalDefinition[] = [
@@ -1701,6 +1757,18 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
     case "LEVEL_SWITCH_NO":
     case "LEVEL_SWITCH_NC": {
       const [leftRing, rightRing] = getResizedSymbolArt(type).ringCenters;
+      const inputTerminal = projectSymbolPoint(leftRing.x, leftRing.y, 64);
+      const outputTerminal = projectSymbolPoint(rightRing.x, rightRing.y, 64);
+
+      return [
+        { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", label: "Out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
+      ];
+    }
+    case "TEMPERATURE_SWITCH":
+    case "FLOW_SWITCH":
+    case "PRESSURE_SWITCH": {
+      const [leftRing, rightRing] = SENSOR_SWITCH_ART[type].open.ringCenters;
       const inputTerminal = projectSymbolPoint(leftRing.x, leftRing.y, 64);
       const outputTerminal = projectSymbolPoint(rightRing.x, rightRing.y, 64);
 
@@ -2062,6 +2130,9 @@ const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
   },
   LEVEL_SWITCH_NO: LEVEL_SWITCH_NO_HIT_ENTRY,
   LEVEL_SWITCH_NC: LEVEL_SWITCH_NC_HIT_ENTRY,
+  TEMPERATURE_SWITCH: { body: [], leads: [] },
+  FLOW_SWITCH: { body: [], leads: [] },
+  PRESSURE_SWITCH: { body: [], leads: [] },
   OL_CONTACT: {
     body: [symbolRect(52, 12, 24, 44, 72), symbolRect(44, 14, 40, 40, 72)],
     leads: [symbolLead(2.3, 54, 36, 72), symbolLead(74, 125.7, 36, 72)]
@@ -2117,6 +2188,9 @@ const TERMINAL_RING_RADIUS: Record<BuilderComponentType, number> = {
   LIMIT_SWITCH_NC: 7,
   LEVEL_SWITCH_NO: 19.45,
   LEVEL_SWITCH_NC: 19.45,
+  TEMPERATURE_SWITCH: 10.1875,
+  FLOW_SWITCH: 10.1875,
+  PRESSURE_SWITCH: 10.1875,
   OL_CONTACT: 6.875,
   PUSH_BUTTON_NO: 6.875,
   PUSH_BUTTON_NC: 6.875,
@@ -2180,8 +2254,10 @@ function getTerminalRingShapes(type: BuilderComponentType): TerminalRingShape[] 
 }
 
 function getResizedArtBounds(component: BuilderComponent): ComponentHitBounds {
-  const isLevelSwitch = component.type === "LEVEL_SWITCH_NO" || component.type === "LEVEL_SWITCH_NC";
-  const states = isLevelSwitch
+  const usesActiveSwitchState = component.type === "LEVEL_SWITCH_NO"
+    || component.type === "LEVEL_SWITCH_NC"
+    || isSensorSwitchType(component.type);
+  const states = usesActiveSwitchState
     ? [isMaintainedSwitchClosed(component)]
     : [false, true];
   let left = Infinity;
@@ -2445,7 +2521,9 @@ export function getComponentDisplayBounds(
   }
 
   const artState = contactClosed ?? (
-    component.type === "LEVEL_SWITCH_NO" || component.type === "LEVEL_SWITCH_NC"
+    component.type === "LEVEL_SWITCH_NO"
+      || component.type === "LEVEL_SWITCH_NC"
+      || isSensorSwitchType(component.type)
       ? isMaintainedSwitchClosed(component)
       : undefined
   );
@@ -2582,6 +2660,9 @@ export function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "LIMIT_SWITCH_NC":
     case "LEVEL_SWITCH_NO":
     case "LEVEL_SWITCH_NC":
+    case "TEMPERATURE_SWITCH":
+    case "FLOW_SWITCH":
+    case "PRESSURE_SWITCH":
     case "OL_CONTACT":
     case "LAMP":
     case "MOTOR":
@@ -2620,6 +2701,9 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
     case "LIMIT_SWITCH_NC":
     case "LEVEL_SWITCH_NO":
     case "LEVEL_SWITCH_NC":
+    case "TEMPERATURE_SWITCH":
+    case "FLOW_SWITCH":
+    case "PRESSURE_SWITCH":
     case "OL_CONTACT":
     case "XIC":
     case "XIO":
@@ -2638,8 +2722,8 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
 }
 
 // Vector de referencia del usuario (limit switch NO, viewBox 1024x768) mapeado al
-// viewBox 128x64 del símbolo: los círculos caen en (40,32)/(88,32) y las salidas
-// en 3.2/124.8, la misma retícula que el resto de los símbolos.
+// viewBox 128x64 del sÃ­mbolo: los cÃ­rculos caen en (40,32)/(88,32) y las salidas
+// en 3.2/124.8, la misma retÃ­cula que el resto de los sÃ­mbolos.
 const LIMIT_SWITCH_VECTOR_SCALE = 0.1403;
 const LIMIT_SWITCH_VECTOR_TRANSFORM = `translate(-7.85 -21.85) scale(${LIMIT_SWITCH_VECTOR_SCALE})`;
 
@@ -2736,6 +2820,7 @@ interface SymbolGraphicOptions {
   breakerClosed?: boolean;
   coilActive?: boolean;
   contactActuated?: boolean;
+  palettePreview?: boolean;
   contactClosed?: boolean;
   debugZones?: boolean;
   energized?: boolean;
@@ -2941,12 +3026,18 @@ function renderSymbolGraphic(
       );
     }
     case "LEVEL_SWITCH_NO":
-    case "LEVEL_SWITCH_NC": {
+    case "LEVEL_SWITCH_NC":
+    case "TEMPERATURE_SWITCH":
+    case "FLOW_SWITCH":
+    case "PRESSURE_SWITCH": {
       const switchClosed = options.switchClosed ?? type === "LEVEL_SWITCH_NC";
       const art = getResizedSymbolArt(type, switchClosed);
+      const viewBox = options.palettePreview && isSensorSwitchType(type)
+        ? getSensorSwitchPreviewViewBox(type)
+        : "0 0 128 64";
 
       return (
-        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
+        <svg viewBox={viewBox} className={symbolClassName} aria-hidden="true">
           {art.ringCenters.map((center, index) => (
             <circle
               key={`under-disc-${index}`}
@@ -2963,11 +3054,15 @@ function renderSymbolGraphic(
             strokeMiterlimit={4}
           >
             {art.elements.map((element, index) => {
+              const strokeLinecap = (element as { strokeLinecap?: "butt" | "round" | "square" }).strokeLinecap;
+              const strokeLinejoin = (element as { strokeLinejoin?: "miter" | "round" | "bevel" }).strokeLinejoin;
               const style = element.fill
                 ? {
                   fill: element.fill,
                   stroke: element.stroke ?? "none",
-                  ...(element.strokeWidth !== undefined ? { strokeWidth: element.strokeWidth } : {})
+                  ...(element.strokeWidth !== undefined ? { strokeWidth: element.strokeWidth } : {}),
+                  ...(strokeLinecap !== undefined ? { strokeLinecap } : {}),
+                  ...(strokeLinejoin !== undefined ? { strokeLinejoin } : {})
                 }
                 : undefined;
 
@@ -2978,6 +3073,19 @@ function renderSymbolGraphic(
                     cx={element.cx}
                     cy={element.cy}
                     r={element.r}
+                    style={style}
+                  />
+                );
+              }
+
+              if (element.tag === "line") {
+                return (
+                  <line
+                    key={index}
+                    x1={element.x1}
+                    y1={element.y1}
+                    x2={element.x2}
+                    y2={element.y2}
                     style={style}
                   />
                 );
@@ -3232,11 +3340,15 @@ function renderSymbolGraphic(
             strokeMiterlimit={4}
           >
             {art.elements.map((element, index) => {
+              const strokeLinecap = element.strokeLinecap;
+              const strokeLinejoin = element.strokeLinejoin;
               const style = element.fill
                 ? {
                   fill: element.fill,
                   stroke: element.stroke ?? "none",
-                  ...(element.strokeWidth !== undefined ? { strokeWidth: element.strokeWidth } : {})
+                  ...(element.strokeWidth !== undefined ? { strokeWidth: element.strokeWidth } : {}),
+                  ...(strokeLinecap !== undefined ? { strokeLinecap } : {}),
+                  ...(strokeLinejoin !== undefined ? { strokeLinejoin } : {})
                 }
                 : undefined;
 
@@ -4555,8 +4667,8 @@ function createWire(
 }
 
 function buildStarterScene(nextId: { current: number }, availableTags: TagDefinition[]): BuilderScene {
-  // Arranque con una fuente AC visible y alineada a la retícula: su borne de
-  // entrada (izquierdo) queda en una intersección de 18 px.
+  // Arranque con una fuente AC visible y alineada a la retÃ­cula: su borne de
+  // entrada (izquierdo) queda en una intersecciÃ³n de 18 px.
   const source = snapComponentToPlaneGrid(
     createCanvasComponent(nextId, availableTags, "POWER_SOURCE", 96, 96),
     DEFAULT_PLANE_SETTINGS
@@ -7219,7 +7331,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             }}
           >
             <span className={`builder-palette-tile__symbol builder-palette-tile__symbol--${getSymbolCategory(instruction.type)}`}>
-              {renderSymbolGraphic(instruction.type)}
+              {renderSymbolGraphic(instruction.type, { palettePreview: true })}
             </span>
             <span className="builder-palette-tile__info">
               <span className="builder-palette-tile__label">{instruction.label}</span>
@@ -9373,8 +9485,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const fileRibbon = (
     <>
       <RibbonGroup label="Circuit" compact={compactRibbon}>
-        <RibbonButton icon="⤓" label="Load circuit" onClick={handleLoadCircuitClick} />
-        <RibbonButton icon="⤒" label="Save circuit" onClick={handleSaveCircuit} />
+        <RibbonButton icon="↥" label="Load circuit" onClick={handleLoadCircuitClick} />
+        <RibbonButton icon="↧" label="Save circuit" onClick={handleSaveCircuit} />
       </RibbonGroup>
       <RibbonGroup label="Document" compact={compactRibbon}>
         <RibbonField label="Project">
@@ -9433,13 +9545,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           onClick={() => copySelectedComponents([...selectedComponentIds])}
         />
         <RibbonButton
-          icon="📋"
+          icon="⎘"
           label="Paste"
           disabled={layoutEditingLocked}
           onClick={pasteClipboardAtViewportCenter}
         />
         <RibbonButton
-          icon="⧉"
+          icon="❐"
           label="Duplicate"
           disabled={layoutEditingLocked || !selectedComponent}
           onClick={() => {
@@ -9451,7 +9563,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       </RibbonGroup>
       <RibbonGroup label="Edit" compact={compactRibbon}>
         <RibbonButton
-          icon="🗑"
+          icon="✕"
           label="Delete"
           disabled={layoutEditingLocked || selection === null}
           onClick={handleDeleteSelection}
@@ -9530,7 +9642,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         {instructionPalette.filter((item) => !LOGIC_PALETTE_TYPES.has(item.type)).map((item) => (
           <RibbonButton
             key={item.type}
-            icon="＋"
+            icon="+"
             label={item.label}
             onClick={() => insertPaletteComponent(item.type)}
           />
@@ -9540,7 +9652,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         {instructionPalette.filter((item) => LOGIC_PALETTE_TYPES.has(item.type)).map((item) => (
           <RibbonButton
             key={item.type}
-            icon="＋"
+            icon="+"
             label={item.label}
             onClick={() => insertPaletteComponent(item.type)}
           />
@@ -9573,14 +9685,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     <>
       <RibbonGroup label="Navigate" compact={compactRibbon}>
         <RibbonButton
-          icon="✋"
+          icon="✥"
           label={isPanModeEnabled ? "Pan on" : "Pan off"}
           active={isPanModeEnabled}
           ariaPressed={isPanModeEnabled}
           onClick={togglePanMode}
         />
         <RibbonButton
-          icon="🖱"
+          icon="◎"
           label="Wheel zooms"
           active={mouseWheelZooms}
           ariaPressed={mouseWheelZooms}
@@ -9671,14 +9783,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       </RibbonGroup>
       <RibbonGroup label="Debug" compact={compactRibbon}>
         <RibbonButton
-          icon="⌖"
+          icon="⌗"
           label="Terminal overlays"
           active={showTerminalDebug}
           ariaPressed={showTerminalDebug}
           onClick={() => setShowTerminalDebug((current) => !current)}
         />
         <RibbonButton
-          icon="▦"
+          icon="▣"
           label="Hit/label overlays"
           active={showHitboxDebug}
           ariaPressed={showHitboxDebug}
@@ -9907,13 +10019,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           onClick={() => copySelectedComponents([selectedComponent.id])}
         />
         <RibbonButton
-          icon="⧉"
+          icon="❐"
           label="Duplicate"
           disabled={layoutEditingLocked}
           onClick={() => duplicateComponentWithHistory(selectedComponent.id)}
         />
         <RibbonButton
-          icon="🗑"
+          icon="✕"
           label="Delete"
           disabled={layoutEditingLocked}
           onClick={handleDeleteSelection}
@@ -9982,13 +10094,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       </RibbonGroup>
       <RibbonGroup label="Geometry" compact={compactRibbon}>
         <RibbonButton
-          icon="＋"
+          icon="+"
           label="Add bend"
           disabled={layoutEditingLocked}
           onClick={addBendToSelectedWire}
         />
         <RibbonButton
-          icon="⇄"
+          icon="⇅"
           label="Reverse route"
           disabled={layoutEditingLocked}
           onClick={reverseSelectedWire}
@@ -10054,7 +10166,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       </RibbonGroup>
       <RibbonGroup label="Edit" compact={compactRibbon}>
         <RibbonButton
-          icon="🗑"
+          icon="✕"
           label="Delete"
           disabled={layoutEditingLocked}
           onClick={handleDeleteSelection}
@@ -10092,14 +10204,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   const paletteCommands: CommandPaletteCommand[] = [
     {
-      icon: "⤓",
+      icon: "↥",
       id: "file.load",
       keywords: "open import circuit json",
       label: "Load circuit…",
       run: handleLoadCircuitClick
     },
     {
-      icon: "⤒",
+      icon: "↧",
       id: "file.save",
       keywords: "download export circuit json",
       label: "Save circuit",
@@ -10134,7 +10246,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: layoutEditingLocked || clipboardRef.current.length === 0,
-      icon: "📋",
+      icon: "⎘",
       id: "edit.paste",
       keywords: "clipboard",
       label: "Paste at viewport center",
@@ -10142,7 +10254,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: layoutEditingLocked || !hasComponentSelection,
-      icon: "⎘",
+      icon: "❐",
       id: "edit.duplicate",
       keywords: "copy clone",
       label: "Duplicate selected components",
@@ -10150,7 +10262,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: layoutEditingLocked || selection === null,
-      icon: "🗑",
+      icon: "✕",
       id: "edit.delete",
       keywords: "remove",
       label: "Delete selection",
@@ -10221,7 +10333,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       run: clearWireInteraction
     },
     ...instructionPalette.map((instruction) => ({
-      icon: "＋",
+      icon: "+",
       id: `insert.${instruction.type}`,
       keywords: `${instruction.type} ${instruction.description}`,
       label: `Insert ${instruction.label}`,
@@ -10254,14 +10366,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       run: () => onFaultReset?.()
     },
     {
-      icon: "✋",
+      icon: "✥",
       id: "view.pan-toggle",
       keywords: "hand navigate",
       label: isPanModeEnabled ? "Turn pan mode off" : "Turn pan mode on",
       run: togglePanMode
     },
     {
-      icon: "🖱",
+      icon: "◎",
       id: "view.wheel-zooms",
       keywords: "mouse wheel zoom setting preference",
       label: mouseWheelZooms ? "Turn mouse-wheel zoom off" : "Turn mouse-wheel zoom on",
@@ -10292,7 +10404,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       shortcut: "Ctrl++"
     },
     {
-      icon: "⤢",
+      icon: "⛶",
       id: "view.fit",
       keywords: "fit canvas sheet",
       label: "Fit canvas",
@@ -10301,21 +10413,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: !hasZoomSelection,
-      icon: "⌖",
+      icon: "⛶",
       id: "view.zoom-selection",
       keywords: "fit selection",
       label: "Zoom to selection",
       run: zoomToSelection
     },
     {
-      icon: "⌖",
+      icon: "⌗",
       id: "view.terminal-overlays",
       keywords: "debug terminals",
       label: showTerminalDebug ? "Hide terminal overlays" : "Show terminal overlays",
       run: () => setShowTerminalDebug((current) => !current)
     },
     {
-      icon: "▦",
+      icon: "▣",
       id: "view.hitbox-overlays",
       keywords: "debug hitboxes labels",
       label: showHitboxDebug ? "Hide hit/label overlays" : "Show hit/label overlays",
@@ -10355,7 +10467,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     ...LAMP_GLOW_COLOR_OPTIONS.map((option) => ({
       disabled: layoutEditingLocked || selectedLampIds.length === 0,
-      icon: "◐",
+      icon: "●",
       id: `component.lamp-${option.value}`,
       keywords: `lamp color ${option.value}`,
       label: `Set lamp color: ${option.label}`,
@@ -10363,7 +10475,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     })),
     {
       disabled: layoutEditingLocked || !selectedMaintainedSwitch,
-      icon: "◐",
+      icon: "●",
       id: "component.switch-toggle",
       keywords: "open close maintained switch",
       label: selectedMaintainedSwitch && isMaintainedSwitchClosed(selectedMaintainedSwitch)
@@ -10377,7 +10489,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: layoutEditingLocked || !selectedWire,
-      icon: "🗑",
+      icon: "✕",
       id: "wire.delete",
       keywords: "remove wire",
       label: "Delete wire",
@@ -10401,7 +10513,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: layoutEditingLocked || !selectedWire,
-      icon: "＋",
+      icon: "+",
       id: "wire.add-bend",
       keywords: "point corner",
       label: "Add bend to wire",
@@ -10409,7 +10521,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     {
       disabled: layoutEditingLocked || !selectedWire,
-      icon: "⇄",
+      icon: "⇅",
       id: "wire.reverse",
       keywords: "flip route endpoints",
       label: "Reverse wire route",
@@ -10433,7 +10545,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     <section className="panel panel--builder builder-shell">
       <header className="builder-ribbon">
         <div className="builder-ribbon__titlebar">
-          <div className="builder-ribbon__brand">PLC Sim <span>Graphic simulator</span></div>
+          <div className="builder-ribbon__brand">
+            <img className="builder-ribbon__brand-mark" src="/ansi-ecs-mark.svg?v=3" alt="" aria-hidden="true" />
+            PLC Sim <span>Graphic simulator</span>
+          </div>
           <div className="builder-ribbon__context">
             {selectedComponent
               ? `${selectedComponent.label || getComponentName(selectedComponent.type)} selected`
@@ -11186,7 +11301,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   `builder-palette-tile__symbol--${getSymbolCategory(paletteDragPreview.type)}`
                 ].join(" ")}
               >
-                {renderSymbolGraphic(paletteDragPreview.type)}
+                {renderSymbolGraphic(paletteDragPreview.type, { palettePreview: true })}
               </span>
               <span className="builder-palette-drag-preview__label">{paletteDragPreview.label}</span>
             </div>,

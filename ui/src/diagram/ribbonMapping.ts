@@ -42,15 +42,18 @@ const paletteEntries: RibbonAuditEntry[] = [
   entry("P13", "P", "Limit switch NC", "Insert tab / Electrical and component list", "tab"),
   entry("P14", "P", "Level switch NO", "Insert tab / Electrical and component list", "tab"),
   entry("P15", "P", "Level switch NC", "Insert tab / Electrical and component list", "tab"),
-  entry("P16", "P", "XIC", "Insert tab / Logic and component list", "tab"),
-  entry("P17", "P", "XIO", "Insert tab / Logic and component list", "tab"),
-  entry("P18", "P", "NOTC", "Insert tab / Logic and component list", "tab"),
-  entry("P19", "P", "NCTO", "Insert tab / Logic and component list", "tab"),
-  entry("P20", "P", "NOTO", "Insert tab / Logic and component list", "tab"),
-  entry("P21", "P", "NCTC", "Insert tab / Logic and component list", "tab"),
-  entry("P22", "P", "OTE", "Insert tab / Logic and component list", "tab"),
-  entry("P23", "P", "Lamp", "Insert tab / Electrical and component list", "tab"),
-  entry("P24", "P", "Motor", "Insert tab / Electrical and component list", "tab")
+  entry("P16", "P", "Temperature switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P17", "P", "Flow switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P18", "P", "Pressure switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P19", "P", "XIC", "Insert tab / Logic and component list", "tab"),
+  entry("P20", "P", "XIO", "Insert tab / Logic and component list", "tab"),
+  entry("P21", "P", "NOTC", "Insert tab / Logic and component list", "tab"),
+  entry("P22", "P", "NCTO", "Insert tab / Logic and component list", "tab"),
+  entry("P23", "P", "NOTO", "Insert tab / Logic and component list", "tab"),
+  entry("P24", "P", "NCTC", "Insert tab / Logic and component list", "tab"),
+  entry("P25", "P", "OTE", "Insert tab / Logic and component list", "tab"),
+  entry("P26", "P", "Lamp", "Insert tab / Electrical and component list", "tab"),
+  entry("P27", "P", "Motor", "Insert tab / Electrical and component list", "tab")
 ];
 
 const toolsEntries: RibbonAuditEntry[] = [

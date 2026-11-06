@@ -64,6 +64,27 @@ version: 1.0
 | `OTL` | Bobina de enclavamiento (OTL) | L333 · `--(L)--` | L173 | Contactos y bobinas | Bobina `OTL` sobre `component.tag` | — | `OTL` (enclava; borra el E-stop) |
 | `OTU` | Bobina de desenclavamiento (OTU) | L343 · `--(U)--` | L181 | Contactos y bobinas | Bobina `OTU` sobre `component.tag` | — | `OTU` (prioridad sobre OTL/OTE) |
 
+## Process switches (current builder)
+
+Added 2026-11-06 from the user's Temperature/Flow/Pressure SVGs. These are **single
+maintained switch components**; there are no separate normally-closed variants.
+Open and closed are two art states of the same component, selected by `isClosed`.
+
+| ID | Label | Default label | Palette group | Terminals | Art | Behaviour |
+|----|-------|---------------|---------------|-----------|-----|-----------|
+| `TEMPERATURE_SWITCH` | Temperature switch | `TS-1` | Sensors & limit switches | `in`/`out`, `(32,48.5)` / `(128,48.5)`, pitch `96` | `sensorSwitchArt.generated.ts` (`open`/`closed`) from `reference/Temperature switch.svg` | maintained toggle; conducts only when closed; default open |
+| `FLOW_SWITCH` | Flow switch | `FS-1` | Sensors & limit switches | `in`/`out`, `(32,48.5)` / `(128,48.5)`, pitch `96` | `sensorSwitchArt.generated.ts` (`open`/`closed`) from `reference/Flow switch.svg` | maintained toggle; conducts only when closed; default open |
+| `PRESSURE_SWITCH` | Pressure switch | `PS-1` | Sensors & limit switches | `in`/`out`, `(32,48.5)` / `(128,48.5)`, pitch `96` | `sensorSwitchArt.generated.ts` (`open`/`closed`) from `reference/Pressure switch.svg` | maintained toggle; conducts only when closed; default open |
+
+- Palette order (current builder, 27 entries): positions `16` Temperature switch,
+  `17` Flow switch, `18` Pressure switch, immediately after the level switches.
+- Generator: `scripts/generate-sensor-switch-art.mjs` (reads the SVGs; 5 elements per
+  state, original geometry preserved).
+- Operability: `"toggle"` (`ui/src/diagram/operability.ts`); saved/loaded through the
+  generic `isClosed` component field.
+- Compiler/engine: these are UI pass-through devices, not `InstructionType`s; they do
+  not add a new `PlcEngine` instruction.
+
 ## Device state rules (single source: `getDeviceContactState`, `deviceMapping.ts:53`)
 
 | Rule | Types |

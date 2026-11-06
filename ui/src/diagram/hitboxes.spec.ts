@@ -33,6 +33,9 @@ const ALL_TYPES: BuilderComponentType[] = [
   "LIMIT_SWITCH_NC",
   "LEVEL_SWITCH_NO",
   "LEVEL_SWITCH_NC",
+  "TEMPERATURE_SWITCH",
+  "FLOW_SWITCH",
+  "PRESSURE_SWITCH",
   "OL_CONTACT",
   "LAMP",
   "MOTOR",
@@ -60,6 +63,9 @@ type TargetType =
   | "NCTC"
   | "LEVEL_SWITCH_NO"
   | "LEVEL_SWITCH_NC"
+  | "TEMPERATURE_SWITCH"
+  | "FLOW_SWITCH"
+  | "PRESSURE_SWITCH"
   | "SELECTOR_3POS"
   | "SWITCH_1P"
   | "POWER_SOURCE";
@@ -77,6 +83,9 @@ const TARGET_TYPES: TargetType[] = [
   "NCTC",
   "LEVEL_SWITCH_NO",
   "LEVEL_SWITCH_NC",
+  "TEMPERATURE_SWITCH",
+  "FLOW_SWITCH",
+  "PRESSURE_SWITCH",
   "SELECTOR_3POS",
   "SWITCH_1P",
   "POWER_SOURCE"
@@ -95,6 +104,9 @@ const BODY_POINTS: Record<TargetType, Point> = {
   NCTC: { x: 80, y: 50 },
   LEVEL_SWITCH_NO: { x: 80, y: 94.79 },
   LEVEL_SWITCH_NC: { x: 86.88, y: 85.9 },
+  TEMPERATURE_SWITCH: { x: 80, y: 80 },
+  FLOW_SWITCH: { x: 80, y: 80 },
+  PRESSURE_SWITCH: { x: 80, y: 80 },
   SELECTOR_3POS: { x: 80, y: 51 },
   SWITCH_1P: { x: 80, y: 37.4 },
   POWER_SOURCE: { x: 80, y: 51 }
