@@ -70,19 +70,20 @@ describe("off-delay generated art", () => {
 
 describe("level-switch generated art", () => {
   it("copies the new SVG body paths and terminal circles without redrawing", () => {
-    expect(levelSwitchElements).toHaveLength(6);
-    expect(LEVEL_SWITCH_ART.LEVEL_SWITCH_NO.elements).toHaveLength(3);
+    expect(levelSwitchElements).toHaveLength(7);
+    expect(LEVEL_SWITCH_ART.LEVEL_SWITCH_NO.elements).toHaveLength(4);
     expect(LEVEL_SWITCH_ART.LEVEL_SWITCH_NC.elements).toHaveLength(3);
 
-    const [noBody, noRightRing, noLeftRing] = LEVEL_SWITCH_ART.LEVEL_SWITCH_NO.elements;
+    const [noLever, noFloat, noRightRing, noLeftRing] = LEVEL_SWITCH_ART.LEVEL_SWITCH_NO.elements;
     const [ncBody, ncRightRing, ncLeftRing] = LEVEL_SWITCH_ART.LEVEL_SWITCH_NC.elements;
 
-    expect(noBody?.d).toBe(levelSwitchElements[0]!.attrs.d);
+    expect(noLever?.d).toBe(levelSwitchElements[0]!.attrs.d);
+    expect(noFloat?.d).toBe(levelSwitchElements[1]!.attrs.d);
     expect(noRightRing).toMatchObject({ cx: 181.71, cy: 106.469, r: 8, strokeWidth: 4.375, tag: "circle" });
     expect(noLeftRing).toMatchObject({ cx: 92.14, cy: 106.456, r: 8, strokeWidth: 4.375, tag: "circle" });
-    expect(ncBody?.d).toBe(levelSwitchElements[3]!.attrs.d);
-    expect(ncRightRing).toMatchObject({ cx: 352.761, cy: 101.784, r: 8, strokeWidth: 4.375, tag: "circle" });
-    expect(ncLeftRing?.d).toBe(levelSwitchElements[5]!.attrs.d);
+    expect(ncBody?.d).toBe(levelSwitchElements[4]!.attrs.d);
+    expect(ncRightRing).toMatchObject({ cx: 352.775, cy: 106.452, r: 8, strokeWidth: 4.375, tag: "circle" });
+    expect(ncLeftRing?.d).toBe(levelSwitchElements[6]!.attrs.d);
 
     for (const element of [...LEVEL_SWITCH_ART.LEVEL_SWITCH_NO.elements, ...LEVEL_SWITCH_ART.LEVEL_SWITCH_NC.elements]) {
       if (element.d) {

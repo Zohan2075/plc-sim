@@ -7,7 +7,7 @@ import {
   useRef,
   useState
 } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactElement, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { BuilderComponentType, BuilderWire, LampGlowColorOption, Point } from "../DiagramBuilder";
 import { isOperable } from "./operability";
@@ -197,6 +197,170 @@ export type MenuItem =
     render: () => ReactNode;
   };
 
+const TIMED_CONTACT_TYPES: ReadonlySet<BuilderComponentType> = new Set([
+  "NOTC",
+  "NCTO",
+  "NOTO",
+  "NCTC"
+]);
+
+function formatComponentDelaySeconds(delayMs: number): string {
+  return String(delayMs / 1000);
+}
+
+function parseComponentDelaySeconds(value: string): number | null {
+  const trimmed = value.trim();
+
+  if (trimmed === "") {
+    return null;
+  }
+
+  const seconds = Number(trimmed);
+
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+export interface ComponentDelayCommitResult {
+  committed: boolean;
+  value: string;
+}
+
+export interface ComponentDelayFieldController {
+  commit: (value?: string) => ComponentDelayCommitResult;
+  getCommittedMs: () => number;
+  getDraft: () => string;
+  revert: () => string;
+  setDraft: (value: string) => void;
+  step: (deltaSeconds: number) => ComponentDelayCommitResult;
+}
+
+export function createComponentDelayFieldController(
+  delayMs: number,
+  commitDelay: (delayMs: number) => void
+): ComponentDelayFieldController {
+  let committedMs = delayMs;
+  let draft = formatComponentDelaySeconds(delayMs);
+
+  const applyValue = (nextMs: number): ComponentDelayCommitResult => {
+    const changed = nextMs !== committedMs;
+
+    if (changed) {
+      committedMs = nextMs;
+      commitDelay(nextMs);
+    }
+
+    draft = formatComponentDelaySeconds(committedMs);
+
+    return { committed: changed, value: draft };
+  };
+
+  return {
+    commit: (value) => {
+      const seconds = parseComponentDelaySeconds(value ?? draft);
+
+      if (seconds === null) {
+        draft = formatComponentDelaySeconds(committedMs);
+        return { committed: false, value: draft };
+      }
+
+      return applyValue(Math.max(0, Math.round(seconds * 1000)));
+    },
+    getCommittedMs: () => committedMs,
+    getDraft: () => draft,
+    revert: () => {
+      draft = formatComponentDelaySeconds(committedMs);
+      return draft;
+    },
+    setDraft: (value) => {
+      draft = value;
+    },
+    step: (deltaSeconds) => {
+      const draftSeconds = parseComponentDelaySeconds(draft);
+      const baseMs = draftSeconds === null
+        ? committedMs
+        : Math.max(0, Math.round(draftSeconds * 1000));
+
+      return applyValue(Math.max(0, baseMs + Math.round(deltaSeconds * 1000)));
+    }
+  };
+}
+
+interface ComponentDelayFieldState {
+  controller: ComponentDelayFieldController;
+  inputElement: HTMLInputElement | null;
+}
+
+function renderComponentDelayField(state: ComponentDelayFieldState): ReactElement {
+  const { controller } = state;
+  const syncInput = (value: string): void => {
+    if (state.inputElement) {
+      state.inputElement.value = value;
+    }
+  };
+  const commit = (rawValue: string, input: HTMLInputElement): void => {
+    const result = controller.commit(rawValue);
+    input.value = result.value;
+    syncInput(result.value);
+  };
+  const step = (deltaSeconds: number): void => {
+    syncInput(controller.step(deltaSeconds).value);
+  };
+
+  return (
+    <label className="context-menu__field context-menu__field--timer">
+      <span>Delay (s)</span>
+      <span className="context-menu__timer">
+        <button
+          type="button"
+          className="context-menu__timer-step"
+          aria-label="Decrease delay by 0.1 seconds"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => step(-0.1)}
+        >
+          -0.1
+        </button>
+        <input
+          ref={(element) => {
+            state.inputElement = element;
+          }}
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.1"
+          aria-label="Delay in seconds"
+          defaultValue={controller.getDraft()}
+          onFocus={(event) => event.currentTarget.select()}
+          onChange={(event) => controller.setDraft(event.currentTarget.value)}
+          onBlur={(event) => commit(event.currentTarget.value, event.currentTarget)}
+          onKeyDown={(event) => {
+            if (["Enter", "Escape", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+              event.stopPropagation();
+            }
+
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit(event.currentTarget.value, event.currentTarget);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.currentTarget.value = controller.revert();
+              syncInput(event.currentTarget.value);
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="context-menu__timer-step"
+          aria-label="Increase delay by 0.1 seconds"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => step(0.1)}
+        >
+          +0.1
+        </button>
+      </span>
+    </label>
+  );
+}
+
 export function buildComponentMenu(
   target: ContextMenuTarget,
   actions: ContextMenuActions,
@@ -316,26 +480,19 @@ export function buildComponentMenu(
     });
   }
 
-  if (target.componentType === "NOTO" || target.componentType === "NCTC") {
+  if (target.componentType && TIMED_CONTACT_TYPES.has(target.componentType)) {
     const delayMs = target.componentDelayMs ?? 1000;
+    const fieldState: ComponentDelayFieldState = {
+      controller: createComponentDelayFieldController(delayMs, (nextDelayMs) => {
+        actions.setComponentDelay(componentId, nextDelayMs);
+      }),
+      inputElement: null
+    };
 
     items.push({
       id: "component-delay",
       kind: "custom",
-      render: () => (
-        <label className="context-menu__field">
-          <span>Delay (s)</span>
-          <input
-            type="number"
-            min="0"
-            step="0.1"
-            defaultValue={delayMs / 1000}
-            onChange={(event) => {
-              actions.setComponentDelay(componentId, Number(event.target.value) * 1000);
-            }}
-          />
-        </label>
-      )
+      render: () => renderComponentDelayField(fieldState)
     });
   }
 

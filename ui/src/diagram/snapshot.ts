@@ -27,6 +27,7 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
   "DC_SOURCE",
   "BREAKER_1P",
   "BREAKER_2P",
+  "FUSE",
   "SWITCH_1P",
   "PUSH_BUTTON_NO",
   "PUSH_BUTTON_NC",
@@ -53,7 +54,7 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
 const circuitSnapshotTagKinds = new Set<TagDefinition["kind"]>(["input", "output", "internal"]);
 
 function isBreakerComponentType(type: BuilderComponentType): boolean {
-  return type === "BREAKER_1P" || type === "BREAKER_2P";
+  return type === "BREAKER_1P" || type === "BREAKER_2P" || type === "FUSE";
 }
 
 export function normalizeInstructionLabel(value: string): string {

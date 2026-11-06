@@ -11,6 +11,7 @@ const expectedTable: Record<BuilderComponentType, ComponentOperability> = {
   DC_SOURCE: "none",
   BREAKER_1P: "none",
   BREAKER_2P: "none",
+  FUSE: "none",
   SWITCH_1P: "toggle",
   PUSH_BUTTON_NO: "momentary",
   PUSH_BUTTON_NC: "momentary",

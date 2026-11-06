@@ -4,6 +4,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -84,6 +85,7 @@ import { renderSelector3Pos, SELECTOR_3POS_RING_CENTERS } from "./diagram/select
 import type { Selector3PosPosition } from "./diagram/selector3pos";
 import { OFF_DELAY_ART } from "./diagram/offDelayArt.generated";
 import { LEVEL_SWITCH_ART } from "./diagram/levelSwitchArt.generated";
+import { FUSE_ART } from "./diagram/fuseArt.generated";
 import { SELECTOR_3POS_RING_RADII } from "./diagram/selector3posArt.generated";
 import {
   applySelector3PosPositionToComponents,
@@ -122,7 +124,7 @@ import {
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
 export type LampGlowColorOption = "red" | "green" | "yellow" | "amber" | "orange" | "blue" | "white";
-export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
+export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "FUSE" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
 type ResizedSymbolType = "NOTO" | "NCTC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC";
 
 function isResizedSymbolType(type: BuilderComponentType): type is ResizedSymbolType {
@@ -405,35 +407,89 @@ export const LAMP_GLOW_COLOR_OPTIONS: ReadonlyArray<{ label: string; value: Lamp
   { label: "White", value: "white" }
 ];
 
+export type ComponentCategoryId =
+  | "power"
+  | "protection"
+  | "operators"
+  | "selectors"
+  | "sensors"
+  | "contacts"
+  | "timers"
+  | "outputs"
+  | "other";
+
+interface ComponentCategory {
+  id: ComponentCategoryId;
+  label: string;
+  types: readonly BuilderComponentType[];
+}
+
+/**
+ * Single source of truth for palette / Insert / search ordering.
+ * Types missing from this table are exposed under "Other" and fail the
+ * registry-coverage test.
+ */
+export const COMPONENT_CATEGORIES: readonly ComponentCategory[] = [
+  { id: "power", label: "Power sources", types: ["POWER_SOURCE", "DC_SOURCE"] },
+  { id: "protection", label: "Protection", types: ["BREAKER_1P", "BREAKER_2P", "FUSE", "OL_CONTACT"] },
+  { id: "operators", label: "Pushbuttons & operators", types: ["PUSH_BUTTON_NO", "PUSH_BUTTON_NC", "ESTOP"] },
+  { id: "selectors", label: "Selectors & switches", types: ["SELECTOR_3POS", "SWITCH_1P"] },
+  { id: "sensors", label: "Sensors & limit switches", types: ["LIMIT_SWITCH_NO", "LIMIT_SWITCH_NC", "LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC"] },
+  { id: "contacts", label: "Contacts", types: ["XIC", "XIO"] },
+  { id: "timers", label: "Timers", types: ["NOTC", "NCTO", "NOTO", "NCTC"] },
+  { id: "outputs", label: "Outputs & loads", types: ["OTE", "LAMP", "MOTOR"] },
+  { id: "other", label: "Other", types: [] }
+] as const;
+
+const PALETTE_ENTRY_BY_TYPE: Partial<Record<BuilderComponentType, { description: string; label: string }>> = {
+  POWER_SOURCE: { label: "AC source", description: "Alternating source L1/L2" },
+  DC_SOURCE: { label: "DC source", description: "Direct source + / -" },
+  BREAKER_1P: { label: "1P breaker", description: "Single-pole breaker" },
+  BREAKER_2P: { label: "2P breaker", description: "Two-pole breaker" },
+  FUSE: { label: "Fuse", description: "Protective fuse, always closed" },
+  PUSH_BUTTON_NO: { label: "NO push button", description: "Momentary normally open switch" },
+  PUSH_BUTTON_NC: { label: "NC push button", description: "Momentary normally closed switch" },
+  ESTOP: { label: "E-stop", description: "Emergency stop, mushroom NC button" },
+  SELECTOR_3POS: { label: "3-pos selector", description: "Three-position selector, 4 terminals" },
+  SWITCH_1P: { label: "Single switch", description: "Maintained open/closed switch" },
+  LIMIT_SWITCH_NO: { label: "Limit switch NO", description: "Plunger roller, normally open" },
+  LIMIT_SWITCH_NC: { label: "Limit switch NC", description: "Plunger roller, normally closed" },
+  LEVEL_SWITCH_NO: { label: "Level switch NO", description: "Liquid level switch, normally open" },
+  LEVEL_SWITCH_NC: { label: "Level switch NC", description: "Liquid level switch, normally closed" },
+  OL_CONTACT: { label: "OL contact", description: "Overload contact, toggle from inspector" },
+  XIC: { label: "XIC", description: "Normally open contact" },
+  XIO: { label: "XIO", description: "Normally closed contact" },
+  NOTC: { label: "NOTC", description: "Normally open on-delay contact" },
+  NCTO: { label: "NCTO", description: "Normally closed on-delay contact" },
+  NOTO: { label: "NOTO", description: "Normally open off-delay contact" },
+  NCTC: { label: "NCTC", description: "Normally closed off-delay contact" },
+  OTE: { label: "OTE", description: "Output energize coil" },
+  LAMP: { label: "Lamp", description: "Indicator lamp load" },
+  MOTOR: { label: "Motor", description: "Motor load" }
+};
+
+export const COMPONENT_TYPE_REGISTRY = Object.keys(PALETTE_ENTRY_BY_TYPE) as BuilderComponentType[];
+
+export function getComponentCategory(type: BuilderComponentType): ComponentCategoryId {
+  return COMPONENT_CATEGORIES.find((category) => category.types.includes(type))?.id ?? "other";
+}
+
+export function getUncategorizedComponentTypes(): BuilderComponentType[] {
+  return COMPONENT_TYPE_REGISTRY.filter((type) => getComponentCategory(type) === "other");
+}
+
 export const instructionPalette: Array<{
+  category: ComponentCategoryId;
   description: string;
   label: string;
   type: BuilderComponentType;
-}> = [
-  { type: "POWER_SOURCE", label: "AC source", description: "Alternating source L1/L2" },
-  { type: "DC_SOURCE", label: "DC source", description: "Direct source + / -" },
-  { type: "BREAKER_1P", label: "1P breaker", description: "Single-pole breaker" },
-  { type: "BREAKER_2P", label: "2P breaker", description: "Two-pole breaker" },
-  { type: "SWITCH_1P", label: "Single switch", description: "Maintained open/closed switch" },
-  { type: "PUSH_BUTTON_NO", label: "NO push button", description: "Momentary normally open switch" },
-  { type: "PUSH_BUTTON_NC", label: "NC push button", description: "Momentary normally closed switch" },
-  { type: "ESTOP", label: "E-stop", description: "Emergency stop, mushroom NC button" },
-  { type: "SELECTOR_3POS", label: "3-pos selector", description: "Three-position selector, 4 terminals" },
-  { type: "LIMIT_SWITCH_NO", label: "Limit switch NO", description: "Plunger roller, normally open" },
-  { type: "LIMIT_SWITCH_NC", label: "Limit switch NC", description: "Plunger roller, normally closed" },
-  { type: "LEVEL_SWITCH_NO", label: "Level switch NO", description: "Liquid level switch, normally open" },
-  { type: "LEVEL_SWITCH_NC", label: "Level switch NC", description: "Liquid level switch, normally closed" },
-  { type: "OL_CONTACT", label: "OL contact", description: "Overload contact, toggle from inspector" },
-  { type: "LAMP", label: "Lamp", description: "Indicator lamp load" },
-  { type: "MOTOR", label: "Motor", description: "Motor load" },
-  { type: "XIC", label: "XIC", description: "Normally open contact" },
-  { type: "XIO", label: "XIO", description: "Normally closed contact" },
-  { type: "NOTC", label: "NOTC", description: "Normally open on-delay contact" },
-  { type: "NCTO", label: "NCTO", description: "Normally closed on-delay contact" },
-  { type: "NOTO", label: "NOTO", description: "Normally open off-delay contact" },
-  { type: "NCTC", label: "NCTC", description: "Normally closed off-delay contact" },
-  { type: "OTE", label: "OTE", description: "Output energize coil" }
-];
+}> = COMPONENT_CATEGORIES.flatMap((category) =>
+  category.types.map((type) => ({
+    category: category.id,
+    type,
+    ...PALETTE_ENTRY_BY_TYPE[type]!
+  }))
+);
 
 const LOGIC_PALETTE_TYPES = new Set<BuilderComponentType>(["XIC", "XIO", "NOTC", "NCTO", "NOTO", "NCTC", "OTE"]);
 
@@ -497,6 +553,7 @@ function getSourceCurrentType(type: BuilderComponentType): SourceCurrentType | n
 function isPassThroughType(type: BuilderComponentType): boolean {
   return type === "BREAKER_1P"
     || type === "BREAKER_2P"
+    || type === "FUSE"
     || type === "SWITCH_1P"
     || type === "SELECTOR_3POS"
     || type === "PUSH_BUTTON_NO"
@@ -515,8 +572,8 @@ function isPassThroughType(type: BuilderComponentType): boolean {
     || type === "NCTC";
 }
 
-function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREAKER_2P" {
-  return type === "BREAKER_1P" || type === "BREAKER_2P";
+function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREAKER_2P" | "FUSE" {
+  return type === "BREAKER_1P" || type === "BREAKER_2P" || type === "FUSE";
 }
 
 function isMaintainedSwitchType(
@@ -549,6 +606,7 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
       return "power";
     case "BREAKER_1P":
     case "BREAKER_2P":
+    case "FUSE":
       return "breaker";
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
@@ -993,6 +1051,7 @@ function getConductiveTerminalPairs(
 ): Array<[string, string]> {
   switch (component.type) {
     case "BREAKER_1P":
+    case "FUSE":
       return [["in", "out"]];
     case "BREAKER_2P":
       return [["in-top", "out-top"], ["in-bottom", "out-bottom"]];
@@ -1315,6 +1374,8 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--/ CB1 --";
     case "BREAKER_2P":
       return "--// CB2 --";
+    case "FUSE":
+      return "--[FUSE]--";
     case "SWITCH_1P":
       return "--o/ o--";
     case "PUSH_BUTTON_NO":
@@ -1370,6 +1431,8 @@ function getComponentName(type: BuilderComponentType): string {
       return "Breaker 1P";
     case "BREAKER_2P":
       return "Breaker 2P";
+    case "FUSE":
+      return "Fuse";
     case "SWITCH_1P":
       return "Single switch";
     case "PUSH_BUTTON_NO":
@@ -1463,6 +1526,8 @@ function getDefaultComponentLabel(
       return "CB-1";
     case "BREAKER_2P":
       return "CB-2";
+    case "FUSE":
+      return "FUSE";
     case "SWITCH_1P":
       return "SW-1";
     case "PUSH_BUTTON_NO":
@@ -1552,6 +1617,11 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
         { id: "right", label: type === "POWER_SOURCE" ? "L2" : "+", role: "source", x: rightTerminal.x, y: rightTerminal.y }
       ];
     }
+    case "FUSE":
+      return [
+        { id: "in", label: "1", pairId: "main", role: "input", x: FUSE_ART.anchors[0].x, y: FUSE_ART.anchors[0].y },
+        { id: "out", label: "2", pairId: "main", role: "output", x: FUSE_ART.anchors[1].x, y: FUSE_ART.anchors[1].y }
+      ];
     case "BREAKER_1P":
       {
         const inputTerminal = projectSymbolPoint(6, 32, 64);
@@ -1936,6 +2006,10 @@ const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
     ],
     leads: [symbolLead(6, 28, 32, 64), symbolLead(100, 122, 32, 64)]
   },
+  FUSE: {
+    body: [localRect(FUSE_ART.tightBounds.left, FUSE_ART.tightBounds.top, FUSE_ART.tightBounds.right - FUSE_ART.tightBounds.left, FUSE_ART.tightBounds.bottom - FUSE_ART.tightBounds.top)],
+    leads: []
+  },
   BREAKER_2P: {
     body: [
       symbolRect(34, -6, 60, 26, 64),
@@ -2037,6 +2111,7 @@ const TERMINAL_RING_RADIUS: Record<BuilderComponentType, number> = {
   DC_SOURCE: 8,
   BREAKER_1P: 6.875,
   BREAKER_2P: 6.875,
+  FUSE: 0,
   SWITCH_1P: 7,
   LIMIT_SWITCH_NO: 7,
   LIMIT_SWITCH_NC: 7,
@@ -2129,6 +2204,15 @@ export function getComponentHitShapes(
   component: BuilderComponent,
   coarse = false
 ): ComponentHitShapes {
+  if (component.type === "FUSE") {
+    return {
+      body: [localRect(FUSE_ART.tightBounds.left, FUSE_ART.tightBounds.top, FUSE_ART.tightBounds.right - FUSE_ART.tightBounds.left, FUSE_ART.tightBounds.bottom - FUSE_ART.tightBounds.top)],
+      leads: [],
+      rings: getTerminalRingShapes(component.type),
+      padding: coarse ? HITBOX_COARSE_PADDING : HITBOX_PADDING
+    };
+  }
+
   if (isResizedSymbolType(component.type)) {
     const bounds = getResizedArtBounds(component);
 
@@ -2289,6 +2373,10 @@ const LABEL_ANCHORS: Partial<
 };
 
 function getComponentLabelShapes(component: BuilderComponent): HitShape[] {
+  if (component.type === "FUSE") {
+    return [localRect(FUSE_ART.tightBounds.left, FUSE_ART.tightBounds.top, FUSE_ART.tightBounds.right - FUSE_ART.tightBounds.left, FUSE_ART.tightBounds.bottom - FUSE_ART.tightBounds.top)];
+  }
+
   if (isResizedSymbolType(component.type)) {
     const bounds = getResizedArtBounds(component);
     return [localRect(bounds.left, bounds.top, bounds.width, bounds.height)];
@@ -2418,7 +2506,7 @@ function renderHitShapeElement(
   }
 }
 
-function ComponentHitOverlay({
+const ComponentHitOverlay = memo(function ComponentHitOverlay({
   component,
   debug,
   interactive = true
@@ -2426,7 +2514,7 @@ function ComponentHitOverlay({
   component: BuilderComponent;
   debug: boolean;
   interactive?: boolean;
-}): ReactNode {
+}) {
   const { body, leads, rings, padding } = getComponentHitShapes(component);
   const interactiveShapes = [...body, ...leads];
 
@@ -2472,7 +2560,7 @@ function ComponentHitOverlay({
       ) : null}
     </svg>
   );
-}
+});
 
 function getTerminalCount(type: BuilderComponentType): number {
   return getTerminalDefinitions(type).length;
@@ -2483,6 +2571,7 @@ export function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "BREAKER_2P":
       return "in-top";
     case "BREAKER_1P":
+    case "FUSE":
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
@@ -2522,6 +2611,7 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
     case "SELECTOR_3POS":
       return "out1";
     case "BREAKER_1P":
+    case "FUSE":
     case "SWITCH_1P":
     case "PUSH_BUTTON_NO":
     case "PUSH_BUTTON_NC":
@@ -2642,22 +2732,24 @@ const ESTOP_VECTOR_OPEN_SYMBOL_PATH = "M112.548 105.05 L9.09 105.087 L9.09 100.8
 const ESTOP_VECTOR_OPEN_LABEL_PATHS = ["M24.929 13.461 L24.929 55.134 L19.839 55.097 L19.839 20.402 C16.208 21.513 12.52 22.778 9.09 24.423 L9.09 19.589 Z", "M41.477 19.429 L57.126 13.595 L57.055 55.075 L52.161 55.147 L52.176 20.468 C48.564 21.593 45.063 23.038 41.366 23.853 Z", "M378.999 19.384 C384.339 17.97 389.776 15.806 394.788 13.498 L394.788 55.17 L389.771 55.199 L389.631 20.528 L378.884 24.362 Z", "M416.346 50.868 L436.991 50.904 L436.938 55.171 L409.98 55.176 C409.931 53.992 409.681 52.543 410.146 51.403 C410.647 50.177 412.07 49.262 412.896 48.243 C417.263 42.856 429.654 32.049 429.737 25.237 C429.834 17.278 419.381 15.08 415.453 21.618 C414.614 23.015 414.452 24.783 414.168 26.348 L409.169 26.348 C409.358 23.304 409.909 20.535 411.891 18.092 C417.461 11.226 431.622 11.833 434.599 21.001 C437.922 31.24 422.471 44.019 416.346 50.868 Z"];
 const ESTOP_VECTOR_OPEN_RINGS = [[302.603, 102.873], [134.947, 102.873]] as const;
 
+interface SymbolGraphicOptions {
+  breakerClosed?: boolean;
+  coilActive?: boolean;
+  contactActuated?: boolean;
+  contactClosed?: boolean;
+  debugZones?: boolean;
+  energized?: boolean;
+  estopPressed?: boolean;
+  label?: string;
+  pushButtonPressed?: boolean;
+  selectorPosition?: Selector3PosPosition;
+  switchClosed?: boolean;
+  terminalLabels?: Partial<Record<string, string>> | undefined;
+}
+
 function renderSymbolGraphic(
   type: BuilderComponentType,
-  options: {
-    breakerClosed?: boolean;
-    coilActive?: boolean;
-    contactActuated?: boolean;
-    contactClosed?: boolean;
-    debugZones?: boolean;
-    energized?: boolean;
-    estopPressed?: boolean;
-    label?: string;
-    pushButtonPressed?: boolean;
-    selectorPosition?: Selector3PosPosition;
-    switchClosed?: boolean;
-    terminalLabels?: Partial<Record<string, string>>;
-  } = {}
+  options: SymbolGraphicOptions = {}
 ): ReactNode {
   const getTerminalLabelText = (terminalId: string, fallbackLabel: string): string => {
     const label = options.terminalLabels?.[terminalId]?.trim();
@@ -2735,6 +2827,22 @@ function renderSymbolGraphic(
           <circle cx="34" cy="32" r="5.5" className="diagram-symbol__terminal" />
           <circle cx="94" cy="32" r="5.5" className="diagram-symbol__terminal" />
           <path d="M41 26 C50 8 78 8 87 26" className="diagram-symbol__line" fill="none" />
+        </svg>
+      );
+    case "FUSE":
+      return (
+        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
+          <g
+            transform={FUSE_ART.transform}
+            className="diagram-symbol__vector--normalized"
+            strokeWidth={FUSE_ART.strokeWidth}
+          >
+            {FUSE_ART.elements.map((element, index) => element.tag === "rect" ? (
+              <rect key={index} x={element.x} y={element.y} width={element.width} height={element.height} />
+            ) : (
+              <path key={index} d={element.d} />
+            ))}
+          </g>
         </svg>
       );
     case "BREAKER_2P":
@@ -3201,6 +3309,13 @@ function renderSymbolGraphic(
       );
   }
 }
+
+const DiagramSymbol = memo(function DiagramSymbol({
+  type,
+  ...options
+}: SymbolGraphicOptions & { type: BuilderComponentType }) {
+  return <>{renderSymbolGraphic(type, options)}</>;
+});
 
 function getDefaultTag(type: InstructionType, tags: TagDefinition[]): string {
   const kindPriority =
@@ -6909,16 +7024,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     () => deriveProgram(connectivityComponents, wires),
     [connectivityComponents, wires]
   );
-  const electricalState = computeElectricalState(
-    connectivityComponents,
-    wires,
-    running,
-    liveTagValues,
-    resolvedPhysicalTagValuesRef.current,
-    timedContactStateByComponentIdRef.current,
-    electricalElapsedMs
+  const electricalState = useMemo(
+    () => computeElectricalState(
+      connectivityComponents,
+      wires,
+      running,
+      liveTagValues,
+      resolvedPhysicalTagValuesRef.current,
+      timedContactStateByComponentIdRef.current,
+      electricalElapsedMs
+    ),
+    [connectivityComponents, electricalElapsedMs, liveTagValues, running, tick, wires]
   );
-  const derivedProgramSignature = JSON.stringify(derivedState.program);
+  const derivedProgramSignature = useMemo(
+    () => JSON.stringify(derivedState.program),
+    [derivedState.program]
+  );
   const resolvedWires = useMemo(
     () => wires.map((wire) => ({
       ...wire,
@@ -6926,6 +7047,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       selectorTrimmed: wireHasSelectorEndpoint(wire, components)
     })),
     [components, planeSettings, wires]
+  );
+  const wireRenderGeometry = useMemo(
+    () => resolvedWires.map((wire) => ({
+      pointString: wire.points.map((point) => `${point.x},${point.y}`).join(" "),
+      wire,
+      wirePathD: buildWirePathD(wire.points, findWireCrossings(wire, resolvedWires))
+    })),
+    [resolvedWires]
   );
   // Los nodos editables deben conservar el mismo numero de puntos que el cable
   // guardado; los stubs son solo visuales y no se pueden arrastrar.
@@ -7078,6 +7207,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
             type="button"
             className={`button button--ghost builder-palette-tile builder-palette-tile--horizontal ${selectedPaletteType === instruction.type ? "builder-palette-tile--selected" : ""}`.trim()}
             aria-pressed={selectedPaletteType === instruction.type}
+            data-category={instruction.category}
             onMouseDown={(event) => handlePaletteMouseDown(event, instruction)}
             onClick={() => {
               if (paletteDragMovedRef.current) {
@@ -10423,10 +10553,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   aria-hidden="true"
                 >
                   <SheetLayer planeSettings={planeSettings} sheet={sheetMetadata} />
-                  {resolvedWires.map((wire) => {
-                  const pointString = wire.points.map((point) => `${point.x},${point.y}`).join(" ");
-                  const wireHops = findWireCrossings(wire, resolvedWires);
-                  const wirePathD = buildWirePathD(wire.points, wireHops);
+                  {wireRenderGeometry.map(({ pointString, wire, wirePathD }) => {
                   const isSelected = selection?.kind === "wire" && selection.id === wire.id;
                   const isEnergized = running && electricalState.energizedWireIds.has(wire.id);
                   const idleCurrentType = electricalState.idleWireCurrentById.get(wire.id) ?? null;
@@ -10769,6 +10896,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           cancelPendingSwitchToggle(component.id);
                         }
 
+                        // Double-click rotates every component while editing.
+                        // rotateComponent already refuses while the simulator is running.
                         rotateComponent(component.id, 1);
                       }}
                       onClick={(event) => {
@@ -10961,22 +11090,23 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                             : { transform: `rotate(${normalizeQuarterTurns(component.rotation) * 90}deg)` })
                         }}
                       >
-                        {renderSymbolGraphic(component.type, {
-                          coilActive,
-                          contactActuated,
-                          contactClosed,
-                          debugZones: showHitboxDebug,
-                          energized: visualEnergized,
-                          estopPressed: component.type === "ESTOP" && component.isPressed === true,
-                          label: component.label,
-                          pushButtonPressed,
-                          ...(isSelector3PosType(component.type)
+                        <DiagramSymbol
+                          type={component.type}
+                          coilActive={coilActive}
+                          contactActuated={contactActuated}
+                          contactClosed={contactClosed}
+                          debugZones={showHitboxDebug}
+                          energized={visualEnergized}
+                          estopPressed={component.type === "ESTOP" && component.isPressed === true}
+                          label={component.label}
+                          pushButtonPressed={pushButtonPressed}
+                          {...(isSelector3PosType(component.type)
                             ? { selectorPosition: component.selectorPosition ?? 2 }
-                            : {}),
-                          terminalLabels: component.terminalLabels,
-                          ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {}),
-                          ...(isMaintainedSwitchType(component.type) ? { switchClosed: isMaintainedSwitchClosed(component) } : {})
-                        })}
+                            : {})}
+                          terminalLabels={component.terminalLabels}
+                          {...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {})}
+                          {...(isMaintainedSwitchType(component.type) ? { switchClosed: isMaintainedSwitchClosed(component) } : {})}
+                        />
                         <ComponentHitOverlay
                           component={component}
                           debug={showHitboxDebug}

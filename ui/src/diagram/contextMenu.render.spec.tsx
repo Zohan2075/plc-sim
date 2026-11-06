@@ -17,7 +17,8 @@ import {
   buildCanvasMenu,
   buildComponentMenu,
   ContextMenuActionRow,
-  ContextMenuSubmenuRow
+  ContextMenuSubmenuRow,
+  createComponentDelayFieldController
 } from "./contextMenu";
 import type {
   ContextMenuActions,
@@ -326,35 +327,95 @@ describe("context menu row rendering", () => {
     expect(actionItems(items).map((item) => item.label)).not.toContain("Operate");
   });
 
-  it("adds the delay field only for off-delay contacts", () => {
-    const actions = createActions();
-    const target: ContextMenuTarget = {
-      ...componentTarget,
-      componentDelayMs: 500,
-      componentId: "builder-component-noto",
-      componentType: "NOTO"
-    };
-    const items = buildComponentMenu(target, actions, lampOptions);
-    const delayItem = items.find((item) => item.kind === "custom" && item.id === "component-delay");
+  it("adds the delay field for every timed contact type", () => {
+    for (const componentType of ["NOTC", "NCTO", "NOTO", "NCTC"] as const) {
+      const actions = createActions();
+      const target: ContextMenuTarget = {
+        ...componentTarget,
+        componentDelayMs: 500,
+        componentId: `builder-component-${componentType.toLowerCase()}`,
+        componentType
+      };
+      const items = buildComponentMenu(target, actions, lampOptions);
+      const delayItem = items.find((item) => item.kind === "custom" && item.id === "component-delay");
 
-    expect(delayItem).toBeDefined();
+      expect(delayItem).toBeDefined();
 
-    const rendered = delayItem!.kind === "custom" ? delayItem!.render() : null;
-    const markup = renderToStaticMarkup(rendered);
+      const rendered = delayItem!.kind === "custom" ? delayItem!.render() : null;
+      const markup = renderToStaticMarkup(rendered);
 
-    expect(markup).toContain("Delay (s)");
-    expect(markup).toContain('type="number"');
-    expect(markup).toContain('min="0"');
-    expect(markup).toContain('step="0.1"');
-    expect(markup).toContain('value="0.5"');
+      expect(markup).toContain("Delay (s)");
+      expect(markup).toContain('type="number"');
+      expect(markup).toContain('min="0"');
+      expect(markup).toContain('step="0.1"');
+      expect(markup).toContain('value="0.5"');
+      expect(markup).toContain("-0.1");
+      expect(markup).toContain("+0.1");
+    }
 
-    const input = (rendered as unknown as {
-      props: { children: Array<{ props: { onChange: (event: { target: { value: string } }) => void } }> };
-    }).props.children[1]!;
-    input.props.onChange({ target: { value: "0.75" } });
-    expect(actions.setComponentDelay).toHaveBeenCalledWith("builder-component-noto", 750);
-    expect(buildComponentMenu(componentTarget, actions, lampOptions)
+    expect(buildComponentMenu(componentTarget, createActions(), lampOptions)
       .some((item) => item.kind === "custom" && item.id === "component-delay")).toBe(false);
+  });
+
+  it("keeps typed delay drafts local and commits once on blur or Enter", () => {
+    const commits: number[] = [];
+    const controller = createComponentDelayFieldController(500, (delayMs) => {
+      commits.push(delayMs);
+    });
+
+    controller.setDraft("0.7");
+    controller.setDraft("0.75");
+    expect(commits).toEqual([]);
+    expect(controller.commit()).toEqual({ committed: true, value: "0.75" });
+    expect(commits).toEqual([750]);
+    expect(controller.commit()).toEqual({ committed: false, value: "0.75" });
+    expect(commits).toEqual([750]);
+
+    const enterController = createComponentDelayFieldController(500, (delayMs) => {
+      commits.push(delayMs);
+    });
+
+    enterController.setDraft("1.25");
+    expect(enterController.commit()).toEqual({ committed: true, value: "1.25" });
+    expect(commits).toEqual([750, 1250]);
+  });
+
+  it("reverts invalid or escaped delay drafts without committing", () => {
+    const commits: number[] = [];
+    const controller = createComponentDelayFieldController(500, (delayMs) => {
+      commits.push(delayMs);
+    });
+
+    controller.setDraft("");
+    expect(controller.commit()).toEqual({ committed: false, value: "0.5" });
+    controller.setDraft("not-a-number");
+    expect(controller.commit()).toEqual({ committed: false, value: "0.5" });
+    controller.setDraft("9.9");
+    expect(controller.revert()).toBe("0.5");
+    expect(controller.getDraft()).toBe("0.5");
+    expect(commits).toEqual([]);
+  });
+
+  it("steps the delay by 0.1 seconds with one commit per press", () => {
+    const commits: number[] = [];
+    const controller = createComponentDelayFieldController(500, (delayMs) => {
+      commits.push(delayMs);
+    });
+
+    expect(controller.step(0.1)).toEqual({ committed: true, value: "0.6" });
+    expect(commits).toEqual([600]);
+    expect(controller.step(0.1)).toEqual({ committed: true, value: "0.7" });
+    expect(commits).toEqual([600, 700]);
+    expect(controller.step(-0.1)).toEqual({ committed: true, value: "0.6" });
+    expect(commits).toEqual([600, 700, 600]);
+
+    const draftController = createComponentDelayFieldController(500, (delayMs) => {
+      commits.push(delayMs);
+    });
+
+    draftController.setDraft("0.7");
+    expect(draftController.step(0.1)).toEqual({ committed: true, value: "0.8" });
+    expect(commits.at(-1)).toBe(800);
   });
 
   it("adds the level-switch operate item only for level switches", () => {

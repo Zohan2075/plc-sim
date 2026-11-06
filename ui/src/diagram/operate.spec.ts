@@ -81,7 +81,7 @@ describe("operate actions (no simulator-running dependency)", () => {
       expect(toggledBack[0]!.isClosed).toBe(false);
     }
 
-    for (const type of ["BREAKER_1P", "BREAKER_2P"] as const) {
+    for (const type of ["BREAKER_1P", "BREAKER_2P", "FUSE"] as const) {
       for (const isClosed of [false, true, undefined] as const) {
         const initial = component(type, isClosed === undefined ? {} : { isClosed });
         expect(isBreakerClosed(initial)).toBe(true);
@@ -94,6 +94,22 @@ describe("operate actions (no simulator-running dependency)", () => {
 
     const pushButton = component("PUSH_BUTTON_NO", { isPressed: false });
     expect(toggleComponentOperateState([pushButton], pushButton.id)[0]).toBe(pushButton);
+  });
+
+  it("conducts through a fuse exactly like a closed breaker and lights a lamp", () => {
+    const source = component("POWER_SOURCE", { id: "fuse-source", x: 40, y: 40 });
+    const fuse = component("FUSE", { id: "fuse", x: 240, y: 40 });
+    const lamp = component("LAMP", { id: "fuse-lamp", tag: "L", x: 440, y: 40 });
+    const wires = [
+      wire(source, "right", fuse, "in"),
+      wire(fuse, "out", lamp, "in"),
+      wire(lamp, "out", source, "left")
+    ];
+
+    expect(isBreakerClosed(fuse)).toBe(true);
+    const live = computeElectricalState([source, fuse, lamp], wires, true, {});
+    expect(live.energizedComponentIds.has(lamp.id)).toBe(true);
+    expect(toggleComponentOperateState([fuse], fuse.id)[0]).toBe(fuse);
   });
 
   it("conducts level switches through the same maintained-switch path as limit switches", () => {

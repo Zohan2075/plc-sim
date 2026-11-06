@@ -52,7 +52,7 @@ function wire(
 }
 
 function buildCircuit(
-  breakerType: "BREAKER_1P" | "BREAKER_2P",
+  breakerType: "BREAKER_1P" | "BREAKER_2P" | "FUSE",
   isClosed?: boolean
 ): { breaker: BuilderComponent; components: BuilderComponent[]; lamp: BuilderComponent; wires: BuilderWire[] } {
   const source = component("POWER_SOURCE", 40, 40, { sourceVoltage: 120 });
@@ -76,7 +76,7 @@ function buildCircuit(
 
 describe("non-operable breakers", () => {
   it("conducts with false, true, or missing old isClosed through stop and restart", () => {
-    for (const breakerType of ["BREAKER_1P", "BREAKER_2P"] as const) {
+    for (const breakerType of ["BREAKER_1P", "BREAKER_2P", "FUSE"] as const) {
       for (const isClosed of [false, true, undefined] as const) {
         const circuit = buildCircuit(breakerType, isClosed);
 

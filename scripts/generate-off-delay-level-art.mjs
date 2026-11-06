@@ -767,17 +767,17 @@ function main() {
   const levelSymbols = [
     buildElementSymbol(
       "LEVEL_SWITCH_NO",
-      [levelElements[0], levelElements[1], levelElements[2]],
+      [levelElements[0], levelElements[1], levelElements[2], levelElements[3]],
+      levelElements[3],
       levelElements[2],
-      levelElements[1],
       LEVEL_SOURCE,
       LEVEL_OUTPUT_PITCH
     ),
     buildElementSymbol(
       "LEVEL_SWITCH_NC",
-      [levelElements[3], levelElements[4], levelElements[5]],
+      [levelElements[4], levelElements[5], levelElements[6]],
+      levelElements[6],
       levelElements[5],
-      levelElements[4],
       LEVEL_SOURCE,
       LEVEL_OUTPUT_PITCH
     )

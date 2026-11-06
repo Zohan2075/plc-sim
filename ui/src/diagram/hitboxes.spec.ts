@@ -23,6 +23,7 @@ const ALL_TYPES: BuilderComponentType[] = [
   "DC_SOURCE",
   "BREAKER_1P",
   "BREAKER_2P",
+  "FUSE",
   "SWITCH_1P",
   "PUSH_BUTTON_NO",
   "PUSH_BUTTON_NC",
@@ -52,6 +53,7 @@ type TargetType =
   | "ESTOP"
   | "BREAKER_1P"
   | "BREAKER_2P"
+  | "FUSE"
   | "LAMP"
   | "NOTC"
   | "NOTO"
@@ -68,6 +70,7 @@ const TARGET_TYPES: TargetType[] = [
   "ESTOP",
   "BREAKER_1P",
   "BREAKER_2P",
+  "FUSE",
   "LAMP",
   "NOTC",
   "NOTO",
@@ -85,6 +88,7 @@ const BODY_POINTS: Record<TargetType, Point> = {
   ESTOP: { x: 80, y: 51 },
   BREAKER_1P: { x: 80, y: 40 },
   BREAKER_2P: { x: 80, y: 75 },
+  FUSE: { x: 80, y: 48.5 },
   LAMP: { x: 80, y: 51 },
   NOTC: { x: 80, y: 50 },
   NOTO: { x: 80, y: 50 },

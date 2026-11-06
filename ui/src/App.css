@@ -2697,6 +2697,52 @@
 	border-color: rgba(14, 116, 144, 0.45);
 }
 
+.context-menu__field--timer {
+	gap: 8px;
+}
+
+.context-menu__timer {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.context-menu__timer input {
+	width: 62px;
+	min-height: 26px;
+	padding: 0 6px;
+	color: var(--text-strong);
+	font-size: 0.78rem;
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+	background: #fff;
+	border: 1px solid rgba(29, 78, 216, 0.25);
+	border-radius: 6px;
+	outline: none;
+}
+
+.context-menu__timer input:focus-visible {
+	border-color: rgba(37, 99, 235, 0.6);
+	box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.context-menu__timer-step {
+	min-width: 34px;
+	min-height: 26px;
+	padding: 0 4px;
+	color: var(--text-strong);
+	font-size: 0.68rem;
+	font-weight: 600;
+	background: #f8fafc;
+	border: 1px solid rgba(15, 23, 42, 0.16);
+	border-radius: 5px;
+	cursor: pointer;
+}
+
+.context-menu__timer-step:hover {
+	background: rgba(37, 99, 235, 0.1);
+}
+
 .context-menu__input {
 	width: 100%;
 	min-height: 34px;
@@ -2717,6 +2763,15 @@
 	}
 
 	.context-menu__thickness button {
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	.context-menu__timer input {
+		min-height: 44px;
+	}
+
+	.context-menu__timer-step {
 		min-width: 44px;
 		min-height: 44px;
 	}
