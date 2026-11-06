@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 export type RibbonTabId =
@@ -25,19 +25,55 @@ export function getRibbonTabDoubleClickAction(
   return tabId === activeTab ? "toggle-collapse" : "none";
 }
 
+export function getNextRibbonTabIndex(
+  currentIndex: number,
+  count: number,
+  direction: 1 | -1
+): number {
+  if (count <= 0) {
+    return -1;
+  }
+
+  const base = currentIndex < 0 ? (direction === 1 ? -1 : 0) : currentIndex;
+
+  return (base + direction + count) % count;
+}
+
+export function getRibbonTabEdgeIndex(count: number, edge: "first" | "last"): number {
+  if (count <= 0) {
+    return -1;
+  }
+
+  return edge === "first" ? 0 : count - 1;
+}
+
 export function RibbonTabBar(props: {
   activeTab: RibbonTabId;
   collapsed: boolean;
+  onEscape?: () => void;
   onSelect: (tab: RibbonTabId) => void;
   onToggleCollapse: () => void;
   tabs: RibbonTab[];
 }) {
-  const { activeTab, collapsed, onSelect, onToggleCollapse, tabs } = props;
+  const { activeTab, collapsed, onEscape, onSelect, onToggleCollapse, tabs } = props;
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const activeIndex = tabs.findIndex((tab) => tab.id === activeTab);
+
+  const focusTab = (nextIndex: number) => {
+    const nextTab = tabs[nextIndex];
+
+    if (!nextTab) {
+      return;
+    }
+
+    onSelect(nextTab.id);
+    tabRefs.current[nextIndex]?.focus();
+  };
 
   return (
     <div className="ribbon-tabs-row">
       <div className="ribbon-tabs" role="tablist" aria-label="Ribbon tabs">
-        {tabs.map((tab) => {
+        {tabs.map((tab, index) => {
           const isActive = tab.id === activeTab;
           const className = [
             "ribbon-tab",
@@ -48,10 +84,14 @@ export function RibbonTabBar(props: {
           return (
             <button
               key={tab.id}
+              ref={(element) => {
+                tabRefs.current[index] = element;
+              }}
               type="button"
               role="tab"
               aria-selected={isActive}
               className={className}
+              tabIndex={isActive ? 0 : activeIndex === -1 && index === 0 ? 0 : -1}
               onClick={() => {
                 onSelect(tab.id);
               }}
@@ -61,6 +101,25 @@ export function RibbonTabBar(props: {
                   && getRibbonTabDoubleClickAction(tab.id, activeTab) === "toggle-collapse"
                 ) {
                   onToggleCollapse();
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  focusTab(getNextRibbonTabIndex(
+                    index,
+                    tabs.length,
+                    event.key === "ArrowRight" ? 1 : -1
+                  ));
+                } else if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  focusTab(getRibbonTabEdgeIndex(
+                    tabs.length,
+                    event.key === "Home" ? "first" : "last"
+                  ));
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  onEscape?.();
                 }
               }}
             >

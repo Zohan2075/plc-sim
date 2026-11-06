@@ -102,6 +102,104 @@ describe("timed contact reset", () => {
   });
 });
 
+function buildOffDelayScene(type: "NOTO" | "NCTC", delayMs: number) {
+  const source = component("POWER_SOURCE", 40, 40);
+  const start = component("SWITCH_1P", 240, 40, { isClosed: true });
+  const driver = component("OTE", 440, 40, { tag: "T" });
+  const output = component("OTE", 440, 240, { tag: "U" });
+  const timer = component(type, 240, 240, { tag: "T", delayMs });
+  const wires = [
+    wire(source, "right", start, "in"),
+    wire(start, "out", driver, "in"),
+    wire(driver, "out", source, "left"),
+    wire(source, "right", timer, "in"),
+    wire(timer, "out", output, "in"),
+    wire(output, "out", source, "left")
+  ];
+
+  return { components: [source, start, driver, output, timer], timer, wires };
+}
+
+describe("off-delay UI preview", () => {
+  for (const type of ["NOTO", "NCTC"] as const) {
+    it(`${type}: immediate actuation, delayed return, cancel and restart`, () => {
+      const scene = buildOffDelayScene(type, 500);
+      const restOutput = type === "NCTC";
+      let tags: Record<string, boolean> = {};
+      let timed: Record<string, { actuationElapsedMs: number; elapsedMs: number }> = {};
+      const step = (startClosed: boolean, elapsedMs: number) => {
+        const components = scene.components.map((entry) =>
+          entry.id === scene.components[1]!.id ? { ...entry, isClosed: startClosed } : entry
+        );
+        const result = resolvePhysicalInstructionTagValues(
+          components,
+          scene.wires,
+          {},
+          tags,
+          timed,
+          elapsedMs
+        );
+        tags = result.resolvedTagValues;
+        timed = result.timedContactStateByComponentId;
+      };
+
+      step(true, 0);
+      expect(tags.T).toBe(true);
+      expect(tags.U).toBe(!restOutput);
+      expect(timed[scene.timer.id]?.elapsedMs).toBe(0);
+
+      step(false, 100);
+      expect(tags.T).toBe(false);
+      expect(tags.U).toBe(!restOutput);
+      expect(timed[scene.timer.id]?.elapsedMs).toBe(100);
+
+      step(false, 400);
+      expect(tags.U).toBe(restOutput);
+      expect(timed[scene.timer.id]).toBeUndefined();
+
+      step(true, 0);
+      expect(tags.U).toBe(!restOutput);
+      expect(timed[scene.timer.id]?.elapsedMs).toBe(0);
+
+      step(false, 100);
+      expect(tags.U).toBe(!restOutput);
+      expect(timed[scene.timer.id]?.elapsedMs).toBe(100);
+
+      step(true, 0);
+      expect(tags.U).toBe(!restOutput);
+      expect(timed[scene.timer.id]?.elapsedMs).toBe(0);
+
+      step(false, 100);
+      expect(timed[scene.timer.id]?.elapsedMs).toBe(100);
+      step(false, 400);
+      expect(tags.U).toBe(restOutput);
+      expect(timed[scene.timer.id]).toBeUndefined();
+    });
+
+    it(`${type}: delay 0 behaves like a plain contact`, () => {
+      const scene = buildOffDelayScene(type, 0);
+      const restOutput = type === "NCTC";
+      let tags: Record<string, boolean> = {};
+      let timed: Record<string, { actuationElapsedMs: number; elapsedMs: number }> = {};
+      const step = (startClosed: boolean) => {
+        const components = scene.components.map((entry) =>
+          entry.id === scene.components[1]!.id ? { ...entry, isClosed: startClosed } : entry
+        );
+        const result = resolvePhysicalInstructionTagValues(components, scene.wires, {}, tags, timed, 0);
+        tags = result.resolvedTagValues;
+        timed = result.timedContactStateByComponentId;
+      };
+
+      step(true);
+      expect(tags.U).toBe(!restOutput);
+
+      step(false);
+      expect(tags.U).toBe(restOutput);
+      expect(timed[scene.timer.id]).toBeUndefined();
+    });
+  }
+});
+
 const timerCascade = JSON.parse(
   readFileSync(new URL("./__fixtures__/timer-cascade.circuit.json", import.meta.url), "utf8")
 ) as { components: BuilderComponent[]; wires: BuilderWire[] };

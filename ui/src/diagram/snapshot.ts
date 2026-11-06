@@ -34,6 +34,8 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
   "SELECTOR_3POS",
   "LIMIT_SWITCH_NO",
   "LIMIT_SWITCH_NC",
+  "LEVEL_SWITCH_NO",
+  "LEVEL_SWITCH_NC",
   "OL_CONTACT",
   "LAMP",
   "MOTOR",
@@ -41,6 +43,8 @@ const circuitSnapshotComponentTypes = new Set<BuilderComponentType>([
   "XIO",
   "NOTC",
   "NCTO",
+  "NOTO",
+  "NCTC",
   "OTE",
   "OTL",
   "OTU"

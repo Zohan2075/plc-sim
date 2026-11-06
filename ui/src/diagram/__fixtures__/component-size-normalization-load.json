@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "name": "Component size normalization smoke",
+  "savedAt": "2026-11-05T12:00:00.000Z",
+  "settings": {
+    "gridSpacing": 18,
+    "height": 940,
+    "scanIntervalMs": 150,
+    "width": 1720
+  },
+  "sheet": {
+    "date": "2026-11-05",
+    "page": "1",
+    "projectName": "Component size normalization smoke",
+    "scale": "1:1"
+  },
+  "components": [
+    { "id": "resize-noto", "type": "NOTO", "label": "SMOKE-NOTO", "rotation": 0, "tag": "T1", "usesCustomLabel": true, "x": 216, "y": 198, "delayMs": 1000 },
+    { "id": "resize-nctc", "type": "NCTC", "label": "SMOKE-NCTC", "rotation": 1, "tag": "T2", "usesCustomLabel": true, "x": 216, "y": 342, "delayMs": 1000 },
+    { "id": "resize-level-no", "type": "LEVEL_SWITCH_NO", "label": "SMOKE-LEVEL-NO", "rotation": 2, "tag": "LEVEL1", "usesCustomLabel": true, "x": 216, "y": 486, "isClosed": false },
+    { "id": "resize-level-nc", "type": "LEVEL_SWITCH_NC", "label": "SMOKE-LEVEL-NC", "rotation": 3, "tag": "LEVEL2", "usesCustomLabel": true, "x": 216, "y": 630, "isClosed": true },
+    { "id": "selector-r0", "type": "SELECTOR_3POS", "label": "SMOKE-SEL-R0", "rotation": 0, "tag": null, "usesCustomLabel": true, "x": 1440, "y": 180, "selectorPosition": 2 },
+    { "id": "selector-r1", "type": "SELECTOR_3POS", "label": "SMOKE-SEL-R1", "rotation": 1, "tag": null, "usesCustomLabel": true, "x": 1440, "y": 360, "selectorPosition": 2 },
+    { "id": "selector-r2", "type": "SELECTOR_3POS", "label": "SMOKE-SEL-R2", "rotation": 2, "tag": null, "usesCustomLabel": true, "x": 1440, "y": 540, "selectorPosition": 2 },
+    { "id": "selector-r3", "type": "SELECTOR_3POS", "label": "SMOKE-SEL-R3", "rotation": 3, "tag": null, "usesCustomLabel": true, "x": 1440, "y": 720, "selectorPosition": 2 },
+    { "id": "older-xic-1", "type": "XIC", "label": "SMOKE-OLD-1", "rotation": 0, "tag": "T1", "usesCustomLabel": true, "x": 540, "y": 198 },
+    { "id": "older-xic-2", "type": "XIC", "label": "SMOKE-OLD-2", "rotation": 0, "tag": "T2", "usesCustomLabel": true, "x": 540, "y": 342 },
+    { "id": "older-xic-3", "type": "XIC", "label": "SMOKE-OLD-3", "rotation": 0, "tag": "LEVEL1", "usesCustomLabel": true, "x": 540, "y": 486 },
+    { "id": "older-xic-4", "type": "XIC", "label": "SMOKE-OLD-4", "rotation": 0, "tag": "LEVEL2", "usesCustomLabel": true, "x": 540, "y": 630 },
+    { "id": "older-xic-5", "type": "XIC", "label": "SMOKE-OLD-5", "rotation": 0, "tag": "T5", "usesCustomLabel": true, "x": 900, "y": 810 },
+    { "id": "older-lamp", "type": "LAMP", "label": "SMOKE-OLD-LAMP", "rotation": 0, "tag": "T5", "usesCustomLabel": true, "x": 1080, "y": 810 }
+  ],
+  "wires": [
+    {
+      "id": "smoke-wire-noto",
+      "points": [
+        { "x": 344, "y": 246.5 },
+        { "x": 400, "y": 246.5 },
+        { "x": 410, "y": 248.5 },
+        { "x": 420, "y": 246.5 },
+        { "x": 548, "y": 249 }
+      ],
+      "startPortId": "resize-noto:out",
+      "endPortId": "older-xic-1:in",
+      "color": "#111827",
+      "thickness": 3.5
+    },
+    {
+      "id": "smoke-wire-nctc",
+      "points": [{ "x": 344, "y": 390 }, { "x": 400, "y": 390 }, { "x": 548, "y": 393 }],
+      "startPortId": "resize-nctc:out",
+      "endPortId": "older-xic-2:in",
+      "color": "#111827",
+      "thickness": 3.5
+    },
+    {
+      "id": "smoke-wire-level-no",
+      "points": [{ "x": 344, "y": 534 }, { "x": 400, "y": 534 }, { "x": 548, "y": 537 }],
+      "startPortId": "resize-level-no:out",
+      "endPortId": "older-xic-3:in",
+      "color": "#111827",
+      "thickness": 3.5
+    },
+    {
+      "id": "smoke-wire-level-nc",
+      "points": [{ "x": 344, "y": 678 }, { "x": 400, "y": 678 }, { "x": 548, "y": 681 }],
+      "startPortId": "resize-level-nc:out",
+      "endPortId": "older-xic-4:in",
+      "color": "#111827",
+      "thickness": 3.5
+    },
+    {
+      "id": "smoke-wire-older-only",
+      "points": [{ "x": 1044, "y": 861 }, { "x": 1090, "y": 863 }, { "x": 1100, "y": 861 }, { "x": 1224, "y": 861 }],
+      "startPortId": "older-xic-5:out",
+      "endPortId": "older-lamp:in",
+      "color": "#b45309",
+      "thickness": 2.5
+    }
+  ],
+  "program": { "rungs": [] },
+  "tags": []
+}

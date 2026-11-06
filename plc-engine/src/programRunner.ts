@@ -15,7 +15,7 @@ interface TimedContactRuntimeState {
 const TIMED_CONTACT_ACTUATION_DELAY_MS = 250;
 
 function isTimedContactInstruction(instruction: InstructionBase): instruction is TimedContactInstruction {
-  return instruction.type === "NOTC" || instruction.type === "NCTO";
+  return instruction.type === "NOTC" || instruction.type === "NCTO" || instruction.type === "NOTO" || instruction.type === "NCTC";
 }
 
 export class ProgramRunner {
@@ -117,7 +117,9 @@ export class ProgramRunner {
         return powerBefore && !value;
       }
       case "NOTC":
-      case "NCTO": {
+      case "NCTO":
+      case "NOTO":
+      case "NCTC": {
         const inputValue = memory.readDuringScan(instruction.tag, inputImage);
         const { contactClosed } = this.advanceTimedContact(instruction, inputValue, elapsedMsThisScan);
         return powerBefore && contactClosed;
@@ -173,7 +175,9 @@ export class ProgramRunner {
         };
       }
       case "NOTC":
-      case "NCTO": {
+      case "NCTO":
+      case "NOTO":
+      case "NCTC": {
         const inputValue = memory.readDuringScan(instruction.tag, inputImage);
         const timedContactState = this.advanceTimedContact(instruction, inputValue, elapsedMsThisScan);
         const powerAfter = powerBefore && timedContactState.contactClosed;
@@ -238,6 +242,10 @@ export class ProgramRunner {
     inputValue: boolean,
     elapsedMsThisScan: number
   ): { contactClosed: boolean; delayMs: number; done: boolean; elapsedMs: number } {
+    if (instruction.type === "NOTO" || instruction.type === "NCTC") {
+      return this.advanceOffDelayContact(instruction, inputValue, elapsedMsThisScan);
+    }
+
     const delayMs = this.normalizeDelayMs(instruction.delayMs);
 
     if (!inputValue) {
@@ -272,6 +280,69 @@ export class ProgramRunner {
       contactClosed: instruction.type === "NOTC" ? done : !done,
       delayMs,
       done,
+      elapsedMs: nextElapsedMs
+    };
+  }
+
+  private advanceOffDelayContact(
+    instruction: TimedContactInstruction,
+    inputValue: boolean,
+    elapsedMsThisScan: number
+  ): { contactClosed: boolean; delayMs: number; done: boolean; elapsedMs: number } {
+    const delayMs = this.normalizeDelayMs(instruction.delayMs);
+    const restClosed = instruction.type === "NCTC";
+
+    if (inputValue) {
+      // The record is the "energized" marker while the driver is true; the
+      // off-delay timer is reset, not deleted, so the first false scan starts
+      // the delay instead of returning to rest immediately.
+      this.timedContactStateByInstructionId.set(instruction.id, {
+        actuationElapsedMs: 0,
+        elapsedMs: 0
+      });
+
+      return {
+        contactClosed: !restClosed,
+        delayMs,
+        done: false,
+        elapsedMs: 0
+      };
+    }
+
+    const previousState = this.timedContactStateByInstructionId.get(instruction.id);
+
+    if (!previousState) {
+      return {
+        contactClosed: restClosed,
+        delayMs,
+        done: false,
+        elapsedMs: 0
+      };
+    }
+
+    const nextElapsedMs = Math.min(delayMs, previousState.elapsedMs + elapsedMsThisScan);
+    const done = nextElapsedMs >= delayMs;
+
+    if (done) {
+      this.timedContactStateByInstructionId.delete(instruction.id);
+
+      return {
+        contactClosed: restClosed,
+        delayMs,
+        done: true,
+        elapsedMs: nextElapsedMs
+      };
+    }
+
+    this.timedContactStateByInstructionId.set(instruction.id, {
+      actuationElapsedMs: 0,
+      elapsedMs: nextElapsedMs
+    });
+
+    return {
+      contactClosed: !restClosed,
+      delayMs,
+      done: false,
       elapsedMs: nextElapsedMs
     };
   }

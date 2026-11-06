@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -16,10 +17,27 @@ import { buildWirePathD, findWireCrossings } from "./diagram/wireHops";
 import type { SheetMetadata } from "./diagram/sheet";
 import {
   buildDuplicatedComponent,
+  canEditConnections as canEditConnectionsForRun,
   isWireOriginHit,
   resolveDiagramShortcut,
-  updateComponentSelection
+  updateComponentSelection,
+  WIRE_CREATION_BLOCKED_MESSAGE
 } from "./diagram/interaction";
+import { CanvasZoomIndicator, CanvasZoomRibbonButtons } from "./CanvasZoomControls";
+import { createCanvasZoomStore } from "./canvasZoomStore";
+import type { CanvasZoomStore } from "./canvasZoomStore";
+import {
+  clampViewZoom,
+  computeAnchoredScroll,
+  computeFitView,
+  computeGridMinorOpacity,
+  resolveWheelIntent,
+  VIEW_MARGIN,
+  VIEW_ZOOM_STEP
+} from "./canvasView";
+import { loadViewSettings, saveViewSettings } from "./viewSettings";
+import { CommandPalette } from "./CommandPalette";
+import type { CommandPaletteCommand } from "./CommandPalette";
 import type { TagDefinition } from "./projectData";
 import {
   clampComponentToPlane,
@@ -55,6 +73,7 @@ import {
   repositionWireEndpointOrthogonally
 } from "./diagram/grid";
 import { reconcileWireTopology } from "./diagram/wireTopology";
+import { prepareSnapshotScene, resolveSceneForApply } from "./diagram/sceneLoad";
 import {
   getWireTerminalRoutes,
   resolveWireDisplayPoints,
@@ -63,9 +82,10 @@ import {
 } from "./diagram/wireRoute";
 import { renderSelector3Pos, SELECTOR_3POS_RING_CENTERS } from "./diagram/selector3pos";
 import type { Selector3PosPosition } from "./diagram/selector3pos";
+import { OFF_DELAY_ART } from "./diagram/offDelayArt.generated";
+import { LEVEL_SWITCH_ART } from "./diagram/levelSwitchArt.generated";
 import { SELECTOR_3POS_RING_RADII } from "./diagram/selector3posArt.generated";
 import {
-  SELECTOR_3POS_ZONES,
   applySelector3PosPositionToComponents,
   getSelector3PosArtPointFromClientPoint,
   getSelector3PosZoneAtArtPoint,
@@ -102,7 +122,15 @@ import {
 type SourceComponentType = "POWER_SOURCE" | "DC_SOURCE";
 type SourceCurrentType = "ac" | "dc";
 export type LampGlowColorOption = "red" | "green" | "yellow" | "amber" | "orange" | "blue" | "white";
-export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
+export type BuilderComponentType = InstructionType | "BREAKER_1P" | "BREAKER_2P" | "SWITCH_1P" | "PUSH_BUTTON_NO" | "PUSH_BUTTON_NC" | "ESTOP" | "SELECTOR_3POS" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "OL_CONTACT" | SourceComponentType | "LAMP" | "MOTOR";
+type ResizedSymbolType = "NOTO" | "NCTC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC";
+
+function isResizedSymbolType(type: BuilderComponentType): type is ResizedSymbolType {
+  return type === "NOTO"
+    || type === "NCTC"
+    || type === "LEVEL_SWITCH_NO"
+    || type === "LEVEL_SWITCH_NC";
+}
 type TerminalRole = "source" | "input" | "output" | "end";
 type WireConnectionStatus = "connected" | "loose-start" | "loose-end" | "loose-both" | "invalid-loop";
 type WireEndpointKey = "start" | "end";
@@ -335,9 +363,6 @@ const DEFAULT_WIRE_THICKNESS = 3.5;
 const DEFAULT_SOURCE_VOLTAGE = 120;
 const DEFAULT_DC_SOURCE_VOLTAGE = 24;
 const DEFAULT_CANVAS_ZOOM = 1;
-const MIN_CANVAS_ZOOM = 0.5;
-const MAX_CANVAS_ZOOM = 2;
-const CANVAS_ZOOM_STEP = 0.1;
 const MAINTAINED_SWITCH_CLICK_DELAY_MS = 220;
 const TIMED_CONTACT_ACTUATION_DELAY_MS = 250;
 export const DEFAULT_TIMED_CONTACT_DELAY_MS = 1000;
@@ -396,6 +421,8 @@ export const instructionPalette: Array<{
   { type: "SELECTOR_3POS", label: "3-pos selector", description: "Three-position selector, 4 terminals" },
   { type: "LIMIT_SWITCH_NO", label: "Limit switch NO", description: "Plunger roller, normally open" },
   { type: "LIMIT_SWITCH_NC", label: "Limit switch NC", description: "Plunger roller, normally closed" },
+  { type: "LEVEL_SWITCH_NO", label: "Level switch NO", description: "Liquid level switch, normally open" },
+  { type: "LEVEL_SWITCH_NC", label: "Level switch NC", description: "Liquid level switch, normally closed" },
   { type: "OL_CONTACT", label: "OL contact", description: "Overload contact, toggle from inspector" },
   { type: "LAMP", label: "Lamp", description: "Indicator lamp load" },
   { type: "MOTOR", label: "Motor", description: "Motor load" },
@@ -403,10 +430,12 @@ export const instructionPalette: Array<{
   { type: "XIO", label: "XIO", description: "Normally closed contact" },
   { type: "NOTC", label: "NOTC", description: "Normally open on-delay contact" },
   { type: "NCTO", label: "NCTO", description: "Normally closed on-delay contact" },
+  { type: "NOTO", label: "NOTO", description: "Normally open off-delay contact" },
+  { type: "NCTC", label: "NCTC", description: "Normally closed off-delay contact" },
   { type: "OTE", label: "OTE", description: "Output energize coil" }
 ];
 
-const LOGIC_PALETTE_TYPES = new Set<BuilderComponentType>(["XIC", "XIO", "NOTC", "NCTO", "OTE"]);
+const LOGIC_PALETTE_TYPES = new Set<BuilderComponentType>(["XIC", "XIO", "NOTC", "NCTO", "NOTO", "NCTC", "OTE"]);
 
 const fallbackTags: TagDefinition[] = [
   { name: "I:0/0", kind: "input", label: "Input" },
@@ -419,6 +448,8 @@ export function componentNeedsTag(type: BuilderComponentType): type is Instructi
     || type === "XIO"
     || type === "NOTC"
     || type === "NCTO"
+    || type === "NOTO"
+    || type === "NCTC"
     || type === "OTE"
     || type === "OTL"
     || type === "OTU";
@@ -428,12 +459,23 @@ function isCoilType(type: BuilderComponentType): type is "OTE" | "OTL" | "OTU" {
   return type === "OTE" || type === "OTL" || type === "OTU";
 }
 
-function isContactType(type: BuilderComponentType): type is "XIC" | "XIO" | "NOTC" | "NCTO" {
-  return type === "XIC" || type === "XIO" || type === "NOTC" || type === "NCTO";
+function isContactType(type: BuilderComponentType): type is "XIC" | "XIO" | "NOTC" | "NCTO" | "NOTO" | "NCTC" {
+  return type === "XIC"
+    || type === "XIO"
+    || type === "NOTC"
+    || type === "NCTO"
+    || type === "NOTO"
+    || type === "NCTC";
 }
 
-export function isTimedContactType(type: BuilderComponentType): type is "NOTC" | "NCTO" {
-  return type === "NOTC" || type === "NCTO";
+export function isTimedContactType(
+  type: BuilderComponentType
+): type is "NOTC" | "NCTO" | "NOTO" | "NCTC" {
+  return type === "NOTC" || type === "NCTO" || type === "NOTO" || type === "NCTC";
+}
+
+export function isOffDelayContactType(type: BuilderComponentType): type is "NOTO" | "NCTC" {
+  return type === "NOTO" || type === "NCTC";
 }
 
 function isSourceType(type: BuilderComponentType): type is SourceComponentType {
@@ -462,19 +504,30 @@ function isPassThroughType(type: BuilderComponentType): boolean {
     || type === "ESTOP"
     || type === "LIMIT_SWITCH_NO"
     || type === "LIMIT_SWITCH_NC"
+    || type === "LEVEL_SWITCH_NO"
+    || type === "LEVEL_SWITCH_NC"
     || type === "OL_CONTACT"
     || type === "XIC"
     || type === "XIO"
     || type === "NOTC"
-    || type === "NCTO";
+    || type === "NCTO"
+    || type === "NOTO"
+    || type === "NCTC";
 }
 
 function isBreakerType(type: BuilderComponentType): type is "BREAKER_1P" | "BREAKER_2P" {
   return type === "BREAKER_1P" || type === "BREAKER_2P";
 }
 
-function isMaintainedSwitchType(type: BuilderComponentType): type is "SWITCH_1P" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "OL_CONTACT" {
-  return type === "SWITCH_1P" || type === "LIMIT_SWITCH_NO" || type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT";
+function isMaintainedSwitchType(
+  type: BuilderComponentType
+): type is "SWITCH_1P" | "LIMIT_SWITCH_NO" | "LIMIT_SWITCH_NC" | "LEVEL_SWITCH_NO" | "LEVEL_SWITCH_NC" | "OL_CONTACT" {
+  return type === "SWITCH_1P"
+    || type === "LIMIT_SWITCH_NO"
+    || type === "LIMIT_SWITCH_NC"
+    || type === "LEVEL_SWITCH_NO"
+    || type === "LEVEL_SWITCH_NC"
+    || type === "OL_CONTACT";
 }
 
 function isSelector3PosType(type: BuilderComponentType): type is "SELECTOR_3POS" {
@@ -504,6 +557,8 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
     case "SELECTOR_3POS":
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
+    case "LEVEL_SWITCH_NO":
+    case "LEVEL_SWITCH_NC":
     case "OL_CONTACT":
       return "contact";
     case "LAMP":
@@ -513,6 +568,8 @@ function getSymbolCategory(type: BuilderComponentType): "power" | "breaker" | "c
     case "XIO":
     case "NOTC":
     case "NCTO":
+    case "NOTO":
+    case "NCTC":
       return "contact";
     case "OTE":
     case "OTL":
@@ -564,23 +621,6 @@ function clampWireThickness(value: number): number {
   return clamp(Math.round(value), 2, 12);
 }
 
-function normalizeWheelDeltaValue(delta: number, deltaMode: number): number {
-  switch (deltaMode) {
-    case 1:
-      return delta * 16;
-    case 2:
-      return delta * 120;
-    default:
-      return delta;
-  }
-}
-
-function clampCanvasZoom(value: number): number {
-  // Pasos de 0.05: menos escalas fraccionarias y menos riesgo de que el SVG y
-  // la capa HTML de componentes redondeen distinto al hacer scroll.
-  return clamp(Math.round(value * 20) / 20, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM);
-}
-
 export function clampTimedContactDelayMs(value: number): number {
   if (!Number.isFinite(value)) {
     return DEFAULT_TIMED_CONTACT_DELAY_MS;
@@ -627,6 +667,36 @@ function getTimedContactTimerDisplay(
   const delayMs = getTimedContactDelayMs(component);
   const presetLabel = formatTimedContactPresetLabel(delayMs);
   const inputActive = getInstructionTagValue(component, tagValues);
+
+  if (isOffDelayContactType(component.type)) {
+    if (inputActive) {
+      return {
+        label: presetLabel,
+        progress: 1
+      };
+    }
+
+    const offDelayState = timedContactStateByComponentId[component.id];
+
+    if (!offDelayState) {
+      return {
+        label: presetLabel,
+        progress: 0
+      };
+    }
+
+    const remainingMs = Math.max(0, delayMs - offDelayState.elapsedMs);
+
+    return remainingMs > 0
+      ? {
+        label: formatTimedContactCountdown(remainingMs),
+        progress: delayMs > 0 ? clamp((delayMs - remainingMs) / delayMs, 0, 1) : 1
+      }
+      : {
+        label: presetLabel,
+        progress: 1
+      };
+  }
 
   if (!inputActive) {
     return {
@@ -750,7 +820,7 @@ function isContactClosed(
     return !getInstructionTagValue(component, tagValues);
   }
 
-   if (component.type === "NOTC" || component.type === "NCTO") {
+  if (isTimedContactType(component.type)) {
     return previewTimedContactState(
       component,
       tagValues,
@@ -766,9 +836,11 @@ function isContactActuated(component: BuilderComponent, contactClosed: boolean):
   switch (component.type) {
     case "XIC":
     case "NOTC":
+    case "NOTO":
       return contactClosed;
     case "XIO":
     case "NCTO":
+    case "NCTC":
       return !contactClosed;
     default:
       return false;
@@ -776,12 +848,43 @@ function isContactActuated(component: BuilderComponent, contactClosed: boolean):
 }
 
 function previewTimedContactState(
-  component: BuilderComponent & { type: "NOTC" | "NCTO" },
+  component: BuilderComponent,
   tagValues: Readonly<Record<string, boolean>>,
   previousTimedContactStateByComponentId: TimedContactStateByComponentId = EMPTY_TIMED_CONTACT_STATES,
   elapsedMsThisStep = 0
 ): TimedContactRuntimeState & { contactClosed: boolean } {
   const inputValue = getInstructionTagValue(component, tagValues);
+
+  if (isOffDelayContactType(component.type)) {
+    const restClosed = component.type === "NCTC";
+    const previousState = previousTimedContactStateByComponentId[component.id];
+
+    if (inputValue) {
+      return {
+        actuationElapsedMs: 0,
+        contactClosed: !restClosed,
+        elapsedMs: 0
+      };
+    }
+
+    if (!previousState) {
+      return {
+        actuationElapsedMs: 0,
+        contactClosed: restClosed,
+        elapsedMs: 0
+      };
+    }
+
+    const delayMs = getTimedContactDelayMs(component);
+    const nextElapsedMs = Math.min(delayMs, previousState.elapsedMs + Math.max(0, elapsedMsThisStep));
+    const done = nextElapsedMs >= delayMs;
+
+    return {
+      actuationElapsedMs: 0,
+      contactClosed: done ? restClosed : !restClosed,
+      elapsedMs: nextElapsedMs
+    };
+  }
 
   if (!inputValue) {
     return {
@@ -824,7 +927,44 @@ function collectTimedContactRuntimeStates(
   const nextTimedContactStateByComponentId: Record<string, TimedContactRuntimeState> = {};
 
   for (const component of components) {
-    if (!isTimedContactType(component.type) || !getInstructionTagValue(component, tagValues)) {
+    if (!isTimedContactType(component.type)) {
+      continue;
+    }
+
+    const inputActive = getInstructionTagValue(component, tagValues);
+
+    if (isOffDelayContactType(component.type)) {
+      if (inputActive) {
+        nextTimedContactStateByComponentId[component.id] = {
+          actuationElapsedMs: 0,
+          elapsedMs: 0
+        };
+        continue;
+      }
+
+      if (!previousTimedContactStateByComponentId[component.id]) {
+        continue;
+      }
+
+      const preview = previewTimedContactState(
+        component,
+        tagValues,
+        previousTimedContactStateByComponentId,
+        elapsedMsThisStep
+      );
+
+      if (preview.elapsedMs >= getTimedContactDelayMs(component)) {
+        continue;
+      }
+
+      nextTimedContactStateByComponentId[component.id] = {
+        actuationElapsedMs: 0,
+        elapsedMs: preview.elapsedMs
+      };
+      continue;
+    }
+
+    if (!inputActive) {
       continue;
     }
 
@@ -874,12 +1014,16 @@ function getConductiveTerminalPairs(
     }
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
+    case "LEVEL_SWITCH_NO":
+    case "LEVEL_SWITCH_NC":
     case "OL_CONTACT":
       return !useLiveTagState || isMaintainedSwitchClosed(component) ? [["in", "out"]] : [];
     case "XIC":
     case "XIO":
     case "NOTC":
     case "NCTO":
+    case "NOTO":
+    case "NCTC":
       return !useLiveTagState || isContactClosed(
         component,
         tagValues,
@@ -1185,6 +1329,10 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--o/ NO o--";
     case "LIMIT_SWITCH_NC":
       return "--o/ NC o--";
+    case "LEVEL_SWITCH_NO":
+      return "--o/ LVL o--";
+    case "LEVEL_SWITCH_NC":
+      return "--o/ LVLC o--";
     case "OL_CONTACT":
       return "--[/OL]--";
     case "LAMP":
@@ -1199,6 +1347,10 @@ function getInstructionSymbol(type: BuilderComponentType): string {
       return "--]T[--";
     case "NCTO":
       return "--]/T[--";
+    case "NOTO":
+      return "--]TO[--";
+    case "NCTC":
+      return "--]/TO[--";
     case "OTE":
       return "--( )--";
     case "OTL":
@@ -1232,12 +1384,23 @@ function getComponentName(type: BuilderComponentType): string {
       return "Limit switch NO";
     case "LIMIT_SWITCH_NC":
       return "Limit switch NC";
+    case "LEVEL_SWITCH_NO":
+      return "Level switch NO";
+    case "LEVEL_SWITCH_NC":
+      return "Level switch NC";
     case "OL_CONTACT":
       return "OL contact";
     case "LAMP":
       return "Lamp";
     case "MOTOR":
       return "Motor";
+    case "NOTC":
+    case "NCTO":
+      return type;
+    case "NOTO":
+      return "Off-delay NO contact";
+    case "NCTC":
+      return "Off-delay NC contact";
     default:
       return type;
   }
@@ -1314,8 +1477,16 @@ function getDefaultComponentLabel(
       return "LS-NO";
     case "LIMIT_SWITCH_NC":
       return "LS-NC";
+    case "LEVEL_SWITCH_NO":
+      return "LVL-NO";
+    case "LEVEL_SWITCH_NC":
+      return "LVL-NC";
     case "OL_CONTACT":
       return "OL-1";
+    case "NOTO":
+      return "NOTO";
+    case "NCTC":
+      return "NCTC";
     case "LAMP":
       return "LAMP";
     case "MOTOR":
@@ -1348,6 +1519,16 @@ function projectSymbolPoint(
   // El terminal local es la proyeccion EXACTA del arte; no se snapea a la
   // retícula (eso movia los bornes de viewBox 72 ~4.3 px respecto al glifo).
   return projectedPoint;
+}
+
+function getResizedSymbolArt(type: ResizedSymbolType, contactClosed?: boolean) {
+  if (type === "LEVEL_SWITCH_NO" || type === "LEVEL_SWITCH_NC") {
+    const closed = contactClosed ?? type === "LEVEL_SWITCH_NC";
+    return closed ? LEVEL_SWITCH_ART.LEVEL_SWITCH_NC : LEVEL_SWITCH_ART.LEVEL_SWITCH_NO;
+  }
+
+  const closed = contactClosed ?? type === "NCTC";
+  return closed ? OFF_DELAY_ART.NCTC : OFF_DELAY_ART.NOTO;
 }
 
 const SELECTOR_3POS_TERMINALS: TerminalDefinition[] = [
@@ -1439,6 +1620,19 @@ export function getTerminalDefinitions(type: BuilderComponentType): TerminalDefi
     case "NCTO": {
       const inputTerminal = projectSymbolPoint(25.6, 30, 64);
       const outputTerminal = projectSymbolPoint(102.4, 30, 64);
+
+      return [
+        { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
+        { id: "out", label: "Out", pairId: "main", role: "output", x: outputTerminal.x, y: outputTerminal.y }
+      ];
+    }
+    case "NOTO":
+    case "NCTC":
+    case "LEVEL_SWITCH_NO":
+    case "LEVEL_SWITCH_NC": {
+      const [leftRing, rightRing] = getResizedSymbolArt(type).ringCenters;
+      const inputTerminal = projectSymbolPoint(leftRing.x, leftRing.y, 64);
+      const outputTerminal = projectSymbolPoint(rightRing.x, rightRing.y, 64);
 
       return [
         { id: "in", label: "In", pairId: "main", role: "input", x: inputTerminal.x, y: inputTerminal.y },
@@ -1550,6 +1744,176 @@ function localRect(x: number, y: number, width: number, height: number): HitShap
   return { kind: "rect", x, y, width, height };
 }
 
+function localCircle(cx: number, cy: number, r: number): HitShape {
+  return { kind: "circle", cx, cy, r };
+}
+
+const SPST_SWITCH_VECTOR_SCALE = 0.365714;
+const SPST_SWITCH_VECTOR_TRANSLATE_X = 3.84;
+const SPST_SWITCH_VECTOR_TRANSLATE_Y = 7.86;
+const AC_SOURCE_BODY_RADIUS = 30.32;
+
+function spstSymbolPoint(x: number, y: number): Point {
+  return projectSymbolPoint(
+    SPST_SWITCH_VECTOR_TRANSLATE_X + x * SPST_SWITCH_VECTOR_SCALE,
+    SPST_SWITCH_VECTOR_TRANSLATE_Y + y * SPST_SWITCH_VECTOR_SCALE,
+    64
+  );
+}
+
+function spstCircle(cx: number, cy: number, r: number): HitShape {
+  const center = spstSymbolPoint(cx, cy);
+
+  return {
+    kind: "circle",
+    cx: center.x,
+    cy: center.y,
+    r: r * SPST_SWITCH_VECTOR_SCALE * projectSymbolScale(64)
+  };
+}
+
+function spstLead(x1: number, x2: number, y: number): HitShape {
+  const first = spstSymbolPoint(x1, y);
+  const second = spstSymbolPoint(x2, y);
+
+  return {
+    kind: "rect",
+    x: Math.min(first.x, second.x),
+    y: first.y - LEAD_HIT_THICKNESS / 2,
+    width: Math.abs(second.x - first.x),
+    height: LEAD_HIT_THICKNESS
+  };
+}
+
+function thickSegmentPolygon(a: Point, b: Point, halfWidth: number): HitShape {
+  const deltaX = b.x - a.x;
+  const deltaY = b.y - a.y;
+  const length = Math.hypot(deltaX, deltaY);
+  const normalX = length === 0 ? 0 : (-deltaY / length) * halfWidth;
+  const normalY = length === 0 ? 0 : (deltaX / length) * halfWidth;
+
+  return {
+    kind: "polygon",
+    points: [
+      { x: a.x + normalX, y: a.y + normalY },
+      { x: b.x + normalX, y: b.y + normalY },
+      { x: b.x - normalX, y: b.y - normalY },
+      { x: a.x - normalX, y: a.y - normalY }
+    ]
+  };
+}
+
+function getSwitch1pHitEntry(switchClosed: boolean): HitShapeTableEntry {
+  return {
+    body: [
+      spstCircle(121, 66, 19),
+      spstCircle(209, 66, 19),
+      switchClosed
+        ? thickSegmentPolygon(spstSymbolPoint(138.163, 69), spstSymbolPoint(215, 69), 2)
+        : thickSegmentPolygon(spstSymbolPoint(121, 8), spstSymbolPoint(215, 69), 2)
+    ],
+    leads: [spstLead(7, 100, 66), spstLead(229, 322, 66)]
+  };
+}
+
+function getLevelSwitchHitEntry(component: BuilderComponent): HitShapeTableEntry {
+  return isMaintainedSwitchClosed(component)
+    ? LEVEL_SWITCH_NC_HIT_ENTRY
+    : LEVEL_SWITCH_NO_HIT_ENTRY;
+}
+
+function getResizedTerminalPairMidpoint(type: ResizedSymbolType): Point {
+  const terminals = getTerminalDefinitions(type);
+  const left = terminals[0];
+  const right = terminals[1];
+
+  if (!left || !right) {
+    throw new Error(`Expected two terminals for resized symbol ${type}`);
+  }
+
+  return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
+}
+
+function scaleHitShapeAbout(shape: HitShape, center: Point, scale: number): HitShape {
+  const transform = (point: Point): Point => ({
+    x: center.x + (point.x - center.x) * scale,
+    y: center.y + (point.y - center.y) * scale
+  });
+
+  switch (shape.kind) {
+    case "rect": {
+      const topLeft = transform({ x: shape.x, y: shape.y });
+      return {
+        ...shape,
+        x: topLeft.x,
+        y: topLeft.y,
+        width: shape.width * scale,
+        height: shape.height * scale
+      };
+    }
+    case "circle": {
+      const centerPoint = transform({ x: shape.cx, y: shape.cy });
+      return { ...shape, cx: centerPoint.x, cy: centerPoint.y, r: shape.r * scale };
+    }
+    case "polygon":
+      return { ...shape, points: shape.points.map(transform) };
+  }
+}
+
+function scaleHitEntryAboutTerminalPair(
+  entry: HitShapeTableEntry,
+  type: ResizedSymbolType
+): HitShapeTableEntry {
+  const center = getResizedTerminalPairMidpoint(type);
+  return {
+    body: entry.body.map((shape) => scaleHitShapeAbout(shape, center, 0.75)),
+    leads: entry.leads.map((shape) => scaleHitShapeAbout(shape, center, 0.75))
+  };
+}
+
+const OFF_DELAY_ARROW_TIP = { x: 80.6065, y: 113.8936 } as const;
+const OFF_DELAY_HIT_HALF_WIDTH = 2.5;
+
+const OFF_DELAY_HIT_SEGMENTS: HitShape[] = [
+  thickSegmentPolygon({ x: 32, y: 48.5 }, { x: 128, y: 48.5042 }, OFF_DELAY_HIT_HALF_WIDTH),
+  thickSegmentPolygon({ x: 32, y: 48.5 }, { x: 137.7844, y: 81.5468 }, OFF_DELAY_HIT_HALF_WIDTH),
+  thickSegmentPolygon({ x: 80.5917, y: 48.4652 }, OFF_DELAY_ARROW_TIP, OFF_DELAY_HIT_HALF_WIDTH),
+  thickSegmentPolygon({ x: 53.4262, y: 86.2801 }, OFF_DELAY_ARROW_TIP, OFF_DELAY_HIT_HALF_WIDTH),
+  thickSegmentPolygon({ x: 108.3159, y: 85.6077 }, OFF_DELAY_ARROW_TIP, OFF_DELAY_HIT_HALF_WIDTH)
+];
+
+const OFF_DELAY_NCTC_HIT_SOURCE: HitShapeTableEntry = {
+  body: OFF_DELAY_HIT_SEGMENTS,
+  leads: []
+};
+
+const OFF_DELAY_NOTO_HIT_SOURCE: HitShapeTableEntry = {
+  body: OFF_DELAY_HIT_SEGMENTS,
+  leads: []
+};
+
+const LEVEL_SWITCH_NO_HIT_SOURCE: HitShapeTableEntry = {
+  body: [
+    thickSegmentPolygon({ x: 32, y: 48.5 }, { x: 80.007, y: 110.2164 }, OFF_DELAY_HIT_HALF_WIDTH),
+    localCircle(80.007, 110.2164, 19.45)
+  ],
+  leads: []
+};
+
+const LEVEL_SWITCH_NC_HIT_SOURCE: HitShapeTableEntry = {
+  body: [
+    thickSegmentPolygon({ x: 32, y: 48.5 }, { x: 128, y: 48.497 }, OFF_DELAY_HIT_HALF_WIDTH),
+    thickSegmentPolygon({ x: 80.0025, y: 48.499 }, { x: 89.174, y: 98.373 }, OFF_DELAY_HIT_HALF_WIDTH),
+    localCircle(89.174, 98.373, 19.45)
+  ],
+  leads: []
+};
+
+const OFF_DELAY_NCTC_HIT_ENTRY = scaleHitEntryAboutTerminalPair(OFF_DELAY_NCTC_HIT_SOURCE, "NCTC");
+const OFF_DELAY_NOTO_HIT_ENTRY = scaleHitEntryAboutTerminalPair(OFF_DELAY_NOTO_HIT_SOURCE, "NOTO");
+const LEVEL_SWITCH_NO_HIT_ENTRY = scaleHitEntryAboutTerminalPair(LEVEL_SWITCH_NO_HIT_SOURCE, "LEVEL_SWITCH_NO");
+const LEVEL_SWITCH_NC_HIT_ENTRY = scaleHitEntryAboutTerminalPair(LEVEL_SWITCH_NC_HIT_SOURCE, "LEVEL_SWITCH_NC");
+
 /**
  * Art-derived hit geometry in component-local (160 x 102) coordinates.
  * Symbol coordinates are projected through `projectSymbolPoint`; the selector
@@ -1557,7 +1921,7 @@ function localRect(x: number, y: number, width: number, height: number): HitShap
  */
 const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
   POWER_SOURCE: {
-    body: [symbolRect(30, 18, 68, 46, 64)],
+    body: [symbolCircle(64, 32, AC_SOURCE_BODY_RADIUS, 64)],
     leads: [symbolLead(6.4, 48, 32, 64), symbolLead(80, 121.6, 32, 64)]
   },
   DC_SOURCE: {
@@ -1589,10 +1953,7 @@ const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
       symbolLead(99.6, 121.6, 46.4, 64)
     ]
   },
-  SWITCH_1P: {
-    body: [symbolRect(24, 16, 80, 48, 64)],
-    leads: [symbolLead(6.4, 28.4, 32, 64), symbolLead(99.6, 121.6, 32, 64)]
-  },
+  SWITCH_1P: getSwitch1pHitEntry(false),
   PUSH_BUTTON_NO: {
     body: [
       symbolRect(36, 6, 56, 40, 72),
@@ -1625,6 +1986,8 @@ const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
     body: [symbolRect(24, 16, 80, 48, 64)],
     leads: [symbolLead(6.4, 28.4, 32, 64), symbolLead(99.6, 121.6, 32, 64)]
   },
+  LEVEL_SWITCH_NO: LEVEL_SWITCH_NO_HIT_ENTRY,
+  LEVEL_SWITCH_NC: LEVEL_SWITCH_NC_HIT_ENTRY,
   OL_CONTACT: {
     body: [symbolRect(52, 12, 24, 44, 72), symbolRect(44, 14, 40, 40, 72)],
     leads: [symbolLead(2.3, 54, 36, 72), symbolLead(74, 125.7, 36, 72)]
@@ -1653,6 +2016,8 @@ const HITBOXES: Record<BuilderComponentType, HitShapeTableEntry> = {
     body: [symbolRect(52, 12, 24, 50, 64), symbolRect(32, 18, 64, 44, 64)],
     leads: [symbolLead(25.6, 52, 30, 64), symbolLead(76, 102.4, 30, 64)]
   },
+  NOTO: OFF_DELAY_NOTO_HIT_ENTRY,
+  NCTC: OFF_DELAY_NCTC_HIT_ENTRY,
   OTE: {
     body: [symbolCircle(64, 30, 20, 60)],
     leads: [symbolLead(6.4, 44, 30, 60), symbolLead(84, 121.6, 30, 60)]
@@ -1675,6 +2040,8 @@ const TERMINAL_RING_RADIUS: Record<BuilderComponentType, number> = {
   SWITCH_1P: 7,
   LIMIT_SWITCH_NO: 7,
   LIMIT_SWITCH_NC: 7,
+  LEVEL_SWITCH_NO: 19.45,
+  LEVEL_SWITCH_NC: 19.45,
   OL_CONTACT: 6.875,
   PUSH_BUTTON_NO: 6.875,
   PUSH_BUTTON_NC: 6.875,
@@ -1686,6 +2053,8 @@ const TERMINAL_RING_RADIUS: Record<BuilderComponentType, number> = {
   XIO: 6.875,
   NOTC: 8,
   NCTO: 8,
+  NOTO: 19.68,
+  NCTC: 19.68,
   OTE: 6.875,
   OTL: 6.875,
   OTU: 6.875
@@ -1706,6 +2075,12 @@ const SELECTOR_3POS_MAX_RING_RADIUS = SELECTOR_RING_IDS.reduce((radii, terminalI
 export function getTerminalRingRadius(type: BuilderComponentType, terminalId: string): number {
   if (type === "SELECTOR_3POS" && (SELECTOR_RING_IDS as readonly string[]).includes(terminalId)) {
     return SELECTOR_3POS_MAX_RING_RADIUS[terminalId as SelectorRingId];
+  }
+
+  if (isResizedSymbolType(type) && (terminalId === "in" || terminalId === "out")) {
+    // Both rings are the same physical terminal; the contour-only radius can
+    // under-report the left ring when its outer edge merges into the bar.
+    return Math.max(...getResizedSymbolArt(type).ringRadii);
   }
 
   return TERMINAL_RING_RADIUS[type];
@@ -1729,11 +2104,45 @@ function getTerminalRingShapes(type: BuilderComponentType): TerminalRingShape[] 
   }));
 }
 
+function getResizedArtBounds(component: BuilderComponent): ComponentHitBounds {
+  const isLevelSwitch = component.type === "LEVEL_SWITCH_NO" || component.type === "LEVEL_SWITCH_NC";
+  const states = isLevelSwitch
+    ? [isMaintainedSwitchClosed(component)]
+    : [false, true];
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+
+  for (const closed of states) {
+    const bounds = getResizedSymbolArt(component.type as ResizedSymbolType, closed).tightBounds;
+    left = Math.min(left, bounds.left);
+    top = Math.min(top, bounds.top);
+    right = Math.max(right, bounds.right);
+    bottom = Math.max(bottom, bounds.bottom);
+  }
+
+  return { bottom, height: bottom - top, left, right, top, width: right - left };
+}
+
 export function getComponentHitShapes(
   component: BuilderComponent,
   coarse = false
 ): ComponentHitShapes {
-  const entry = HITBOXES[component.type];
+  if (isResizedSymbolType(component.type)) {
+    const bounds = getResizedArtBounds(component);
+
+    return {
+      body: [localRect(bounds.left, bounds.top, bounds.width, bounds.height)],
+      leads: [],
+      rings: getTerminalRingShapes(component.type),
+      padding: coarse ? HITBOX_COARSE_PADDING : HITBOX_PADDING
+    };
+  }
+
+  const entry = component.type === "SWITCH_1P"
+    ? getSwitch1pHitEntry(isMaintainedSwitchClosed(component))
+    : HITBOXES[component.type];
 
   return {
     body: entry.body,
@@ -1866,9 +2275,34 @@ function getShapeBounds(shape: HitShape): { bottom: number; left: number; right:
   }
 }
 
-export function getComponentHitBounds(component: BuilderComponent): ComponentHitBounds {
-  const { body, leads, rings } = getComponentHitShapes(component);
-  const shapes = [...body, ...leads, ...rings];
+const LABEL_ANCHORS: Partial<
+  Record<BuilderComponentType, (component: BuilderComponent) => HitShapeTableEntry>
+> = {
+  POWER_SOURCE: () => HITBOXES.POWER_SOURCE,
+  SWITCH_1P: (component) => getSwitch1pHitEntry(isMaintainedSwitchClosed(component)),
+  LEVEL_SWITCH_NO: (component) => getLevelSwitchHitEntry(component),
+  LEVEL_SWITCH_NC: (component) => getLevelSwitchHitEntry(component),
+  XIC: () => ({
+    body: [symbolRect(56, 12, 16, 40, 64)],
+    leads: [symbolLead(6.4, 54, 32, 64), symbolLead(74, 121.6, 32, 64)]
+  })
+};
+
+function getComponentLabelShapes(component: BuilderComponent): HitShape[] {
+  if (isResizedSymbolType(component.type)) {
+    const bounds = getResizedArtBounds(component);
+    return [localRect(bounds.left, bounds.top, bounds.width, bounds.height)];
+  }
+
+  const entry = LABEL_ANCHORS[component.type]?.(component) ?? HITBOXES[component.type];
+
+  return [...entry.body, ...entry.leads];
+}
+
+function getRotatedShapeBounds(
+  component: BuilderComponent,
+  shapes: HitShape[]
+): ComponentHitBounds {
   let left = Infinity;
   let top = Infinity;
   let right = -Infinity;
@@ -1902,6 +2336,49 @@ export function getComponentHitBounds(component: BuilderComponent): ComponentHit
     top: rotatedTop,
     width: rotatedRight - rotatedLeft
   };
+}
+
+export function getComponentHitBounds(component: BuilderComponent): ComponentHitBounds {
+  const { body, leads, rings } = getComponentHitShapes(component);
+
+  return getRotatedShapeBounds(component, [...body, ...leads, ...rings]);
+}
+
+export function getComponentLabelBounds(component: BuilderComponent): ComponentHitBounds {
+  return getRotatedShapeBounds(component, getComponentLabelShapes(component));
+}
+
+export function getComponentDisplayBounds(
+  component: BuilderComponent,
+  contactClosed?: boolean
+): ComponentHitBounds {
+  if (!isResizedSymbolType(component.type)) {
+    throw new Error(`Component display bounds are only defined for resized symbols: ${component.type}`);
+  }
+
+  const artState = contactClosed ?? (
+    component.type === "LEVEL_SWITCH_NO" || component.type === "LEVEL_SWITCH_NC"
+      ? isMaintainedSwitchClosed(component)
+      : undefined
+  );
+  const art = getResizedSymbolArt(component.type, artState);
+  const bounds = art.tightBounds;
+  const rotatedCorners = [
+    { x: bounds.left, y: bounds.top },
+    { x: bounds.right, y: bounds.top },
+    { x: bounds.right, y: bounds.bottom },
+    { x: bounds.left, y: bounds.bottom }
+  ].map((corner) => rotatePoint(corner, component.rotation));
+  const left = Math.min(...rotatedCorners.map((point) => point.x));
+  const top = Math.min(...rotatedCorners.map((point) => point.y));
+  const right = Math.max(...rotatedCorners.map((point) => point.x));
+  const bottom = Math.max(...rotatedCorners.map((point) => point.y));
+
+  return { bottom, height: bottom - top, left, right, top, width: right - left };
+}
+
+export function getComponentLogicalStageOffset(bounds: ComponentHitBounds): { left: number; top: number } {
+  return { left: -bounds.left, top: -bounds.top };
 }
 
 function renderHitShapeElement(
@@ -1941,7 +2418,15 @@ function renderHitShapeElement(
   }
 }
 
-function ComponentHitOverlay({ component, debug }: { component: BuilderComponent; debug: boolean }): ReactNode {
+function ComponentHitOverlay({
+  component,
+  debug,
+  interactive = true
+}: {
+  component: BuilderComponent;
+  debug: boolean;
+  interactive?: boolean;
+}): ReactNode {
   const { body, leads, rings, padding } = getComponentHitShapes(component);
   const interactiveShapes = [...body, ...leads];
 
@@ -1952,13 +2437,15 @@ function ComponentHitOverlay({ component, debug }: { component: BuilderComponent
       aria-hidden="true"
       style={{ overflow: "visible", pointerEvents: "none" }}
     >
-      {interactiveShapes.map((shape, index) => renderHitShapeElement(shape, `hit-${index}`, {
-        className: "freeplay-component__hit-shape",
-        fill: "transparent",
-        pointerEvents: "all",
-        stroke: "transparent",
-        strokeWidth: padding * 2
-      }))}
+      {interactive
+        ? interactiveShapes.map((shape, index) => renderHitShapeElement(shape, `hit-${index}`, {
+          className: "freeplay-component__hit-shape",
+          fill: "transparent",
+          pointerEvents: "all",
+          stroke: "transparent",
+          strokeWidth: padding * 2
+        }))
+        : null}
       {debug ? (
         <g style={{ pointerEvents: "none" }}>
           {interactiveShapes.map((shape, index) => renderHitShapeElement(shape, `debug-${index}`, {
@@ -2004,6 +2491,8 @@ export function getDefaultEntryTerminalId(type: BuilderComponentType): string {
       return type === "SELECTOR_3POS" ? "in1" : "in";
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
+    case "LEVEL_SWITCH_NO":
+    case "LEVEL_SWITCH_NC":
     case "OL_CONTACT":
     case "LAMP":
     case "MOTOR":
@@ -2011,6 +2500,8 @@ export function getDefaultEntryTerminalId(type: BuilderComponentType): string {
     case "XIO":
     case "NOTC":
     case "NCTO":
+    case "NOTO":
+    case "NCTC":
     case "OTE":
     case "OTL":
     case "OTU":
@@ -2037,11 +2528,15 @@ function getDefaultExitTerminalId(type: BuilderComponentType): string {
     case "ESTOP":
     case "LIMIT_SWITCH_NO":
     case "LIMIT_SWITCH_NC":
+    case "LEVEL_SWITCH_NO":
+    case "LEVEL_SWITCH_NC":
     case "OL_CONTACT":
     case "XIC":
     case "XIO":
     case "NOTC":
     case "NCTO":
+    case "NOTO":
+    case "NCTC":
       return "out";
     case "LAMP":
     case "MOTOR":
@@ -2118,8 +2613,8 @@ const AC_SOURCE_VECTOR_WAVE_PATH = "M368.482 492.501 C368.581 488.171 370.995 48
 // de las salidas caen en (6.4,32)/(121.6,32) y los anillos en (48.1,32)/(80.3,32)
 // con r=6.95. El arte ya es de trazo, asi que el grosor se fija directo:
 // 3.2 unidades del viewBox = 3.2 / escala en unidades locales.
-const SPST_SWITCH_VECTOR_SCALE = 0.365714;
-const SPST_SWITCH_VECTOR_TRANSFORM = `translate(3.84 7.86) scale(${SPST_SWITCH_VECTOR_SCALE})`;
+const SPST_SWITCH_VECTOR_TRANSFORM =
+  `translate(${SPST_SWITCH_VECTOR_TRANSLATE_X} ${SPST_SWITCH_VECTOR_TRANSLATE_Y}) scale(${SPST_SWITCH_VECTOR_SCALE})`;
 const SPST_SWITCH_VECTOR_STROKE_WIDTH = 3.5 / SPST_SWITCH_VECTOR_SCALE;
 const SPST_SWITCH_VECTOR_RING_LEFT_PATH = "M140 66a19 19 0 1 1-38 0 19 19 0 1 1 38 0z";
 const SPST_SWITCH_VECTOR_RING_RIGHT_PATH = "M228 66a19 19 0 1 1-38 0 19 19 0 1 1 38 0z";
@@ -2337,6 +2832,62 @@ function renderSymbolGraphic(
         </svg>
       );
     }
+    case "LEVEL_SWITCH_NO":
+    case "LEVEL_SWITCH_NC": {
+      const switchClosed = options.switchClosed ?? type === "LEVEL_SWITCH_NC";
+      const art = getResizedSymbolArt(type, switchClosed);
+
+      return (
+        <svg viewBox="0 0 128 64" className={symbolClassName} aria-hidden="true">
+          {art.ringCenters.map((center, index) => (
+            <circle
+              key={`under-disc-${index}`}
+              cx={center.x}
+              cy={center.y}
+              r={art.underDiscRadius}
+              fill="rgba(255, 255, 255, 0.98)"
+            />
+          ))}
+          <g
+            transform={art.transform}
+            className="diagram-symbol__vector--normalized"
+            strokeWidth={art.strokeWidth}
+            strokeMiterlimit={4}
+          >
+            {art.elements.map((element, index) => {
+              const style = element.fill
+                ? {
+                  fill: element.fill,
+                  stroke: element.stroke ?? "none",
+                  ...(element.strokeWidth !== undefined ? { strokeWidth: element.strokeWidth } : {})
+                }
+                : undefined;
+
+              if (element.tag === "circle") {
+                return (
+                  <circle
+                    key={index}
+                    cx={element.cx}
+                    cy={element.cy}
+                    r={element.r}
+                    style={style}
+                  />
+                );
+              }
+
+              return (
+                <path
+                  key={index}
+                  d={element.d}
+                  fillRule={element.fillRule}
+                  style={style}
+                />
+              );
+            })}
+          </g>
+        </svg>
+      );
+    }
     case "LAMP":
       // Proporciones del Lamp_symbol.svg del usuario (280x120) mapeadas al
       // viewBox 128x64: patas 6.4/121.6, circulo r=17.28 y X inscrita.
@@ -2545,6 +3096,80 @@ function renderSymbolGraphic(
         </svg>
       );
       }
+    case "NOTO":
+    case "NCTC": {
+      const contactClosed = options.contactClosed ?? type === "NCTC";
+      const art = getResizedSymbolArt(type, contactClosed);
+      const contactSymbolClassName = [
+        "diagram-symbol",
+        options.contactActuated ? "diagram-symbol--energized" : "",
+        options.contactActuated ? "diagram-symbol--contact-actuated" : ""
+      ].filter(Boolean).join(" ");
+
+      return (
+        <svg viewBox="0 0 128 64" className={contactSymbolClassName} aria-hidden="true">
+          {art.ringCenters.map((center, index) => (
+            <circle
+              key={`under-disc-${index}`}
+              cx={center.x}
+              cy={center.y}
+              r={art.underDiscRadius}
+              fill="rgba(255, 255, 255, 0.98)"
+            />
+          ))}
+          <g
+            transform={art.transform}
+            className="diagram-symbol__vector--normalized"
+            strokeWidth={art.strokeWidth}
+            strokeMiterlimit={4}
+          >
+            {art.elements.map((element, index) => {
+              const style = element.fill
+                ? {
+                  fill: element.fill,
+                  stroke: element.stroke ?? "none",
+                  ...(element.strokeWidth !== undefined ? { strokeWidth: element.strokeWidth } : {})
+                }
+                : undefined;
+
+              if (element.tag === "circle") {
+                return (
+                  <circle
+                    key={index}
+                    cx={element.cx}
+                    cy={element.cy}
+                    r={element.r}
+                    style={style}
+                  />
+                );
+              }
+
+              if (element.tag === "line") {
+                return (
+                  <line
+                    key={index}
+                    x1={element.x1}
+                    y1={element.y1}
+                    x2={element.x2}
+                    y2={element.y2}
+                    style={style}
+                  />
+                );
+              }
+
+              return (
+                <path
+                  key={index}
+                  d={element.d}
+                  fillRule={element.fillRule}
+                  style={style}
+                />
+              );
+            })}
+          </g>
+        </svg>
+      );
+    }
     case "OTE":
       return (
         <svg viewBox="0 0 128 60" className={symbolClassName} aria-hidden="true">
@@ -2579,7 +3204,7 @@ function renderSymbolGraphic(
 
 function getDefaultTag(type: InstructionType, tags: TagDefinition[]): string {
   const kindPriority =
-    type === "XIC" || type === "XIO" || type === "NOTC" || type === "NCTO"
+    type === "XIC" || type === "XIO" || type === "NOTC" || type === "NCTO" || type === "NOTO" || type === "NCTC"
       ? (["input", "internal", "output"] as const)
       : type === "OTE"
         ? (["output", "internal", "input"] as const)
@@ -3015,6 +3640,21 @@ export function buildTerminalPortMap(components: readonly BuilderComponent[]): M
   }
 
   return terminalsByPort;
+}
+
+function getResizedTerminalLocations(components: readonly BuilderComponent[]): Map<string, Point> {
+  const resizedComponentIds = new Set(
+    components.filter((component) => isResizedSymbolType(component.type)).map((component) => component.id)
+  );
+  const locations = new Map<string, Point>();
+
+  for (const [portId, terminal] of buildTerminalPortMap(components)) {
+    if (resizedComponentIds.has(terminal.componentId)) {
+      locations.set(portId, { x: terminal.x, y: terminal.y });
+    }
+  }
+
+  return locations;
 }
 
 /**
@@ -3744,7 +4384,9 @@ function createCanvasComponent(
     y,
     ...(isTimedContactType(type) ? { delayMs: clampTimedContactDelayMs(delayMsOverride ?? DEFAULT_TIMED_CONTACT_DELAY_MS) } : {}),
     ...(type === "LAMP" ? { lampGlowColor: DEFAULT_LAMP_GLOW_COLOR } : {}),
-    ...(isMaintainedSwitchType(type) ? { isClosed: type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT" } : {}),
+    ...(isMaintainedSwitchType(type)
+      ? { isClosed: type === "LIMIT_SWITCH_NC" || type === "OL_CONTACT" || type === "LEVEL_SWITCH_NC" }
+      : {}),
     ...(isBreakerType(type) ? { isClosed: true } : {}),
     ...(isSelector3PosType(type) ? { selectorPosition: 2 as const } : {}),
     ...(isMomentaryPushButtonType(type) ? { isPressed: false } : {}),
@@ -4508,7 +5150,7 @@ export function deriveProgram(components: BuilderComponent[], wires: BuilderWire
           id: `builder-rung-${rungIndex + 1}-instruction-${instructionIndex + 1}`,
           tag: instruction.tag,
           type: instruction.type,
-          ...((instruction.type === "NOTC" || instruction.type === "NCTO")
+          ...(isTimedContactType(instruction.type)
             ? { delayMs: clampTimedContactDelayMs(instruction.delayMs ?? DEFAULT_TIMED_CONTACT_DELAY_MS) }
             : {})
         }))
@@ -4695,7 +5337,7 @@ export function computeElectricalState(
 }
 
 export function getComponentLabelLayout(component: BuilderComponent): CSSProperties {
-  const bounds = getComponentHitBounds(component);
+  const bounds = getComponentLabelBounds(component);
   const normalizedRotation = normalizeQuarterTurns(component.rotation);
   const baseStyle: CSSProperties = {
     bottom: "auto",
@@ -4833,6 +5475,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const nextId = useRef(0);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const componentLabelInputRef = useRef<HTMLInputElement>(null);
   const circuitFileInputRef = useRef<HTMLInputElement>(null);
   const stageScrollRef = useRef<HTMLDivElement>(null);
   const componentsRef = useRef<BuilderComponent[]>([]);
@@ -4852,6 +5495,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   } | null>(null);
   const planeSettingsRef = useRef<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
   const canvasZoomRef = useRef(DEFAULT_CANVAS_ZOOM);
+  const canvasViewportRef = useRef<HTMLDivElement>(null);
+  const zoomStoreRef = useRef<CanvasZoomStore | null>(null);
+  zoomStoreRef.current ??= createCanvasZoomStore(DEFAULT_CANVAS_ZOOM);
+  const zoomStore = zoomStoreRef.current;
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+  const spaceHeldRef = useRef(false);
+  const viewOffsetRef = useRef({ x: 0, y: 0 });
+  const wheelFrameRef = useRef<number | null>(null);
+  const pendingWheelRef = useRef<{
+    focusClient: Point | null;
+    panX: number;
+    panY: number;
+    zoomFactor: number;
+  }>({ focusClient: null, panX: 0, panY: 0, zoomFactor: 1 });
+  const lastCanvasLayoutRef = useRef("");
   const componentDragMovedRef = useRef(false);
   const paletteDragMovedRef = useRef(false);
   const dragState = useRef<{
@@ -4870,6 +5529,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     type: BuilderComponentType;
   } | null>(null);
   const panState = useRef<{
+    offsetX: number;
+    offsetY: number;
     scrollLeft: number;
     scrollTop: number;
     startX: number;
@@ -4897,6 +5558,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   } | null>(null);
   const [wires, setWires] = useState<BuilderWire[]>([]);
   const [planeSettings, setPlaneSettings] = useState<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
+  planeSettingsRef.current = planeSettings;
   const [planeDraft, setPlaneDraft] = useState({
     gridSpacing: String(DEFAULT_PLANE_SETTINGS.gridSpacing),
     height: String(DEFAULT_PLANE_SETTINGS.height),
@@ -4915,10 +5577,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [isWireAuthoringEnabled, setIsWireAuthoringEnabled] = useState(true);
   const [isPanModeEnabled, setIsPanModeEnabled] = useState(true);
   const [selection, setSelection] = useState<BuilderSelection>(null);
+  const selectionRef = useRef<BuilderSelection>(selection);
+  selectionRef.current = selection;
   const [selectedComponentIds, setSelectedComponentIds] = useState<ReadonlySet<string>>(() => new Set());
   const selectedComponentIdsRef = useRef<ReadonlySet<string>>(new Set());
   const runningRef = useRef(running);
+  const onRunToggleRef = useRef(onRunToggle);
+  const faultRef = useRef(fault);
+  const runDisabledRef = useRef(runDisabled);
   runningRef.current = running;
+  onRunToggleRef.current = onRunToggle;
+  faultRef.current = fault;
+  runDisabledRef.current = runDisabled;
+  const canEditConnections = canEditConnectionsForRun(running);
   const contextMenuRef = useRef<ContextMenuHandle>(null);
   const clipboardRef = useRef<BuilderComponent[]>([]);
   const undoStackRef = useRef<Array<{ components: BuilderComponent[]; wires: BuilderWire[] }>>([]);
@@ -4934,8 +5605,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
   const [rotationToast, setRotationToast] = useState<string | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
-  const [isPanning, setIsPanning] = useState(false);
-  const [canvasZoom, setCanvasZoom] = useState(DEFAULT_CANVAS_ZOOM);
+  const [mouseWheelZooms, setMouseWheelZooms] = useState(() => loadViewSettings().mouseWheelZooms);
+  const mouseWheelZoomsRef = useRef(mouseWheelZooms);
+  mouseWheelZoomsRef.current = mouseWheelZooms;
   const [paletteDragPreview, setPaletteDragPreview] = useState<{
     label: string;
     type: BuilderComponentType;
@@ -4944,6 +5616,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   } | null>(null);
   const [circuitSnapshotStatus, setCircuitSnapshotStatus] = useState<string | null>(null);
   const [activeRibbonTab, setActiveRibbonTab] = useState<RibbonTabId>("home");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const commandPaletteOpenRef = useRef(commandPaletteOpen);
+  commandPaletteOpenRef.current = commandPaletteOpen;
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
   const compactRibbon = useCompactRibbon();
   const [showTerminalDebug, setShowTerminalDebug] = useState(() => queryFlag("debugTerminals"));
@@ -4973,7 +5648,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     const observer = new ResizeObserver(() => {
-      setCanvasLayoutVersion((currentVersion) => currentVersion + 1);
+      applyView({ zoom: canvasZoomRef.current });
+
+      const canvas = canvasRef.current;
+      const layoutSignature = canvas ? `${canvas.offsetWidth}x${canvas.offsetHeight}` : "";
+
+      if (layoutSignature !== lastCanvasLayoutRef.current) {
+        lastCanvasLayoutRef.current = layoutSignature;
+        setCanvasLayoutVersion((currentVersion) => currentVersion + 1);
+      }
     });
     const canvas = canvasRef.current;
     const stageScroll = stageScrollRef.current;
@@ -4998,6 +5681,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     return () => window.clearTimeout(timeoutId);
   }, [rotationToast]);
+
+  useEffect(() => {
+    if (!canEditConnections) {
+      clearWireInteraction();
+      wirePointDragState.current = null;
+      setDraggingComponentId(null);
+    }
+  }, [canEditConnections]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -5044,9 +5735,18 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     });
   }, [planeSettings]);
 
-  useEffect(() => {
-    canvasZoomRef.current = canvasZoom;
-  }, [canvasZoom]);
+  useLayoutEffect(() => {
+    planeSettingsRef.current = planeSettings;
+    applyView({
+      scrollLeft: stageScrollRef.current?.scrollLeft ?? 0,
+      scrollTop: stageScrollRef.current?.scrollTop ?? 0,
+      zoom: canvasZoomRef.current
+    });
+  }, [planeSettings.width, planeSettings.height, planeSettings.gridSpacing]);
+
+  useLayoutEffect(() => {
+    syncPanCursorClasses();
+  });
 
   useEffect(() => {
     const syncedComponents = components.map(syncInstructionComponentTag);
@@ -5070,10 +5770,88 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (
-        event.target instanceof HTMLElement
-        && event.target.closest("input, textarea, select, [contenteditable='true']")
-      ) {
+      const isTextEntry = event.target instanceof HTMLElement
+        && Boolean(event.target.closest("input, textarea, select, [contenteditable='true']"));
+      const modifier = event.ctrlKey || event.metaKey;
+
+      if (modifier && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        contextMenuRef.current?.close();
+        setCommandPaletteOpen(true);
+        return;
+      }
+
+      const shortcut = resolveDiagramShortcut(event);
+
+      if (shortcut) {
+        if (shortcut.type === "run") {
+          event.preventDefault();
+
+          if (!runningRef.current && !runDisabledRef.current && !faultRef.current) {
+            onRunToggleRef.current?.();
+          }
+
+          return;
+        }
+
+        if (shortcut.type === "stop") {
+          event.preventDefault();
+
+          if (runningRef.current) {
+            onRunToggleRef.current?.();
+          }
+
+          return;
+        }
+
+        if (shortcut.type === "zoom") {
+          event.preventDefault();
+
+          if (shortcut.action === "fit") {
+            fitCanvasToStage();
+          } else if (shortcut.action === "actual") {
+            zoomToPreset(100);
+          } else if (shortcut.action === "in") {
+            zoomByStep(1);
+          } else {
+            zoomByStep(-1);
+          }
+
+          return;
+        }
+
+        if (shortcut.type === "command-palette") {
+          event.preventDefault();
+          contextMenuRef.current?.close();
+          setCommandPaletteOpen(true);
+          return;
+        }
+      }
+
+      if (isTextEntry) {
+        return;
+      }
+
+      // Space is handled before the running/early-return gate so Space+drag
+      // panning works while the simulator is running.
+      if (event.code === "Space") {
+        if (event.repeat) {
+          return;
+        }
+
+        const target = event.target;
+
+        if (
+          !commandPaletteOpenRef.current
+          && !(target instanceof Element && target.closest(
+            "button, [role='menu'], [role='dialog'], .command-palette, .context-menu"
+          ))
+        ) {
+          event.preventDefault();
+          spaceHeldRef.current = true;
+          syncPanCursorClasses();
+        }
+
         return;
       }
 
@@ -5082,13 +5860,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         return;
       }
 
-      if (runningRef.current) {
-        return;
-      }
-
-      const shortcut = resolveDiagramShortcut(event);
-
-      if (!shortcut) {
+      if (!shortcut || runningRef.current) {
         return;
       }
 
@@ -5116,17 +5888,38 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         return;
       }
 
-      const ids = [...selectedComponentIdsRef.current];
+      if (shortcut.type === "rotate") {
+        const ids = [...selectedComponentIdsRef.current];
 
-      if (ids.length > 0) {
-        event.preventDefault();
-        rotateComponents(ids, shortcut.direction);
+        if (ids.length > 0) {
+          event.preventDefault();
+          rotateComponents(ids, shortcut.direction);
+        }
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.code === "Space" && spaceHeldRef.current) {
+        spaceHeldRef.current = false;
+        syncPanCursorClasses();
+      }
+    }
 
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    function handleWindowBlur() {
+      spaceHeldRef.current = false;
+      panState.current = null;
+      syncPanCursorClasses();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
   }, []);
 
   function getCanvasPointFromClient(clientX: number, clientY: number): Point | null {
@@ -5187,75 +5980,320 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     return createOrthogonalPath(currentPoints, snappedPoint, planeSettingsRef.current);
   }
 
-  function updateCanvasZoom(nextZoom: number, focusClientPoint?: Point) {
-    const resolvedZoom = clampCanvasZoom(nextZoom);
+  /**
+   * Applies the complete view state directly to the DOM. This is the only place
+   * that writes zoom/scroll, so wheel zoom and panning never trigger React renders.
+   */
+  function applyView(next: {
+    offsetX?: number;
+    offsetY?: number;
+    scrollLeft?: number;
+    scrollTop?: number;
+    zoom?: number;
+  }) {
+    const plane = planeSettingsRef.current;
+    const viewport = canvasViewportRef.current;
+    const canvas = canvasRef.current;
+    const stage = stageScrollRef.current;
+    const zoom = next.zoom === undefined ? canvasZoomRef.current : clampViewZoom(next.zoom);
 
-    if (resolvedZoom === canvasZoomRef.current) {
+    canvasZoomRef.current = zoom;
+
+    if (viewport) {
+      viewport.style.width = `${Math.ceil(plane.width * zoom + VIEW_MARGIN * 2)}px`;
+      viewport.style.height = `${Math.ceil(plane.height * zoom + VIEW_MARGIN * 2)}px`;
+    }
+
+    let offsetX = next.offsetX ?? viewOffsetRef.current.x;
+    let offsetY = next.offsetY ?? viewOffsetRef.current.y;
+
+    if (stage) {
+      // Reading scrollWidth after the size changes forces layout, so the clamp
+      // uses the new extents (diagram + margin).
+      const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+      const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+      const desiredLeft = next.scrollLeft ?? stage.scrollLeft;
+      const desiredTop = next.scrollTop ?? stage.scrollTop;
+      const targetLeft = clamp(desiredLeft, 0, maxScrollLeft);
+      const targetTop = clamp(desiredTop, 0, maxScrollTop);
+
+      stage.scrollLeft = Math.round(targetLeft);
+      stage.scrollTop = Math.round(targetTop);
+
+      if (next.scrollLeft !== undefined && next.offsetX === undefined) {
+        // Scroll cannot go below 0 or past the extents; absorb the remainder in
+        // the transform so the anchored point stays exact at every zoom.
+        offsetX = desiredLeft - stage.scrollLeft;
+      }
+
+      if (next.scrollTop !== undefined && next.offsetY === undefined) {
+        offsetY = desiredTop - stage.scrollTop;
+      }
+
+      // Keep at least 80 px of the diagram visible.
+      const minVisible = 80;
+      const contentWidth = plane.width * zoom;
+      const contentHeight = plane.height * zoom;
+      const baseLeft = VIEW_MARGIN - stage.scrollLeft;
+      const baseTop = VIEW_MARGIN - stage.scrollTop;
+      const minOffsetX = baseLeft - stage.clientWidth + minVisible;
+      const maxOffsetX = baseLeft + contentWidth - minVisible;
+      const minOffsetY = baseTop - stage.clientHeight + minVisible;
+      const maxOffsetY = baseTop + contentHeight - minVisible;
+
+      offsetX = clamp(offsetX, minOffsetX, maxOffsetX);
+      offsetY = clamp(offsetY, minOffsetY, maxOffsetY);
+    }
+
+    viewOffsetRef.current = { x: offsetX, y: offsetY };
+
+    if (canvas) {
+      canvas.style.left = `${VIEW_MARGIN}px`;
+      canvas.style.top = `${VIEW_MARGIN}px`;
+      // The translate is applied in parent pixels after the scale, so it can
+      // absorb native-scroll clamping and sub-pixel rounding without being
+      // multiplied by zoom.
+      canvas.style.transform = offsetX === 0 && offsetY === 0
+        ? `scale(${zoom})`
+        : `translate(${-offsetX}px, ${-offsetY}px) scale(${zoom})`;
+      canvas.style.setProperty(
+        "--grid-minor-opacity",
+        String(computeGridMinorOpacity(plane.gridSpacing * zoom))
+      );
+    }
+
+    zoomStore.set(zoom);
+  }
+
+  function syncPanCursorClasses() {
+    const panning = panState.current !== null;
+    const hand = !panning && spaceHeldRef.current;
+    const stage = stageScrollRef.current;
+    const canvas = canvasRef.current;
+
+    if (stage) {
+      stage.classList.toggle("builder-stage__scroll--hand", hand);
+      stage.classList.toggle("builder-stage__scroll--panning", panning);
+    }
+
+    if (canvas) {
+      canvas.classList.toggle("freeplay-canvas--hand", hand);
+      canvas.classList.toggle("freeplay-canvas--panning", panning);
+    }
+  }
+
+  function getStageCenterClientPoint(): Point | undefined {
+    const stage = stageScrollRef.current;
+
+    if (!stage) {
+      return undefined;
+    }
+
+    const bounds = stage.getBoundingClientRect();
+
+    return {
+      x: bounds.left + stage.clientLeft + stage.clientWidth / 2,
+      y: bounds.top + stage.clientTop + stage.clientHeight / 2
+    };
+  }
+
+  function updateCanvasZoom(nextZoom: number, focusClientPoint?: Point) {
+    const stage = stageScrollRef.current;
+    const resolvedZoom = clampViewZoom(nextZoom);
+    const currentZoom = canvasZoomRef.current;
+
+    if (resolvedZoom === currentZoom) {
       return;
     }
 
-    const stageScroll = stageScrollRef.current;
-    const currentZoom = canvasZoomRef.current;
-    let nextScrollLeft = 0;
-    let nextScrollTop = 0;
-
-    if (stageScroll) {
-      const stageBounds = stageScroll.getBoundingClientRect();
-      const focusViewportX = focusClientPoint
-        ? clamp(focusClientPoint.x - stageBounds.left, 0, stageScroll.clientWidth)
-        : stageScroll.clientWidth / 2;
-      const focusViewportY = focusClientPoint
-        ? clamp(focusClientPoint.y - stageBounds.top, 0, stageScroll.clientHeight)
-        : stageScroll.clientHeight / 2;
-      const focusPlaneX = (stageScroll.scrollLeft + focusViewportX) / currentZoom;
-      const focusPlaneY = (stageScroll.scrollTop + focusViewportY) / currentZoom;
-
-      nextScrollLeft = focusPlaneX * resolvedZoom - focusViewportX;
-      nextScrollTop = focusPlaneY * resolvedZoom - focusViewportY;
+    if (!stage) {
+      canvasZoomRef.current = resolvedZoom;
+      zoomStore.set(resolvedZoom);
+      return;
     }
 
-    setCanvasZoom(resolvedZoom);
+    const stageBounds = stage.getBoundingClientRect();
+    const focusViewportX = focusClientPoint
+      ? clamp(focusClientPoint.x - stageBounds.left - stage.clientLeft, 0, stage.clientWidth)
+      : stage.clientWidth / 2;
+    const focusViewportY = focusClientPoint
+      ? clamp(focusClientPoint.y - stageBounds.top - stage.clientTop, 0, stage.clientHeight)
+      : stage.clientHeight / 2;
+    const anchored = computeAnchoredScroll({
+      focusX: focusViewportX,
+      focusY: focusViewportY,
+      margin: VIEW_MARGIN,
+      newZoom: resolvedZoom,
+      oldZoom: currentZoom,
+      scrollLeft: stage.scrollLeft + viewOffsetRef.current.x,
+      scrollTop: stage.scrollTop + viewOffsetRef.current.y
+    });
 
-    window.requestAnimationFrame(() => {
-      const updatedStageScroll = stageScrollRef.current;
+    applyView({
+      scrollLeft: anchored.scrollLeft,
+      scrollTop: anchored.scrollTop,
+      zoom: resolvedZoom
+    });
+  }
 
-      if (!updatedStageScroll) {
-        return;
+  function fitCanvasToStage() {
+    const stage = stageScrollRef.current;
+
+    if (!stage) {
+      return;
+    }
+
+    const fit = computeFitView({
+      contentHeight: planeSettingsRef.current.height,
+      contentWidth: planeSettingsRef.current.width,
+      margin: VIEW_MARGIN,
+      viewportHeight: stage.clientHeight,
+      viewportWidth: stage.clientWidth
+    });
+
+    const contentWidth = planeSettingsRef.current.width * fit.zoom + VIEW_MARGIN * 2;
+    const contentHeight = planeSettingsRef.current.height * fit.zoom + VIEW_MARGIN * 2;
+
+    applyView({
+      offsetX: -Math.max(0, (stage.clientWidth - contentWidth) / 2),
+      offsetY: -Math.max(0, (stage.clientHeight - contentHeight) / 2),
+      scrollLeft: fit.scrollLeft,
+      scrollTop: fit.scrollTop,
+      zoom: fit.zoom
+    });
+  }
+
+  function zoomToSelection() {
+    const stage = stageScrollRef.current;
+
+    if (!stage) {
+      return;
+    }
+
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+
+    for (const componentId of selectedComponentIdsRef.current) {
+      const component = componentsRef.current.find((candidate) => candidate.id === componentId);
+
+      if (!component) {
+        continue;
       }
 
-      updatedStageScroll.scrollLeft = Math.round(clamp(
-        nextScrollLeft,
-        0,
-        Math.max(planeSettingsRef.current.width * resolvedZoom - updatedStageScroll.clientWidth, 0)
-      ));
-      updatedStageScroll.scrollTop = Math.round(clamp(
-        nextScrollTop,
-        0,
-        Math.max(planeSettingsRef.current.height * resolvedZoom - updatedStageScroll.clientHeight, 0)
-      ));
+      const bounds = getComponentHitBounds(component);
+      left = Math.min(left, component.x + bounds.left);
+      top = Math.min(top, component.y + bounds.top);
+      right = Math.max(right, component.x + bounds.right);
+      bottom = Math.max(bottom, component.y + bounds.bottom);
+    }
+
+    const currentSelection = selectionRef.current;
+
+    if (currentSelection?.kind === "wire") {
+      const selectedWire = wiresRef.current.find((wire) => wire.id === currentSelection.id);
+
+      for (const point of selectedWire?.points ?? []) {
+        left = Math.min(left, point.x);
+        top = Math.min(top, point.y);
+        right = Math.max(right, point.x);
+        bottom = Math.max(bottom, point.y);
+      }
+    }
+
+    if (!Number.isFinite(left) || !Number.isFinite(top)) {
+      return;
+    }
+
+    const fit = computeFitView({
+      contentHeight: Math.max(bottom - top, 1),
+      contentWidth: Math.max(right - left, 1),
+      margin: VIEW_MARGIN,
+      viewportHeight: stage.clientHeight,
+      viewportWidth: stage.clientWidth
     });
+    const centerX = (left + right) / 2;
+    const centerY = (top + bottom) / 2;
+
+    applyView({
+      scrollLeft: centerX * fit.zoom + VIEW_MARGIN - stage.clientWidth / 2,
+      scrollTop: centerY * fit.zoom + VIEW_MARGIN - stage.clientHeight / 2,
+      zoom: fit.zoom
+    });
+  }
+
+  function zoomByStep(direction: 1 | -1) {
+    const factor = direction > 0 ? VIEW_ZOOM_STEP : 1 / VIEW_ZOOM_STEP;
+
+    updateCanvasZoom(canvasZoomRef.current * factor, getStageCenterClientPoint());
+  }
+
+  function zoomToPreset(percent: number) {
+    updateCanvasZoom(percent / 100, getStageCenterClientPoint());
   }
 
   useEffect(() => {
     const stageScrollElement = stageScrollRef.current;
     const paletteScrollElement = componentPaletteScrollRef.current;
 
-    const handleNativeStageWheel = (event: WheelEvent) => {
-      const rawZoomDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX)
-        ? event.deltaY
-        : event.deltaX;
-      const zoomDelta = normalizeWheelDeltaValue(rawZoomDelta, event.deltaMode);
+    const flushPendingWheel = () => {
+      wheelFrameRef.current = null;
+      const stage = stageScrollRef.current;
+      const pending = pendingWheelRef.current;
 
-      if (zoomDelta === 0) {
+      pendingWheelRef.current = { focusClient: null, panX: 0, panY: 0, zoomFactor: 1 };
+
+      if (!stage) {
+        return;
+      }
+
+      if (pending.zoomFactor !== 1) {
+        updateCanvasZoom(
+          canvasZoomRef.current * pending.zoomFactor,
+          pending.focusClient ?? undefined
+        );
+      }
+
+      if (pending.panX !== 0 || pending.panY !== 0) {
+        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+        const desiredLeft = stage.scrollLeft + pending.panX;
+        const desiredTop = stage.scrollTop + pending.panY;
+        const targetLeft = clamp(desiredLeft, 0, maxScrollLeft);
+        const targetTop = clamp(desiredTop, 0, maxScrollTop);
+
+        applyView({
+          offsetX: viewOffsetRef.current.x + (desiredLeft - targetLeft),
+          offsetY: viewOffsetRef.current.y + (desiredTop - targetTop),
+          scrollLeft: targetLeft,
+          scrollTop: targetTop,
+          zoom: canvasZoomRef.current
+        });
+      }
+    };
+
+    const handleNativeStageWheel = (event: WheelEvent) => {
+      const intent = resolveWheelIntent(event, mouseWheelZoomsRef.current);
+
+      if (!intent) {
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
-      updateCanvasZoom(
-        canvasZoomRef.current * Math.exp(-zoomDelta * 0.0012),
-        { x: event.clientX, y: event.clientY }
-      );
+
+      if (intent.type === "zoom") {
+        pendingWheelRef.current.zoomFactor *= intent.factor;
+        pendingWheelRef.current.focusClient = { x: event.clientX, y: event.clientY };
+      } else {
+        pendingWheelRef.current.panX += intent.dx;
+        pendingWheelRef.current.panY += intent.dy;
+      }
+
+      if (wheelFrameRef.current === null) {
+        wheelFrameRef.current = window.requestAnimationFrame(flushPendingWheel);
+      }
     };
 
     const handleNativePaletteWheel = (event: WheelEvent) => {
@@ -5278,10 +6316,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     return () => {
       stageScrollElement?.removeEventListener("wheel", handleNativeStageWheel);
       paletteScrollElement?.removeEventListener("wheel", handleNativePaletteWheel);
+
+      if (wheelFrameRef.current !== null) {
+        window.cancelAnimationFrame(wheelFrameRef.current);
+        wheelFrameRef.current = null;
+      }
     };
   }, []);
 
   function commitWireFromPoints(nextPointsInput: Point[]) {
+    if (!canEditConnections) {
+      return;
+    }
+
     const nextPoints = cleanWirePath(nextPointsInput);
 
     if (nextPoints.length < 2) {
@@ -5338,19 +6385,27 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     nextScene: BuilderScene,
     nextProgramSignature: string,
     customLayout: boolean,
-    nextPlaneSettings: BuilderPlaneSettings = planeSettingsRef.current
+    nextPlaneSettings: BuilderPlaneSettings = planeSettingsRef.current,
+    origin: "program" | "prepared-snapshot" = "program"
   ) {
     const resolvedPlaneSettings = sanitizePlaneSettings(nextPlaneSettings);
-    // Migracion de geometria: alinea cada componente a la reticula de su borne
-    // de entrada y mueve los cables con el. Es idempotente y hace que los
-    // bornes izquierdo/derecho de dos simbolos alineados coincidan en vertical.
-    const clampedScene = clampSceneToPlane(cloneScene(nextScene), resolvedPlaneSettings);
-    const reconciled = reconcileWireTopology(clampedScene, resolvedPlaneSettings);
-    const resolvedScene = reconciled.scene;
+    const application = resolveSceneForApply(
+      nextScene,
+      origin,
+      resolvedPlaneSettings,
+      (scene, settings) => {
+        // Program-generated scenes retain the existing clamp/reconcile path,
+        // even when they contain one of the resized instruction types.
+        const clampedScene = clampSceneToPlane(scene, settings);
+        const reconciled = reconcileWireTopology(clampedScene, settings);
+        return { removedWireIds: reconciled.removedWireIds, scene: reconciled.scene };
+      }
+    );
+    const resolvedScene = application.scene;
 
-    if (reconciled.removedWireIds.length > 0) {
+    if (application.removedWireIds.length > 0) {
       setCircuitSnapshotStatus(
-        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+        `Removed ${application.removedWireIds.length} loose wire(s): ${application.removedWireIds.join(", ")}.`
       );
     }
 
@@ -5372,7 +6427,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     componentDragMovedRef.current = false;
     setDraggingComponentId(null);
     setPaletteDragPreview(null);
-    setIsPanning(false);
+    syncPanCursorClasses();
     setHasCustomLayout(customLayout);
     resolvedPhysicalTagValuesRef.current = {};
     lastProgramSignature.current = nextProgramSignature;
@@ -5412,7 +6467,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       nextScene,
       JSON.stringify(nextDerivedState.program),
       shouldUsePendingScene || shouldKeepCurrentScene,
-      nextPlaneSettings
+      nextPlaneSettings,
+      shouldUsePendingScene ? "prepared-snapshot" : "program"
     );
   }, [availableTags, program]);
 
@@ -5604,12 +6660,27 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           return;
         }
 
-        const nextScrollLeft = Math.round(panState.current.scrollLeft - deltaX);
-        const nextScrollTop = Math.round(panState.current.scrollTop - deltaY);
+        const stage = stageScrollRef.current;
+
+        if (!stage) {
+          return;
+        }
+
+        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
+        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+        const desiredLeft = panState.current.scrollLeft - deltaX;
+        const desiredTop = panState.current.scrollTop - deltaY;
+        const targetLeft = clamp(desiredLeft, 0, maxScrollLeft);
+        const targetTop = clamp(desiredTop, 0, maxScrollTop);
 
         didPanDuringMouseDownRef.current = true;
-        stageScrollRef.current.scrollLeft = nextScrollLeft;
-        stageScrollRef.current.scrollTop = nextScrollTop;
+        applyView({
+          offsetX: panState.current.offsetX + (desiredLeft - targetLeft),
+          offsetY: panState.current.offsetY + (desiredTop - targetTop),
+          scrollLeft: targetLeft,
+          scrollTop: targetTop,
+          zoom: canvasZoomRef.current
+        });
         return;
       }
 
@@ -5792,7 +6863,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       }
 
       panState.current = null;
-      setIsPanning(false);
+      syncPanCursorClasses();
       didPanDuringMouseDownRef.current = false;
       wirePointDragState.current = null;
       if (activePushButtonPressRef.current) {
@@ -5889,20 +6960,23 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }, [activeRibbonTab, selectedComponent, selectedWire]);
 
   const hasActiveWireDraft = draftWirePoints.length > 0;
-  const wireTerminalsEnabled = isWireAuthoringEnabled || wireReconnectTarget !== null;
+  const wireTerminalsEnabled = canEditConnections
+    && (isWireAuthoringEnabled || wireReconnectTarget !== null);
   const isWirePointerPreviewVisible = wireTerminalsEnabled && (hasActiveWireDraft || wireReconnectTarget !== null);
-  const scaledCanvasWidth = planeSettings.width * canvasZoom;
-  const scaledCanvasHeight = planeSettings.height * canvasZoom;
   const canvasViewportStyle: CSSProperties = {
-    height: Math.ceil(scaledCanvasHeight),
-    width: Math.ceil(scaledCanvasWidth)
+    height: Math.ceil(planeSettings.height * canvasZoomRef.current + VIEW_MARGIN * 2),
+    width: Math.ceil(planeSettings.width * canvasZoomRef.current + VIEW_MARGIN * 2)
   };
   const canvasStyle: CSSProperties = {
     height: planeSettings.height,
-    transform: `scale(${canvasZoom})`,
+    left: VIEW_MARGIN,
+    position: "absolute",
+    top: VIEW_MARGIN,
+    transform: `scale(${canvasZoomRef.current})`,
+    transformOrigin: "top left",
     width: planeSettings.width
   };
-  const zoomPercent = Math.round(canvasZoom * 100);
+  const hasZoomSelection = selectedComponentIds.size > 0 || selection?.kind === "wire";
   const previewPoints = draftWirePoints.length > 0 && cursorPoint !== null
     ? [...draftWirePoints, cursorPoint]
     : draftWirePoints;
@@ -6084,7 +7158,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         <span className="status-pill status-pill--neutral">{components.length} symbols</span>
         <span className="status-pill status-pill--neutral">{wires.length} wires</span>
         <span className="status-pill status-pill--neutral">{derivedState.runnableRungs} runnable rungs</span>
-        <span className="status-pill status-pill--neutral">{zoomPercent}%</span>
+        <CanvasZoomIndicator
+          store={zoomStore}
+          hasSelection={hasZoomSelection}
+          onActual={() => zoomToPreset(100)}
+          onFit={fitCanvasToStage}
+          onPreset={(percent) => zoomToPreset(percent)}
+          onZoomSelection={zoomToSelection}
+        />
         <span className="status-pill status-pill--neutral">{syncLabel}</span>
         {circuitSnapshotStatus ? (
           <span className="status-pill status-pill--neutral">{circuitSnapshotStatus}</span>
@@ -6156,8 +7237,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const padding = getComponentPlanePadding(currentPlaneSettings);
     const gridSpacing = currentPlaneSettings.gridSpacing;
     const stageScrollElement = stageScrollRef.current;
-    const viewportX = stageScrollElement ? stageScrollElement.scrollLeft / canvasZoom : 0;
-    const viewportY = stageScrollElement ? stageScrollElement.scrollTop / canvasZoom : 0;
+    const viewportX = stageScrollElement
+      ? Math.max(0, (stageScrollElement.scrollLeft + viewOffsetRef.current.x - VIEW_MARGIN) / canvasZoomRef.current)
+      : 0;
+    const viewportY = stageScrollElement
+      ? Math.max(0, (stageScrollElement.scrollTop + viewOffsetRef.current.y - VIEW_MARGIN) / canvasZoomRef.current)
+      : 0;
     const startX = clamp(
       viewportX + gridSpacing * 2,
       padding,
@@ -6257,11 +7342,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function appendDraftPoint(point: Point) {
+    if (!canEditConnections) {
+      return;
+    }
+
     contextMenuRef.current?.close();
     setDraftWirePoints((currentPoints) => buildNextDraftPoints(currentPoints, point));
   }
 
   function toggleWireAuthoring() {
+    if (!canEditConnections) {
+      return;
+    }
+
     if (isWireAuthoringEnabled) {
       clearWireInteraction();
     }
@@ -6272,13 +7365,21 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   function togglePanMode() {
     if (isPanModeEnabled) {
       panState.current = null;
-      setIsPanning(false);
+      syncPanCursorClasses();
     }
 
     dragState.current = null;
     wirePointDragState.current = null;
     setDraggingComponentId(null);
     setIsPanModeEnabled((currentValue) => !currentValue);
+  }
+
+  function toggleMouseWheelZooms() {
+    const nextValue = !mouseWheelZoomsRef.current;
+
+    mouseWheelZoomsRef.current = nextValue;
+    setMouseWheelZooms(nextValue);
+    saveViewSettings({ mouseWheelZooms: nextValue });
   }
 
   function resetPlaneDraftField(field: keyof typeof planeDraft) {
@@ -6366,7 +7467,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     wireId: string,
     pointIndex: number
   ) {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6489,7 +7590,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function startWireReconnect(endpoint: WireEndpointKey) {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6508,7 +7609,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function finishWireReconnect(point: Point) {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6584,7 +7685,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function disconnectWireEndpoint(wireId: string, endpoint: WireEndpointKey) {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6615,7 +7716,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function reverseSelectedWire() {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6641,7 +7742,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function simplifySelectedWire() {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6653,7 +7754,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function simplifyWireById(wireId: string) {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6661,7 +7762,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function deleteWireById(wireId: string) {
-    if (running) {
+    if (!canEditConnections) {
       return;
     }
 
@@ -6851,6 +7952,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       componentRotation: component.rotation,
       componentType: component.type,
       kind: "component",
+      ...(isTimedContactType(component.type) ? { componentDelayMs: getTimedContactDelayMs(component) } : {}),
+      ...(isMaintainedSwitchType(component.type) ? { componentClosed: isMaintainedSwitchClosed(component) } : {}),
       ...(component.lampGlowColor ? { lampGlowColor: component.lampGlowColor } : {}),
       ...(isSelector3PosType(component.type)
         ? { selectorPosition: component.selectorPosition ?? 2 }
@@ -6966,6 +8069,30 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
+  function applyComponentDelay(componentId: string, delayMs: number) {
+    const component = componentsRef.current.find((entry) => entry.id === componentId);
+
+    if (running || !component || !isTimedContactType(component.type)) {
+      return;
+    }
+
+    const resolvedDelayMs = clampTimedContactDelayMs(delayMs);
+
+    if (getTimedContactDelayMs(component) === resolvedDelayMs) {
+      return;
+    }
+
+    pushUndoSnapshot();
+    setComponents((currentComponents) =>
+      currentComponents.map((entry) =>
+        entry.id === componentId && isTimedContactType(entry.type)
+          ? { ...entry, delayMs: resolvedDelayMs }
+          : entry
+      )
+    );
+    setHasCustomLayout(true);
+  }
+
   function applyComponentRotation(
     componentId: string,
     nextRotation: number
@@ -7062,18 +8189,80 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     showRotationRemovalToast(removedWireIds.size);
   }
 
-  function deleteComponentWithHistory(componentId: string) {
+  function deleteComponentsWithHistory(componentIds: string[]) {
+    if (running || componentIds.length === 0) {
+      return;
+    }
+
+    const ids = new Set(componentIds.filter((componentId) => (
+      componentsRef.current.some((component) => component.id === componentId)
+    )));
+
+    if (ids.size === 0) {
+      return;
+    }
+
     pushUndoSnapshot();
-    deleteComponentById(componentId);
-    const nextIds = new Set(selectedComponentIdsRef.current);
-    nextIds.delete(componentId);
+    const reconciled = reconcileWireTopology(
+      {
+        components: componentsRef.current.filter((component) => !ids.has(component.id)),
+        wires: wiresRef.current
+      },
+      planeSettingsRef.current
+    );
+
+    componentsRef.current = reconciled.scene.components;
+    wiresRef.current = reconciled.scene.wires;
+    setComponents(reconciled.scene.components);
+    setWires(reconciled.scene.wires);
+
+    const nextIds = new Set(
+      [...selectedComponentIdsRef.current].filter((componentId) => !ids.has(componentId))
+    );
+
     setSelectedComponentIds(nextIds);
     setSelection(nextIds.size > 0 ? { kind: "component", id: [...nextIds][0]! } : null);
+    setWireReconnectTarget(null);
+    setHasCustomLayout(true);
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+      );
+    }
   }
 
   function duplicateComponentWithHistory(componentId: string) {
     pushUndoSnapshot();
     duplicateComponent(componentId);
+  }
+
+  function duplicateComponentsWithHistory(componentIds: string[]) {
+    if (running || componentIds.length === 0) {
+      return;
+    }
+
+    const sources = componentIds
+      .map((componentId) => componentsRef.current.find((component) => component.id === componentId))
+      .filter((component): component is BuilderComponent => component !== undefined);
+
+    if (sources.length === 0) {
+      return;
+    }
+
+    pushUndoSnapshot();
+    const duplicated = sources.map((source) => {
+      const copy = buildDuplicatedComponent(source, nextId.current, planeSettingsRef.current);
+      nextId.current += 1;
+
+      return copy;
+    });
+
+    componentsRef.current = [...componentsRef.current, ...duplicated];
+    setComponents(componentsRef.current);
+    setSelectedComponentIds(new Set(duplicated.map((component) => component.id)));
+    setSelection({ kind: "component", id: duplicated[0]!.id });
+    setHasCustomLayout(true);
   }
 
   function renameComponentWithHistory(componentId: string, nextLabel: string) {
@@ -7137,6 +8326,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       return;
     }
 
+    if (!canEditConnections) {
+      clearSelectionState();
+      return;
+    }
+
     if (wireReconnectTarget) {
       const point = getCanvasPointFromClient(event.clientX, event.clientY);
 
@@ -7194,6 +8388,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleCanvasMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
+    if (panState.current) {
+      return;
+    }
+
     if (!isWirePointerPreviewVisible) {
       if (cursorPoint !== null) {
         setCursorPoint(null);
@@ -7291,8 +8489,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     clipboardRef.current = [];
     setIsWireAuthoringEnabled(true);
     setIsPanModeEnabled(true);
-    setIsPanning(false);
     panState.current = null;
+    syncPanCursorClasses();
     dragState.current = null;
     wirePointDragState.current = null;
     setHasCustomLayout(true);
@@ -7346,12 +8544,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         height: snapshot.settings.height,
         width: snapshot.settings.width
       });
-      const clampedScene = clampSceneToPlane(
-        cloneScene({ components: snapshot.components, wires: snapshot.wires }),
-        nextPlaneSettings
+      const preparation = prepareSnapshotScene(
+        { components: snapshot.components, wires: snapshot.wires },
+        nextPlaneSettings,
+        {
+          normalizeLegacy: (scene, settings) => {
+            const clampedScene = clampSceneToPlane(cloneScene(scene), settings);
+            const reconciled = reconcileWireTopology(clampedScene, settings);
+            return { removedWireIds: reconciled.removedWireIds, scene: reconciled.scene };
+          },
+          resizedPortLocations: getResizedTerminalLocations(snapshot.components)
+        }
       );
-      const reconciled = reconcileWireTopology(clampedScene, nextPlaneSettings);
-      const nextScene = reconciled.scene;
+      const nextScene = preparation.scene;
       const nextDerivedState = deriveProgram(nextScene.components, nextScene.wires);
       const nextProgramSignature = JSON.stringify(nextDerivedState.program);
       const nextTags = mergeInstructionBindingTags(snapshot.tags, nextScene.components);
@@ -7363,13 +8568,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         signature: nextProgramSignature
       };
 
-      applySceneState(nextScene, nextProgramSignature, true, nextPlaneSettings);
+      applySceneState(nextScene, nextProgramSignature, true, nextPlaneSettings, "prepared-snapshot");
       contextMenuRef.current?.close();
       undoStackRef.current = [];
       redoStackRef.current = [];
       clipboardRef.current = [];
       setSheetMetadata(snapshot.sheet);
-      setCircuitSnapshotStatus(`Loaded ${snapshot.name}.`);
+      setCircuitSnapshotStatus(
+        preparation.removedWireIds.length > 0
+          ? `Loaded ${snapshot.name}. Removed ${preparation.removedWireIds.length} loose wire(s): ${preparation.removedWireIds.join(", ")}.`
+          : `Loaded ${snapshot.name}.`
+      );
 
       if (onCircuitLoad) {
         onCircuitLoad(nextSnapshot);
@@ -7384,34 +8593,58 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   function handleStageScrollMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
-    if (!isPanModeEnabled || !stageScrollRef.current || event.button !== 0) {
+    const stageScroll = stageScrollRef.current;
+
+    if (!stageScroll) {
+      return;
+    }
+
+    const isMiddleButton = event.button === 1;
+    const isSpacePan = spaceHeldRef.current && event.button === 0;
+    const isPanButton = event.button === 0 && isPanModeEnabled;
+
+    if (!isMiddleButton && !isSpacePan && !isPanButton) {
       return;
     }
 
     const eventTarget = event.target;
+    const isTemporaryPan = isMiddleButton || isSpacePan;
 
     if (
       eventTarget instanceof Element
       && eventTarget.closest(
-        ".freeplay-component, .freeplay-wire, .context-menu, .freeplay-port, .freeplay-wire__node, .freeplay-wire__hit, input, textarea, select, option, button"
+        ".context-menu, .command-palette, input, textarea, select, [role='menu'], [role='dialog']"
+      )
+    ) {
+      return;
+    }
+
+    if (
+      !isTemporaryPan
+      && eventTarget instanceof Element
+      && eventTarget.closest(
+        ".freeplay-component, .freeplay-wire, .freeplay-port, .freeplay-wire__node, .freeplay-wire__hit, button, option"
       )
     ) {
       return;
     }
 
     event.preventDefault();
+    event.stopPropagation();
     didPanDuringMouseDownRef.current = false;
     panState.current = {
-      scrollLeft: stageScrollRef.current.scrollLeft,
-      scrollTop: stageScrollRef.current.scrollTop,
+      offsetX: viewOffsetRef.current.x,
+      offsetY: viewOffsetRef.current.y,
+      scrollLeft: stageScroll.scrollLeft,
+      scrollTop: stageScroll.scrollTop,
       startX: event.clientX,
       startY: event.clientY
     };
-    setIsPanning(true);
+    syncPanCursorClasses();
   }
 
   function handleComponentHandleMouseDown(event: ReactMouseEvent<HTMLDivElement>, componentId: string) {
-    if (running || event.button !== 0) {
+    if (running || event.button !== 0 || spaceHeldRef.current || panState.current) {
       componentDragMovedRef.current = false;
       return;
     }
@@ -7445,10 +8678,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       startClientY: event.clientY
     };
     setDraggingComponentId(componentId);
-
-    if (!(event.shiftKey || event.ctrlKey || event.metaKey)) {
-      selectComponentById(componentId);
-    }
+    // Pointerdown calls preventDefault, which suppresses the follow-up click.
+    // Select here so Shift/Ctrl/Cmd additive selection works reliably.
+    selectComponentById(
+      componentId,
+      event.shiftKey || event.ctrlKey || event.metaKey
+    );
   }
 
   function handleComponentHandlePointerDown(event: ReactPointerEvent<HTMLDivElement>, componentId: string) {
@@ -7682,6 +8917,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event: ReactPointerEvent<HTMLDivElement>,
     component: BuilderComponent
   ) {
+    if (panState.current) {
+      return;
+    }
+
     if (!isSelector3PosType(component.type)) {
       return;
     }
@@ -7751,7 +8990,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event: ReactPointerEvent<HTMLDivElement>,
     component: BuilderComponent
   ): boolean {
-    if (event.button !== 0) {
+    if (
+      event.button !== 0
+      || spaceHeldRef.current
+      || panState.current !== null
+      || performance.now() < suppressCanvasClickUntilRef.current
+    ) {
       return false;
     }
 
@@ -7847,7 +9091,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     event.preventDefault();
     event.stopPropagation();
     setWireReconnectTarget(null);
-    selectComponentById(componentId);
+    selectComponentById(
+      componentId,
+      event.shiftKey || event.ctrlKey || event.metaKey
+    );
     componentDragMovedRef.current = false;
 
     const component = componentsRef.current.find((entry) => entry.id === componentId);
@@ -8106,6 +9353,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           label={isWireAuthoringEnabled ? "Wire on" : "Wire off"}
           active={isWireAuthoringEnabled}
           ariaPressed={isWireAuthoringEnabled}
+          disabled={!canEditConnections}
           onClick={toggleWireAuthoring}
         />
         <RibbonField label="Wire color">
@@ -8133,13 +9381,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         <RibbonButton
           icon="✓"
           label="Finish wire"
-          disabled={draftWirePoints.length < 2}
+          disabled={!canEditConnections || draftWirePoints.length < 2}
           onClick={handleFinishWire}
         />
         <RibbonButton
           icon="✕"
           label="Cancel"
-          disabled={draftWirePoints.length === 0 && wireReconnectTarget === null}
+          disabled={!canEditConnections || (draftWirePoints.length === 0 && wireReconnectTarget === null)}
           onClick={clearWireInteraction}
         />
       </RibbonGroup>
@@ -8177,6 +9425,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         <RibbonButton
           icon={running ? "■" : "▶"}
           label={running ? "Stop simulator" : "Run simulator"}
+          shortcut={running ? "Shift+F5" : "F5"}
           disabled={runDisabled || fault !== null}
           onClick={onRunToggle}
         />
@@ -8200,26 +9449,20 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           ariaPressed={isPanModeEnabled}
           onClick={togglePanMode}
         />
+        <RibbonButton
+          icon="🖱"
+          label="Wheel zooms"
+          active={mouseWheelZooms}
+          ariaPressed={mouseWheelZooms}
+          onClick={toggleMouseWheelZooms}
+        />
       </RibbonGroup>
       <RibbonGroup label="Zoom" compact={compactRibbon}>
-        <RibbonButton
-          icon="−"
-          label="Zoom out"
-          disabled={canvasZoom <= MIN_CANVAS_ZOOM}
-          onClick={() => updateCanvasZoom(canvasZoom - CANVAS_ZOOM_STEP)}
-        />
-        <span className="status-pill status-pill--neutral">{zoomPercent}%</span>
-        <RibbonButton
-          icon="+"
-          label="Zoom in"
-          disabled={canvasZoom >= MAX_CANVAS_ZOOM}
-          onClick={() => updateCanvasZoom(canvasZoom + CANVAS_ZOOM_STEP)}
-        />
-        <RibbonButton
-          icon="1:1"
-          label="100%"
-          disabled={canvasZoom === DEFAULT_CANVAS_ZOOM}
-          onClick={() => updateCanvasZoom(DEFAULT_CANVAS_ZOOM)}
+        <CanvasZoomRibbonButtons
+          onZoomOut={() => zoomByStep(-1)}
+          onActual={() => zoomToPreset(100)}
+          onZoomIn={() => zoomByStep(1)}
+          onFit={fitCanvasToStage}
         />
       </RibbonGroup>
       <RibbonGroup label="Canvas" compact={compactRibbon}>
@@ -8325,7 +9568,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   const componentHint = selectedComponent
     ? isTimedContactType(selectedComponent.type)
-      ? "Set the on-delay here. Matching OTE and timed-contact labels share the same boolean tag, but each timed contact keeps its own local preset and elapsed state."
+      ? isOffDelayContactType(selectedComponent.type)
+        ? "Set the off-delay here. The contact actuates immediately and returns after the preset when its tag drops; re-energizing cancels the timer."
+        : "Set the on-delay here. Matching OTE and timed-contact labels share the same boolean tag, but each timed contact keeps its own local preset and elapsed state."
       : componentNeedsTag(selectedComponent.type)
         ? "Rename and recolor the symbol here. Matching OTE, XIC, XIO, NOTC, and NCTO labels share the same internal logic state automatically."
         : isSourceType(selectedComponent.type)
@@ -8401,6 +9646,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         />
         <RibbonField label={componentNeedsTag(selectedComponent.type) ? "Logic label" : "Component label"}>
           <input
+            ref={componentLabelInputRef}
             type="text"
             className="builder-text-input"
             spellCheck={false}
@@ -8457,7 +9703,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       {hasComponentParameters ? (
         <RibbonGroup label="Parameters" compact={compactRibbon}>
           {isTimedContactType(selectedComponent.type) ? (
-            <RibbonField label="On-delay time (s)">
+            <RibbonField label={isOffDelayContactType(selectedComponent.type) ? "Off-delay time (s)" : "On-delay time (s)"}>
               <input
                 type="number"
                 min="0"
@@ -8687,6 +9933,372 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     </>
   ) : null;
 
+  const selectedComponentIdList = [...selectedComponentIds];
+  const hasComponentSelection = selectedComponentIdList.length > 0;
+  const selectedLampIds = selectedComponentIdList.filter((componentId) => (
+    components.some((component) => component.id === componentId && component.type === "LAMP")
+  ));
+  const selectedSelectorIds = selectedComponentIdList.filter((componentId) => {
+    const component = components.find((candidate) => candidate.id === componentId);
+
+    return component ? isSelector3PosType(component.type) : false;
+  });
+  const selectedMaintainedSwitch = selectedComponent && isMaintainedSwitchType(selectedComponent.type)
+    ? selectedComponent
+    : null;
+
+  function renameSelectedComponent() {
+    if (!selectedComponent) {
+      return;
+    }
+
+    setActiveRibbonTab("component");
+    setRibbonCollapsed(false);
+    window.requestAnimationFrame(() => {
+      componentLabelInputRef.current?.focus();
+      componentLabelInputRef.current?.select();
+    });
+  }
+
+  const paletteCommands: CommandPaletteCommand[] = [
+    {
+      icon: "⤓",
+      id: "file.load",
+      keywords: "open import circuit json",
+      label: "Load circuit…",
+      run: handleLoadCircuitClick
+    },
+    {
+      icon: "⤒",
+      id: "file.save",
+      keywords: "download export circuit json",
+      label: "Save circuit",
+      run: handleSaveCircuit
+    },
+    {
+      disabled: layoutEditingLocked || undoStackRef.current.length === 0,
+      icon: "↶",
+      id: "edit.undo",
+      keywords: "history back",
+      label: "Undo",
+      run: undo,
+      shortcut: "Ctrl+Z"
+    },
+    {
+      disabled: layoutEditingLocked || redoStackRef.current.length === 0,
+      icon: "↷",
+      id: "edit.redo",
+      keywords: "history forward",
+      label: "Redo",
+      run: redo,
+      shortcut: "Ctrl+Shift+Z"
+    },
+    {
+      disabled: layoutEditingLocked || !hasComponentSelection,
+      icon: "⧉",
+      id: "edit.copy",
+      keywords: "clipboard",
+      label: "Copy selected components",
+      run: () => copySelectedComponents(selectedComponentIdList),
+      shortcut: "Ctrl+C"
+    },
+    {
+      disabled: layoutEditingLocked || clipboardRef.current.length === 0,
+      icon: "📋",
+      id: "edit.paste",
+      keywords: "clipboard",
+      label: "Paste at viewport center",
+      run: pasteClipboardAtViewportCenter
+    },
+    {
+      disabled: layoutEditingLocked || !hasComponentSelection,
+      icon: "⎘",
+      id: "edit.duplicate",
+      keywords: "copy clone",
+      label: "Duplicate selected components",
+      run: () => duplicateComponentsWithHistory(selectedComponentIdList)
+    },
+    {
+      disabled: layoutEditingLocked || selection === null,
+      icon: "🗑",
+      id: "edit.delete",
+      keywords: "remove",
+      label: "Delete selection",
+      run: () => {
+        if (selectedComponentIdList.length > 0) {
+          deleteComponentsWithHistory(selectedComponentIdList);
+        } else {
+          handleDeleteSelection();
+        }
+      }
+    },
+    {
+      disabled: layoutEditingLocked || !hasComponentSelection,
+      icon: "↺",
+      id: "edit.rotate-ccw",
+      keywords: "turn left",
+      label: "Rotate selected -90°",
+      run: () => rotateComponents(selectedComponentIdList, "ccw"),
+      shortcut: "Shift+R"
+    },
+    {
+      disabled: layoutEditingLocked || !hasComponentSelection,
+      icon: "↻",
+      id: "edit.rotate-cw",
+      keywords: "turn right",
+      label: "Rotate selected +90°",
+      run: () => rotateComponents(selectedComponentIdList, "cw"),
+      shortcut: "R"
+    },
+    {
+      disabled: layoutEditingLocked,
+      icon: "⟲",
+      id: "edit.reset-canvas",
+      keywords: "clear sheet",
+      label: "Reset canvas",
+      run: handleResetCanvas
+    },
+    {
+      disabled: layoutEditingLocked || !selectedComponent,
+      icon: "✎",
+      id: "edit.rename",
+      keywords: "label name",
+      label: "Rename selected component",
+      run: renameSelectedComponent
+    },
+    {
+      disabled: !canEditConnections,
+      icon: "⌁",
+      id: "wire.toggle",
+      keywords: "authoring draw",
+      label: isWireAuthoringEnabled ? "Turn wire mode off" : "Turn wire mode on",
+      run: toggleWireAuthoring
+    },
+    {
+      disabled: !canEditConnections || draftWirePoints.length < 2,
+      icon: "✓",
+      id: "wire.finish",
+      keywords: "complete commit",
+      label: "Finish wire",
+      run: handleFinishWire
+    },
+    {
+      disabled: !canEditConnections || (draftWirePoints.length === 0 && wireReconnectTarget === null),
+      icon: "✕",
+      id: "wire.cancel",
+      keywords: "abort clear",
+      label: "Cancel wire",
+      run: clearWireInteraction
+    },
+    ...instructionPalette.map((instruction) => ({
+      icon: "＋",
+      id: `insert.${instruction.type}`,
+      keywords: `${instruction.type} ${instruction.description}`,
+      label: `Insert ${instruction.label}`,
+      run: () => insertPaletteComponent(instruction.type)
+    })),
+    {
+      disabled: running || runDisabled || fault !== null,
+      icon: "▶",
+      id: "simulate.run",
+      keywords: "start simulation",
+      label: "Run simulator",
+      run: () => onRunToggle?.(),
+      shortcut: "F5"
+    },
+    {
+      disabled: !running || runDisabled,
+      icon: "■",
+      id: "simulate.stop",
+      keywords: "halt simulation",
+      label: "Stop simulator",
+      run: () => onRunToggle?.(),
+      shortcut: "Shift+F5"
+    },
+    {
+      disabled: fault === null || !onFaultReset,
+      icon: "⟲",
+      id: "simulate.reset-fault",
+      keywords: "clear short circuit",
+      label: "Reset fault",
+      run: () => onFaultReset?.()
+    },
+    {
+      icon: "✋",
+      id: "view.pan-toggle",
+      keywords: "hand navigate",
+      label: isPanModeEnabled ? "Turn pan mode off" : "Turn pan mode on",
+      run: togglePanMode
+    },
+    {
+      icon: "🖱",
+      id: "view.wheel-zooms",
+      keywords: "mouse wheel zoom setting preference",
+      label: mouseWheelZooms ? "Turn mouse-wheel zoom off" : "Turn mouse-wheel zoom on",
+      run: toggleMouseWheelZooms
+    },
+    {
+      icon: "−",
+      id: "view.zoom-out",
+      keywords: "smaller",
+      label: "Zoom out",
+      run: () => zoomByStep(-1),
+      shortcut: "Ctrl+-"
+    },
+    {
+      icon: "1:1",
+      id: "view.zoom-100",
+      keywords: "actual size",
+      label: "Zoom 100%",
+      run: () => zoomToPreset(100),
+      shortcut: "Ctrl+1"
+    },
+    {
+      icon: "+",
+      id: "view.zoom-in",
+      keywords: "larger",
+      label: "Zoom in",
+      run: () => zoomByStep(1),
+      shortcut: "Ctrl++"
+    },
+    {
+      icon: "⤢",
+      id: "view.fit",
+      keywords: "fit canvas sheet",
+      label: "Fit canvas",
+      run: fitCanvasToStage,
+      shortcut: "Ctrl+0"
+    },
+    {
+      disabled: !hasZoomSelection,
+      icon: "⌖",
+      id: "view.zoom-selection",
+      keywords: "fit selection",
+      label: "Zoom to selection",
+      run: zoomToSelection
+    },
+    {
+      icon: "⌖",
+      id: "view.terminal-overlays",
+      keywords: "debug terminals",
+      label: showTerminalDebug ? "Hide terminal overlays" : "Show terminal overlays",
+      run: () => setShowTerminalDebug((current) => !current)
+    },
+    {
+      icon: "▦",
+      id: "view.hitbox-overlays",
+      keywords: "debug hitboxes labels",
+      label: showHitboxDebug ? "Hide hit/label overlays" : "Show hit/label overlays",
+      run: () => setShowHitboxDebug((current) => !current)
+    },
+    ...[0, 90, 180, 270].map((angle) => ({
+      disabled: layoutEditingLocked || !hasComponentSelection,
+      icon: "∠",
+      id: `component.angle-${angle}`,
+      keywords: `rotation ${angle}`,
+      label: `Set rotation ${angle}°`,
+      run: () => rotateComponents(selectedComponentIdList, `angle${angle}` as RotationAction)
+    })),
+    {
+      disabled: layoutEditingLocked || selectedSelectorIds.length === 0,
+      icon: "1",
+      id: "component.selector-1",
+      keywords: "selector position first",
+      label: "Selector position 1",
+      run: () => applySelectorPosition(selectedComponentIdList, 1)
+    },
+    {
+      disabled: layoutEditingLocked || selectedSelectorIds.length === 0,
+      icon: "2",
+      id: "component.selector-2",
+      keywords: "selector position middle off",
+      label: "Selector position 2 (OFF)",
+      run: () => applySelectorPosition(selectedComponentIdList, 2)
+    },
+    {
+      disabled: layoutEditingLocked || selectedSelectorIds.length === 0,
+      icon: "3",
+      id: "component.selector-3",
+      keywords: "selector position third",
+      label: "Selector position 3",
+      run: () => applySelectorPosition(selectedComponentIdList, 3)
+    },
+    ...LAMP_GLOW_COLOR_OPTIONS.map((option) => ({
+      disabled: layoutEditingLocked || selectedLampIds.length === 0,
+      icon: "◐",
+      id: `component.lamp-${option.value}`,
+      keywords: `lamp color ${option.value}`,
+      label: `Set lamp color: ${option.label}`,
+      run: () => applyLampGlowColor(selectedComponentIdList, option.value)
+    })),
+    {
+      disabled: layoutEditingLocked || !selectedMaintainedSwitch,
+      icon: "◐",
+      id: "component.switch-toggle",
+      keywords: "open close maintained switch",
+      label: selectedMaintainedSwitch && isMaintainedSwitchClosed(selectedMaintainedSwitch)
+        ? "Open selected switch"
+        : "Close selected switch",
+      run: () => {
+        if (selectedMaintainedSwitch) {
+          toggleComponentOperate(selectedMaintainedSwitch.id);
+        }
+      }
+    },
+    {
+      disabled: layoutEditingLocked || !selectedWire,
+      icon: "🗑",
+      id: "wire.delete",
+      keywords: "remove wire",
+      label: "Delete wire",
+      run: () => {
+        if (selectedWire) {
+          deleteWireById(selectedWire.id);
+        }
+      }
+    },
+    {
+      disabled: layoutEditingLocked || !selectedWire,
+      icon: "⌁",
+      id: "wire.simplify",
+      keywords: "straighten path",
+      label: "Simplify wire",
+      run: () => {
+        if (selectedWire) {
+          simplifyWireById(selectedWire.id);
+        }
+      }
+    },
+    {
+      disabled: layoutEditingLocked || !selectedWire,
+      icon: "＋",
+      id: "wire.add-bend",
+      keywords: "point corner",
+      label: "Add bend to wire",
+      run: addBendToSelectedWire
+    },
+    {
+      disabled: layoutEditingLocked || !selectedWire,
+      icon: "⇄",
+      id: "wire.reverse",
+      keywords: "flip route endpoints",
+      label: "Reverse wire route",
+      run: reverseSelectedWire
+    },
+    ...[2, 3.5, 5, 7].map((thickness) => ({
+      disabled: layoutEditingLocked || !selectedWire,
+      icon: "⌁",
+      id: `wire.thickness-${thickness}`,
+      keywords: `wire thickness ${thickness}`,
+      label: `Wire thickness ${thickness}px`,
+      run: () => {
+        if (selectedWire) {
+          updateWireThicknessById(selectedWire.id, thickness);
+        }
+      }
+    }))
+  ];
+
   return (
     <section className="panel panel--builder builder-shell">
       <header className="builder-ribbon">
@@ -8699,10 +10311,41 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 ? `Wire ${selectedWire.color} selected`
                 : sheetMetadata.projectName}
           </div>
+          <div className="builder-ribbon__run-cluster" role="group" aria-label="Simulation controls">
+            <button
+              type="button"
+              className={`builder-run-cluster__button ${running ? "builder-run-cluster__button--stop" : "builder-run-cluster__button--run"}`.trim()}
+              aria-keyshortcuts={running ? "Shift+F5" : "F5"}
+              disabled={runDisabled || fault !== null}
+              title={running ? "Stop simulator (Shift+F5)" : "Run simulator (F5)"}
+              onClick={onRunToggle}
+            >
+              <span aria-hidden="true">{running ? "■" : "▶"}</span>
+              <span>{running ? "Stop" : "Run"}</span>
+            </button>
+            <button
+              type="button"
+              className="builder-run-cluster__button builder-run-cluster__button--reset"
+              disabled={!fault || !onFaultReset}
+              title="Reset fault"
+              onClick={onFaultReset}
+            >
+              <span aria-hidden="true">⟲</span>
+              <span>Reset</span>
+            </button>
+            <span
+              className={`status-pill ${running ? "status-pill--on" : "status-pill--off"} builder-run-cluster__status`.trim()}
+              aria-live="polite"
+            >
+              <span className="builder-run-cluster__dot" aria-hidden="true" />
+              {running ? "Running" : "Stopped"}
+            </span>
+          </div>
         </div>
         <RibbonTabBar
           activeTab={activeRibbonTab}
           collapsed={ribbonCollapsed}
+          onEscape={() => canvasRef.current?.focus()}
           onSelect={handleRibbonTabSelect}
           onToggleCollapse={() => setRibbonCollapsed((current) => !current)}
           tabs={ribbonTabs}
@@ -8724,18 +10367,20 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         <div className="builder-stage">
           <div
             ref={stageScrollRef}
-            className={`builder-stage__scroll ${isPanModeEnabled ? "builder-stage__scroll--pan" : ""} ${isPanning ? "builder-stage__scroll--panning" : ""}`.trim()}
+            className={`builder-stage__scroll ${isPanModeEnabled ? "builder-stage__scroll--pan" : ""}`.trim()}
             onMouseDownCapture={handleStageScrollMouseDown}
           >
             <div
+              ref={canvasViewportRef}
               className="freeplay-canvas-viewport"
               style={canvasViewportStyle}
             >
               <div
                 ref={canvasRef}
                 tabIndex={-1}
-                className={`freeplay-canvas ${isWirePointerPreviewVisible ? "freeplay-canvas--wire" : ""} ${isPanModeEnabled ? "freeplay-canvas--pan" : ""} ${isPanning ? "freeplay-canvas--panning" : ""}`.trim()}
+                className={`freeplay-canvas ${isWirePointerPreviewVisible ? "freeplay-canvas--wire" : ""} ${isPanModeEnabled ? "freeplay-canvas--pan" : ""}`.trim()}
                 data-layout-version={canvasLayoutVersion}
+                data-render-count={renderCountRef.current}
                 style={canvasStyle}
                 onClick={handleCanvasClick}
                 onContextMenu={handleCanvasContextMenu}
@@ -8839,6 +10484,10 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         onClick={(event) => {
                           event.stopPropagation();
 
+                          if (performance.now() < suppressCanvasClickUntilRef.current) {
+                            return;
+                          }
+
                           if (suppressClickAfterLongPressRef.current) {
                             suppressClickAfterLongPressRef.current = false;
                             return;
@@ -8846,12 +10495,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
                           const point = getCanvasPointFromClient(event.clientX, event.clientY);
 
-                          if (point && wireReconnectTarget) {
+                          if (point && canEditConnections && wireReconnectTarget) {
                             finishWireReconnect(point);
                             return;
                           }
 
-                          if (point && draftWirePoints.length > 0) {
+                          if (point && canEditConnections && draftWirePoints.length > 0) {
                             commitWireFromPoints(buildNextDraftPoints(draftWirePoints, point));
                             return;
                           }
@@ -8919,12 +10568,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       onClick={(event) => {
                         event.stopPropagation();
 
-                        if (wireReconnectTarget) {
+                        if (canEditConnections && wireReconnectTarget) {
                           finishWireReconnect(node.point);
                           return;
                         }
 
-                        if (draftWirePoints.length > 0) {
+                        if (canEditConnections && draftWirePoints.length > 0) {
                           commitWireFromPoints(buildNextDraftPoints(draftWirePoints, node.point));
                           return;
                         }
@@ -9011,9 +10660,6 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                     || (isSelector3PosType(component.type) && (component.selectorPosition ?? 2) !== 2);
                   const selectorRingHover = selectorHover?.componentId === component.id
                     && selectorHover.overRing;
-                  const selectorHoverZone = selectorHover?.componentId === component.id
-                    ? selectorHover.zone
-                    : null;
                   const glyphHitboxStyle = getComponentGlyphHitboxStyle(component.type, component.rotation);
                   const pushButtonPressTargetStyle = isMomentaryPushButtonType(component.type)
                     ? getPushButtonPressTargetStyle(component.rotation)
@@ -9026,12 +10672,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   );
                   const labelLayout = getComponentLabelLayout(component);
                   const hitDebugBounds = showHitboxDebug ? getComponentHitBounds(component) : null;
+                  const displayBounds = isResizedSymbolType(component.type)
+                    ? getComponentDisplayBounds(
+                      component,
+                      component.type === "NOTO" || component.type === "NCTC" ? contactClosed : undefined
+                    )
+                    : null;
+                  const logicalStageOffset = displayBounds
+                    ? getComponentLogicalStageOffset(displayBounds)
+                    : null;
 
                   return (
                     <div
                       key={component.id}
                       className={[
                         "freeplay-component",
+                        displayBounds ? "freeplay-component--tight" : "",
                         selected ? "freeplay-component--selected" : "",
                         visualEnergized ? "freeplay-component--energized" : "",
                         component.type === "LAMP" && energized ? "freeplay-component--lamp-on" : "",
@@ -9039,12 +10695,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         manualControl ? "freeplay-component--manual" : "",
                         manualControlActive ? "freeplay-component--manual-active" : "",
                         selectorRingHover ? "freeplay-component--selector-ring-hover" : "",
+                        isSelector3PosType(component.type) ? "freeplay-component--selector" : "",
                         pushButtonPressed ? "freeplay-component--pushbutton-down" : "",
                         coilActive ? "freeplay-component--coil-on" : ""
                       ].filter(Boolean).join(" ")}
                       style={{
-                        left: component.x,
-                        top: component.y,
+                        left: component.x + (displayBounds?.left ?? 0),
+                        top: component.y + (displayBounds?.top ?? 0),
+                        ...(displayBounds ? { width: displayBounds.width, height: displayBounds.height } : {}),
                         ...(lampGlowColor ? {
                           ["--lamp-glow-fill" as "--lamp-glow-fill"]: lampGlowColor.fill,
                           ["--lamp-glow-stroke" as "--lamp-glow-stroke"]: lampGlowColor.stroke,
@@ -9143,7 +10801,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         const additive = event.shiftKey || event.ctrlKey || event.metaKey;
                         contextMenuRef.current?.close();
                         setWireReconnectTarget(null);
-                        selectComponentById(component.id, additive);
+
+                        // While stopped, pointerdown already selects. While
+                        // running, pointerdown is disabled, so the click is the
+                        // selection path.
+                        if (running) {
+                          selectComponentById(component.id, additive);
+                        }
                       }}
                       onContextMenu={(event) => {
                         event.preventDefault();
@@ -9160,6 +10824,15 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                         openComponentContextMenu(component, { x: event.clientX, y: event.clientY });
                       }}
                     >
+                      <div
+                        className="freeplay-component__logical-stage"
+                        style={displayBounds ? {
+                          height: COMPONENT_HEIGHT,
+                          left: logicalStageOffset?.left ?? 0,
+                          top: logicalStageOffset?.top ?? 0,
+                          width: COMPONENT_WIDTH
+                        } : undefined}
+                      >
                       {componentBadge ? (
                         <div className={`freeplay-component__badge ${energized ? "freeplay-component__badge--live" : ""}`.trim()}>
                           {componentBadge}
@@ -9177,7 +10850,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       <button
                         key={terminal.portId}
                         type="button"
-                        className={`freeplay-port ${wireTerminalsEnabled ? "freeplay-port--active" : ""}`.trim()}
+                        className={`freeplay-port ${wireTerminalsEnabled ? "freeplay-port--active" : ""} ${
+                          !canEditConnections ? "freeplay-port--connections-locked" : ""
+                        }`.trim()}
                         aria-label={`Connect to ${component.label} terminal ${terminal.label || formatTerminalLabel(terminal.terminalId)}`}
                         style={{
                           height: terminalHitDiameter,
@@ -9185,11 +10860,24 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           top: terminal.y - component.y,
                           width: terminalHitDiameter
                         }}
+                        onPointerDown={(event) => {
+                          if (canEditConnections) {
+                            return;
+                          }
+
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setRotationToast(WIRE_CREATION_BLOCKED_MESSAGE);
+                        }}
                         onClick={(event) => {
                           event.stopPropagation();
                           contextMenuRef.current?.close();
 
-                          if (wireReconnectTarget) {
+                          if (performance.now() < suppressCanvasClickUntilRef.current) {
+                            return;
+                          }
+
+                          if (wireReconnectTarget && canEditConnections) {
                             finishWireReconnect({ x: terminal.x, y: terminal.y });
                             return;
                           }
@@ -9199,7 +10887,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                             event.shiftKey || event.ctrlKey || event.metaKey
                           );
 
-                          if (!isWireAuthoringEnabled) {
+                          if (!canEditConnections || !isWireAuthoringEnabled) {
                             return;
                           }
 
@@ -9253,27 +10941,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                       ) : null}
                       {isSelector3PosType(component.type) ? (
                         <div
-                          className="freeplay-selector-zones"
+                          className="freeplay-selector-hitarea"
                           style={{
                             ...(normalizeQuarterTurns(component.rotation) === 0
                               ? {}
                               : { transform: `rotate(${normalizeQuarterTurns(component.rotation) * 90}deg)` })
                           }}
                           aria-hidden="true"
-                        >
-                          {SELECTOR_3POS_ZONES.map((zone) => (
-                            <div
-                              className={`freeplay-selector-zone${
-                                selectorHoverZone === zone.position
-                                  ? " freeplay-selector-zone--hover"
-                                  : ""
-                              }`}
-                              data-selector-position={zone.position}
-                              key={zone.position}
-                              style={{ height: zone.height, top: zone.top }}
-                            />
-                          ))}
-                        </div>
+                        />
                       ) : null}
                       <div
                         className={`freeplay-component__symbol-rotator freeplay-component__symbol-rotator--${getSymbolCategory(component.type)}`.trim()}
@@ -9302,7 +10977,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           ...(isBreakerType(component.type) ? { breakerClosed: isBreakerClosed(component) } : {}),
                           ...(isMaintainedSwitchType(component.type) ? { switchClosed: isMaintainedSwitchClosed(component) } : {})
                         })}
-                        <ComponentHitOverlay component={component} debug={showHitboxDebug} />
+                        <ComponentHitOverlay
+                          component={component}
+                          debug={showHitboxDebug}
+                          interactive={!isSelector3PosType(component.type)}
+                        />
                       </div>
                     </div>
 
@@ -9324,6 +11003,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                           aria-hidden="true"
                         />
                       ) : null}
+                      </div>
                     </div>
                   );
                 })}
@@ -9400,27 +11080,37 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           {rotationToast}
         </div>
       ) : null}
+      <CommandPalette
+        open={commandPaletteOpen}
+        commands={paletteCommands}
+        onClose={() => {
+          setCommandPaletteOpen(false);
+          canvasRef.current?.focus();
+        }}
+      />
       <ContextMenuLayer
         ref={contextMenuRef}
         actions={{
           copyComponents: copySelectedComponents,
-          deleteComponent: deleteComponentWithHistory,
+          deleteComponents: deleteComponentsWithHistory,
           deleteWire: deleteWireById,
-          duplicateComponent: duplicateComponentWithHistory,
+          duplicateComponents: duplicateComponentsWithHistory,
           paste: pasteClipboard,
           redo,
           renameComponent: renameComponentWithHistory,
           rotateComponents,
+          setComponentDelay: applyComponentDelay,
           setLampGlowColor: applyLampGlowColor,
           setSelectorPosition: applySelectorPosition,
           setWireColor: updateWireColorById,
           setWireThickness: updateWireThicknessById,
           simplifyWire: simplifyWireById,
+          toggleComponentOperate,
           undo
         }}
         getAvailability={getMenuAvailability}
         lampColorOptions={lampColorMenuOptions}
-        locked={layoutEditingLocked}
+        locked={!canEditConnections || layoutEditingLocked}
         onClose={() => canvasRef.current?.focus()}
       />
     </section>

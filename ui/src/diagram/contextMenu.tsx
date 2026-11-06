@@ -23,6 +23,8 @@ export interface ContextMenuLampColorOption {
 export interface ContextMenuTarget {
   kind: "component" | "canvas" | "wire";
   anchor: Point;
+  componentClosed?: boolean;
+  componentDelayMs?: number;
   componentId?: string;
   componentLabel?: string;
   componentRotation?: number;
@@ -35,18 +37,20 @@ export interface ContextMenuTarget {
 
 export interface ContextMenuActions {
   copyComponents: (ids: string[]) => void;
-  deleteComponent: (id: string) => void;
+  deleteComponents: (ids: string[]) => void;
   deleteWire: (id: string) => void;
-  duplicateComponent: (id: string) => void;
+  duplicateComponents: (ids: string[]) => void;
   paste: (anchor: Point) => void;
   redo: () => void;
   renameComponent: (id: string, label: string) => void;
   rotateComponents: (ids: string[], action: RotationAction) => void;
+  setComponentDelay: (id: string, delayMs: number) => void;
   setLampGlowColor: (ids: string[], color: LampGlowColorOption) => void;
   setSelectorPosition: (ids: string[], position: 1 | 2 | 3) => void;
   setWireColor: (id: string, color: string) => void;
   setWireThickness: (id: string, thickness: number) => void;
   simplifyWire: (id: string) => void;
+  toggleComponentOperate: (id: string) => void;
   undo: () => void;
 }
 
@@ -158,10 +162,17 @@ export function shouldRestoreMenuFocus(wasOpen: boolean): boolean {
   return wasOpen;
 }
 
+export const CONTEXT_MENU_CLOSE_MS = 80;
+
+export function getContextMenuClassName(closing: boolean): string {
+  return ["context-menu", closing ? "context-menu--closing" : ""].filter(Boolean).join(" ");
+}
+
 export type MenuItem =
   | {
     checked?: boolean;
     danger?: boolean;
+    icon?: ReactNode;
     id: string;
     kind: "action";
     label: string;
@@ -170,6 +181,7 @@ export type MenuItem =
     swatch?: string;
   }
   | {
+    icon?: ReactNode;
     id: string;
     items: MenuItem[];
     kind: "submenu";
@@ -197,12 +209,16 @@ export function buildComponentMenu(
   }
 
   const selectedIds = target.selectedComponentIds ?? [componentId];
+  const count = selectedIds.length;
+  const multiLabel = (label: string) => (count > 1 ? `${label} ${count} components` : label);
   const rotation = ((target.componentRotation ?? 0) % 4 + 4) % 4;
   const items: MenuItem[] = [
     {
+      icon: "↻",
       id: "rotate",
       items: [
         {
+          icon: "↻",
           id: "rotate-cw",
           kind: "action",
           label: "Rotate 90° clockwise",
@@ -210,6 +226,7 @@ export function buildComponentMenu(
           onSelect: () => actions.rotateComponents(selectedIds, "cw")
         },
         {
+          icon: "↺",
           id: "rotate-ccw",
           kind: "action",
           label: "Rotate 90° counter-clockwise",
@@ -217,6 +234,7 @@ export function buildComponentMenu(
           onSelect: () => actions.rotateComponents(selectedIds, "ccw")
         },
         {
+          icon: "⟲",
           id: "rotate-half",
           kind: "action",
           label: "Rotate 180°",
@@ -225,6 +243,7 @@ export function buildComponentMenu(
         { id: "rotate-separator", kind: "separator" },
         ...[0, 1, 2, 3].map((turns) => ({
           checked: rotation === turns,
+          icon: "∠",
           id: `rotate-angle-${turns}`,
           kind: "action" as const,
           label: `Set angle ${turns * 90}°`,
@@ -233,6 +252,7 @@ export function buildComponentMenu(
         ...(rotation === 0
           ? []
           : [{
+            icon: "↺",
             id: "rotate-reset",
             kind: "action" as const,
             label: "Reset rotation",
@@ -240,16 +260,18 @@ export function buildComponentMenu(
           }])
       ],
       kind: "submenu",
-      label: "Rotate"
+      label: multiLabel("Rotate")
     }
   ];
 
   if (target.componentType && isOperable[target.componentType] === "position") {
     items.push({
+      icon: "⇅",
       id: "selector-position",
       items: [
         {
           checked: (target.selectorPosition ?? 2) === 1,
+          icon: "↥",
           id: "selector-position-1",
           kind: "action",
           label: "1st contact",
@@ -257,6 +279,7 @@ export function buildComponentMenu(
         },
         {
           checked: (target.selectorPosition ?? 2) === 2,
+          icon: "•",
           id: "selector-position-2",
           kind: "action",
           label: "2nd OFF",
@@ -264,6 +287,7 @@ export function buildComponentMenu(
         },
         {
           checked: (target.selectorPosition ?? 2) === 3,
+          icon: "↧",
           id: "selector-position-3",
           kind: "action",
           label: "3rd contact",
@@ -277,6 +301,7 @@ export function buildComponentMenu(
 
   if (target.componentType === "LAMP") {
     items.push({
+      icon: "◐",
       id: "lamp-color",
       items: lampColorOptions.map((option) => ({
         checked: (target.lampGlowColor ?? "yellow") === option.value,
@@ -291,22 +316,58 @@ export function buildComponentMenu(
     });
   }
 
+  if (target.componentType === "NOTO" || target.componentType === "NCTC") {
+    const delayMs = target.componentDelayMs ?? 1000;
+
+    items.push({
+      id: "component-delay",
+      kind: "custom",
+      render: () => (
+        <label className="context-menu__field">
+          <span>Delay (s)</span>
+          <input
+            type="number"
+            min="0"
+            step="0.1"
+            defaultValue={delayMs / 1000}
+            onChange={(event) => {
+              actions.setComponentDelay(componentId, Number(event.target.value) * 1000);
+            }}
+          />
+        </label>
+      )
+    });
+  }
+
+  if (target.componentType === "LEVEL_SWITCH_NO" || target.componentType === "LEVEL_SWITCH_NC") {
+    items.push({
+      icon: "◐",
+      id: "level-switch-toggle",
+      kind: "action",
+      label: target.componentClosed ? "Open switch" : "Close switch",
+      onSelect: () => actions.toggleComponentOperate(componentId)
+    });
+  }
+
   items.push(
     { id: "component-separator", kind: "separator" },
     {
+      icon: "⧉",
       id: "copy",
       kind: "action",
-      label: "Copy",
+      label: multiLabel("Copy"),
       shortcut: "Ctrl+C",
       onSelect: () => actions.copyComponents(selectedIds)
     },
     {
+      icon: "⎘",
       id: "duplicate",
       kind: "action",
-      label: "Duplicate",
-      onSelect: () => actions.duplicateComponent(componentId)
+      label: multiLabel("Duplicate"),
+      onSelect: () => actions.duplicateComponents(selectedIds)
     },
     {
+      icon: "✎",
       id: "rename",
       kind: "action",
       label: "Rename",
@@ -314,10 +375,11 @@ export function buildComponentMenu(
     },
     {
       danger: true,
+      icon: "🗑",
       id: "delete",
       kind: "action",
-      label: "Delete",
-      onSelect: () => actions.deleteComponent(componentId)
+      label: multiLabel("Delete"),
+      onSelect: () => actions.deleteComponents(selectedIds)
     }
   );
 
@@ -337,12 +399,14 @@ export function buildWireMenu(
 
   return [
     {
+      icon: "🗑",
       id: "wire-delete",
       kind: "action",
       label: "Delete",
       onSelect: () => actions.deleteWire(wire.id)
     },
     {
+      icon: "⌁",
       id: "wire-simplify",
       kind: "action",
       label: "Simplify",
@@ -402,6 +466,7 @@ export function buildCanvasMenu(
 
   if (availability.canPaste) {
     items.push({
+      icon: "📋",
       id: "paste",
       kind: "action",
       label: "Paste",
@@ -411,6 +476,7 @@ export function buildCanvasMenu(
 
   if (availability.canUndo) {
     items.push({
+      icon: "↶",
       id: "undo",
       kind: "action",
       label: "Undo",
@@ -421,6 +487,7 @@ export function buildCanvasMenu(
 
   if (availability.canRedo) {
     items.push({
+      icon: "↷",
       id: "redo",
       kind: "action",
       label: "Redo",
@@ -469,7 +536,9 @@ export function ContextMenuActionRow({
       <span className="context-menu__icon">
         {item.swatch ? (
           <span className="context-menu__swatch" style={{ background: item.swatch }} />
-        ) : null}
+        ) : (
+          item.icon ?? null
+        )}
       </span>
       <span className="context-menu__label">{item.label}</span>
       <span className="context-menu__shortcut">{item.shortcut ?? ""}</span>
@@ -511,7 +580,7 @@ export function ContextMenuSubmenuRow({
       onPointerLeave={onPointerLeave}
     >
       <span className="context-menu__check" />
-      <span className="context-menu__icon" />
+      <span className="context-menu__icon">{item.icon ?? null}</span>
       <span className="context-menu__label">{item.label}</span>
       <span className="context-menu__shortcut">›</span>
     </button>
@@ -605,6 +674,17 @@ function SubmenuPanel({
         } else if (event.key === "End") {
           event.preventDefault();
           buttons[buttons.length - 1]?.focus();
+        } else if (event.key === "Tab") {
+          event.preventDefault();
+
+          if (buttons.length > 0) {
+            const direction = event.shiftKey ? -1 : 1;
+            const nextIndex = currentIndex < 0
+              ? (direction === 1 ? 0 : buttons.length - 1)
+              : getNextMenuIndex(currentIndex, buttons.length, direction);
+
+            buttons[nextIndex]?.focus();
+          }
         } else if (event.key === "ArrowLeft" || event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
@@ -646,11 +726,14 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
     const [items, setItems] = useState<MenuItem[]>([]);
     const [position, setPosition] = useState<MenuPosition | null>(null);
     const [editingLabel, setEditingLabel] = useState(false);
+    const [closing, setClosing] = useState(false);
     const [activeSubmenuId, setActiveSubmenuId] = useState<string | null>(null);
     const [submenuAnchorRect, setSubmenuAnchorRect] = useState<DOMRect | null>(null);
     const [submenuFocusToken, setSubmenuFocusToken] = useState(0);
     const menuRef = useRef<HTMLDivElement>(null);
     const targetRef = useRef<ContextMenuTarget | null>(null);
+    const closingRef = useRef(false);
+    const closeTimerRef = useRef<number | null>(null);
     const actionsRef = useRef(actions);
     const availabilityRef = useRef(getAvailability);
     const lampColorsRef = useRef(lampColorOptions);
@@ -675,23 +758,44 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
       }
     }, []);
 
-    const close = useCallback(() => {
-      const wasOpen = targetRef.current !== null;
-      targetRef.current = null;
-      clearSubmenuTimers();
+    const cancelPendingClose = useCallback(() => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
 
-      if (!shouldRestoreMenuFocus(wasOpen)) {
+      closingRef.current = false;
+      setClosing(false);
+    }, []);
+
+    const close = useCallback(() => {
+      if (targetRef.current === null || closingRef.current) {
         return;
       }
 
-      setTarget(null);
-      setItems([]);
-      setPosition(null);
-      setEditingLabel(false);
+      closingRef.current = true;
+      setClosing(true);
+      clearSubmenuTimers();
       setActiveSubmenuId(null);
       setSubmenuAnchorRect(null);
       setSubmenuFocusToken(0);
-      onCloseRef.current();
+      closeTimerRef.current = window.setTimeout(() => {
+        closeTimerRef.current = null;
+        closingRef.current = false;
+        const wasOpen = targetRef.current !== null;
+        targetRef.current = null;
+
+        if (!shouldRestoreMenuFocus(wasOpen)) {
+          return;
+        }
+
+        setClosing(false);
+        setTarget(null);
+        setItems([]);
+        setPosition(null);
+        setEditingLabel(false);
+        onCloseRef.current();
+      }, CONTEXT_MENU_CLOSE_MS);
     }, [clearSubmenuTimers]);
 
     const runAction = useCallback((item: Extract<MenuItem, { kind: "action" }>) => {
@@ -720,6 +824,7 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
         return;
       }
 
+      cancelPendingClose();
       clearSubmenuTimers();
       targetRef.current = nextTarget;
       setTarget(nextTarget);
@@ -729,7 +834,7 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
       setActiveSubmenuId(null);
       setSubmenuAnchorRect(null);
       setSubmenuFocusToken(0);
-    }, [clearSubmenuTimers, locked]);
+    }, [cancelPendingClose, clearSubmenuTimers, locked]);
 
     useImperativeHandle(ref, () => ({ close, open }), [close, open]);
 
@@ -814,7 +919,14 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
       }
     }, [close, locked, target]);
 
-    useEffect(() => () => clearSubmenuTimers(), [clearSubmenuTimers]);
+    useEffect(() => () => {
+      clearSubmenuTimers();
+
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    }, [clearSubmenuTimers]);
 
     if (!target || typeof document === "undefined") {
       return null;
@@ -910,7 +1022,7 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
       <>
         <div
           ref={menuRef}
-          className="context-menu"
+          className={getContextMenuClassName(closing)}
           role="menu"
           style={{
             left: position?.left ?? -9999,
@@ -947,6 +1059,9 @@ export const ContextMenuLayer = forwardRef<ContextMenuHandle, ContextMenuLayerPr
               last && menuRef.current
                 ?.querySelector<HTMLElement>(`[data-menu-item="${last.id}"]`)
                 ?.focus();
+            } else if (event.key === "Tab") {
+              event.preventDefault();
+              moveFocus(event.shiftKey ? -1 : 1);
             } else if (event.key === "ArrowRight") {
               const focused = document.activeElement instanceof HTMLElement
                 ? document.activeElement.closest<HTMLElement>("[data-menu-item]")

@@ -29,18 +29,20 @@ import type {
 function createActions(): ContextMenuActions {
   return {
     copyComponents: vi.fn(),
-    deleteComponent: vi.fn(),
+    deleteComponents: vi.fn(),
     deleteWire: vi.fn(),
-    duplicateComponent: vi.fn(),
+    duplicateComponents: vi.fn(),
     paste: vi.fn(),
     redo: vi.fn(),
     renameComponent: vi.fn(),
     rotateComponents: vi.fn(),
+    setComponentDelay: vi.fn(),
     setLampGlowColor: vi.fn(),
     setSelectorPosition: vi.fn(),
     setWireColor: vi.fn(),
     setWireThickness: vi.fn(),
     simplifyWire: vi.fn(),
+    toggleComponentOperate: vi.fn(),
     undo: vi.fn()
   };
 }
@@ -126,6 +128,7 @@ describe("context menu row rendering", () => {
         }));
 
         expect(item.label.length).toBeGreaterThan(0);
+        expect(item.icon ?? item.swatch).toBeTruthy();
         expect(labelText(html)).toBe(item.label);
         expect(shortcutText(html)).toBe(item.shortcut ?? "");
         // check + icon + label + shortcut: the 4-column grid contract.
@@ -141,6 +144,7 @@ describe("context menu row rendering", () => {
           onOpen: () => undefined
         }));
 
+        expect(submenu.icon).toBeTruthy();
         expect(labelText(html)).toBe(submenu.label);
         expect(shortcutText(html)).toBe("›");
         expect(slotCount(html)).toBe(4);
@@ -168,6 +172,7 @@ describe("context menu row rendering", () => {
         onSelect: () => undefined
       }));
 
+      expect(item.icon).toBeTruthy();
       expect(labelText(html)).toBe(item.label);
       expect(slotCount(html)).toBe(4);
     }
@@ -192,6 +197,35 @@ describe("context menu row rendering", () => {
     expect(clockwise).toBeDefined();
     clockwise!.onSelect();
     expect(actions.rotateComponents).toHaveBeenCalledWith(["builder-component-1"], "cw");
+  });
+
+  it("labels and runs duplicate/delete with every selected component", () => {
+    const actions = createActions();
+    const target: ContextMenuTarget = {
+      ...componentTarget,
+      selectedComponentIds: ["builder-component-1", "builder-component-2"]
+    };
+    const items = buildComponentMenu(target, actions, lampOptions);
+    const rotateMenu = submenuItems(items).find((item) => item.id === "rotate");
+
+    expect(rotateMenu?.label).toBe("Rotate 2 components");
+    expect(actionItems(items).find((item) => item.id === "copy")?.label).toBe("Copy 2 components");
+    expect(actionItems(items).find((item) => item.id === "duplicate")?.label)
+      .toBe("Duplicate 2 components");
+    expect(actionItems(items).find((item) => item.id === "delete")?.label)
+      .toBe("Delete 2 components");
+
+    actionItems(items).find((item) => item.id === "duplicate")?.onSelect();
+    actionItems(items).find((item) => item.id === "delete")?.onSelect();
+
+    expect(actions.duplicateComponents).toHaveBeenCalledWith([
+      "builder-component-1",
+      "builder-component-2"
+    ]);
+    expect(actions.deleteComponents).toHaveBeenCalledWith([
+      "builder-component-1",
+      "builder-component-2"
+    ]);
   });
 
   it("four clicks on the Rotate menu item go 0 -> 1 -> 2 -> 3 -> 0", () => {
@@ -290,6 +324,65 @@ describe("context menu row rendering", () => {
 
     expect(submenuItems(items).map((item) => item.id)).not.toContain("selector-position");
     expect(actionItems(items).map((item) => item.label)).not.toContain("Operate");
+  });
+
+  it("adds the delay field only for off-delay contacts", () => {
+    const actions = createActions();
+    const target: ContextMenuTarget = {
+      ...componentTarget,
+      componentDelayMs: 500,
+      componentId: "builder-component-noto",
+      componentType: "NOTO"
+    };
+    const items = buildComponentMenu(target, actions, lampOptions);
+    const delayItem = items.find((item) => item.kind === "custom" && item.id === "component-delay");
+
+    expect(delayItem).toBeDefined();
+
+    const rendered = delayItem!.kind === "custom" ? delayItem!.render() : null;
+    const markup = renderToStaticMarkup(rendered);
+
+    expect(markup).toContain("Delay (s)");
+    expect(markup).toContain('type="number"');
+    expect(markup).toContain('min="0"');
+    expect(markup).toContain('step="0.1"');
+    expect(markup).toContain('value="0.5"');
+
+    const input = (rendered as unknown as {
+      props: { children: Array<{ props: { onChange: (event: { target: { value: string } }) => void } }> };
+    }).props.children[1]!;
+    input.props.onChange({ target: { value: "0.75" } });
+    expect(actions.setComponentDelay).toHaveBeenCalledWith("builder-component-noto", 750);
+    expect(buildComponentMenu(componentTarget, actions, lampOptions)
+      .some((item) => item.kind === "custom" && item.id === "component-delay")).toBe(false);
+  });
+
+  it("adds the level-switch operate item only for level switches", () => {
+    const actions = createActions();
+    const openTarget: ContextMenuTarget = {
+      ...componentTarget,
+      componentClosed: false,
+      componentId: "builder-component-level-no",
+      componentType: "LEVEL_SWITCH_NO"
+    };
+    const openItems = buildComponentMenu(openTarget, actions, lampOptions);
+    const openAction = actionItems(openItems).find((item) => item.id === "level-switch-toggle");
+
+    expect(openAction?.label).toBe("Close switch");
+    openAction!.onSelect();
+    expect(actions.toggleComponentOperate).toHaveBeenCalledWith("builder-component-level-no");
+
+    const closedItems = buildComponentMenu({
+      ...openTarget,
+      componentClosed: true,
+      componentId: "builder-component-level-nc",
+      componentType: "LEVEL_SWITCH_NC"
+    }, actions, lampOptions);
+
+    expect(actionItems(closedItems).find((item) => item.id === "level-switch-toggle")?.label)
+      .toBe("Open switch");
+    expect(actionItems(buildComponentMenu(componentTarget, actions, lampOptions))
+      .some((item) => item.id === "level-switch-toggle")).toBe(false);
   });
 
   it("lists all seven lamp colors and marks the current one", () => {

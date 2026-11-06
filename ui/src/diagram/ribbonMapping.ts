@@ -38,14 +38,18 @@ const paletteEntries: RibbonAuditEntry[] = [
   entry("P9", "P", "3-pos selector", "Insert tab / Electrical and component list", "tab"),
   entry("P10", "P", "Limit switch NO", "Insert tab / Electrical and component list", "tab"),
   entry("P11", "P", "Limit switch NC", "Insert tab / Electrical and component list", "tab"),
-  entry("P12", "P", "OL contact", "Insert tab / Electrical and component list", "tab"),
-  entry("P13", "P", "Lamp", "Insert tab / Electrical and component list", "tab"),
-  entry("P14", "P", "Motor", "Insert tab / Electrical and component list", "tab"),
-  entry("P15", "P", "XIC", "Insert tab / Logic and component list", "tab"),
-  entry("P16", "P", "XIO", "Insert tab / Logic and component list", "tab"),
-  entry("P17", "P", "NOTC", "Insert tab / Logic and component list", "tab"),
-  entry("P18", "P", "NCTO", "Insert tab / Logic and component list", "tab"),
-  entry("P19", "P", "OTE", "Insert tab / Logic and component list", "tab")
+  entry("P12", "P", "Level switch NO", "Insert tab / Electrical and component list", "tab"),
+  entry("P13", "P", "Level switch NC", "Insert tab / Electrical and component list", "tab"),
+  entry("P14", "P", "OL contact", "Insert tab / Electrical and component list", "tab"),
+  entry("P15", "P", "Lamp", "Insert tab / Electrical and component list", "tab"),
+  entry("P16", "P", "Motor", "Insert tab / Electrical and component list", "tab"),
+  entry("P17", "P", "XIC", "Insert tab / Logic and component list", "tab"),
+  entry("P18", "P", "XIO", "Insert tab / Logic and component list", "tab"),
+  entry("P19", "P", "NOTC", "Insert tab / Logic and component list", "tab"),
+  entry("P20", "P", "NCTO", "Insert tab / Logic and component list", "tab"),
+  entry("P21", "P", "NOTO", "Insert tab / Logic and component list", "tab"),
+  entry("P22", "P", "NCTC", "Insert tab / Logic and component list", "tab"),
+  entry("P23", "P", "OTE", "Insert tab / Logic and component list", "tab")
 ];
 
 const toolsEntries: RibbonAuditEntry[] = [

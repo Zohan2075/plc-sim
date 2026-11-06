@@ -9,6 +9,7 @@ import {
   getDefaultEntryTerminalId,
   getTerminalDefinitions,
   getTerminalPoint,
+  rotatePoint,
   instructionPalette
 } from "../DiagramBuilder";
 import type { BuilderComponent, BuilderComponentType, BuilderScene, Point } from "../DiagramBuilder";
@@ -111,6 +112,41 @@ describe("alignment proof: raw terminal geometry follows the lattice rule", () =
       for (const terminal of terminals) {
         expect(Number.isFinite(terminal.x), `${type}.${terminal.id}.x`).toBe(true);
         expect(Number.isFinite(terminal.y), `${type}.${terminal.id}.y`).toBe(true);
+      }
+    }
+  });
+
+  it("resized off-delay and level-switch rings keep their old midpoint and expected pitch", () => {
+    for (const type of ["NOTO", "NCTC", "LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC"] as const) {
+      const terminals = getTerminalDefinitions(type);
+      const input = terminals.find((terminal) => terminal.id === "in")!;
+      const output = terminals.find((terminal) => terminal.id === "out")!;
+      const isLevelSwitch = type === "LEVEL_SWITCH_NO" || type === "LEVEL_SWITCH_NC";
+      const left = isLevelSwitch ? 35 : 32;
+      const right = isLevelSwitch ? 125 : 128;
+      const pitch = isLevelSwitch ? 90 : 96;
+
+      expect(input.x).toBeCloseTo(left, 8);
+      expect(output.x).toBeCloseTo(right, 8);
+      expect(Math.abs(input.y - 48.5)).toBeLessThan(0.05);
+      expect(Math.abs(output.y - 48.5)).toBeLessThan(0.05);
+      expect(Math.hypot(output.x - input.x, output.y - input.y)).toBeCloseTo(pitch, 2);
+      expect((input.x + output.x) / 2).toBeCloseTo(80, 8);
+      expect((input.y + output.y) / 2).toBeCloseTo(48.5, 8);
+
+      for (const rotation of ROTATIONS) {
+        for (const [x, y] of [[324, 233], [918, 451]] as const) {
+          const component = makeComponent(type, x, y, rotation);
+          const snapped = snapComponentToPlaneGrid(component, planeSettings);
+          const terminalsAtOrigin = getComponentTerminals(snapped);
+
+          for (const definition of terminals) {
+            const actual = terminalsAtOrigin.find((terminal) => terminal.terminalId === definition.id)!;
+            const expectedLocal = rotatePoint({ x: definition.x, y: definition.y }, rotation);
+            expect(actual.x).toBeCloseTo(snapped.x + expectedLocal.x, 8);
+            expect(actual.y).toBeCloseTo(snapped.y + expectedLocal.y, 8);
+          }
+        }
       }
     }
   });

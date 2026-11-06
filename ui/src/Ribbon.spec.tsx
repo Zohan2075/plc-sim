@@ -2,7 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  getNextRibbonTabIndex,
   getRibbonTabDoubleClickAction,
+  getRibbonTabEdgeIndex,
   RibbonBody,
   RibbonButton,
   RibbonGroup,
@@ -31,6 +33,19 @@ describe("RibbonTabBar", () => {
     expect(markup).toContain('aria-selected="true"');
     expect(markup).toContain("ribbon-tab--contextual");
     expect(markup).toContain('aria-label="Collapse ribbon"');
+  });
+
+  it("uses a roving tab index with only the active tab in the tab order", () => {
+    const markup = renderToStaticMarkup(createElement(RibbonTabBar, {
+      activeTab: "home",
+      collapsed: false,
+      onSelect: () => undefined,
+      onToggleCollapse: () => undefined,
+      tabs
+    }));
+
+    expect((markup.match(/tabindex="0"/g) ?? []).length).toBe(1);
+    expect((markup.match(/tabindex="-1"/g) ?? []).length).toBe(tabs.length - 1);
   });
 
   it("switches the collapse label when collapsed", () => {
@@ -108,5 +123,27 @@ describe("ribbon tab helpers", () => {
   it("toggles collapse only when the active tab is double-clicked", () => {
     expect(getRibbonTabDoubleClickAction("home", "home")).toBe("toggle-collapse");
     expect(getRibbonTabDoubleClickAction("insert", "home")).toBe("none");
+  });
+
+  it("wraps the next tab index in both directions", () => {
+    expect(getNextRibbonTabIndex(2, 3, 1)).toBe(0);
+    expect(getNextRibbonTabIndex(0, 3, -1)).toBe(2);
+    expect(getNextRibbonTabIndex(1, 3, 1)).toBe(2);
+    expect(getNextRibbonTabIndex(1, 3, -1)).toBe(0);
+  });
+
+  it("starts at the first or last tab when nothing is focused", () => {
+    expect(getNextRibbonTabIndex(-1, 3, 1)).toBe(0);
+    expect(getNextRibbonTabIndex(-1, 3, -1)).toBe(2);
+  });
+
+  it("returns no tab for an empty tab list", () => {
+    expect(getNextRibbonTabIndex(0, 0, 1)).toBe(-1);
+    expect(getRibbonTabEdgeIndex(0, "first")).toBe(-1);
+  });
+
+  it("returns the first and last tab edges", () => {
+    expect(getRibbonTabEdgeIndex(3, "first")).toBe(0);
+    expect(getRibbonTabEdgeIndex(3, "last")).toBe(2);
   });
 });

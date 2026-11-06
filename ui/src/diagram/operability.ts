@@ -14,6 +14,8 @@ export const isOperable: Record<BuilderComponentType, ComponentOperability> = {
   SELECTOR_3POS: "position",
   LIMIT_SWITCH_NO: "toggle",
   LIMIT_SWITCH_NC: "toggle",
+  LEVEL_SWITCH_NO: "toggle",
+  LEVEL_SWITCH_NC: "toggle",
   OL_CONTACT: "toggle",
   LAMP: "none",
   MOTOR: "none",
@@ -21,6 +23,8 @@ export const isOperable: Record<BuilderComponentType, ComponentOperability> = {
   XIO: "none",
   NOTC: "none",
   NCTO: "none",
+  NOTO: "none",
+  NCTC: "none",
   OTE: "none",
   OTL: "none",
   OTU: "none"

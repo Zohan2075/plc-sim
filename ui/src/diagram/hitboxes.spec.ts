@@ -4,6 +4,7 @@ import {
   COMPONENT_WIDTH,
   getComponentHitBounds,
   getComponentHitShapes,
+  getComponentLabelBounds,
   getComponentLabelLayout,
   getTerminalDefinitions,
   getTerminalHitRadius,
@@ -29,6 +30,8 @@ const ALL_TYPES: BuilderComponentType[] = [
   "SELECTOR_3POS",
   "LIMIT_SWITCH_NO",
   "LIMIT_SWITCH_NC",
+  "LEVEL_SWITCH_NO",
+  "LEVEL_SWITCH_NC",
   "OL_CONTACT",
   "LAMP",
   "MOTOR",
@@ -36,6 +39,8 @@ const ALL_TYPES: BuilderComponentType[] = [
   "XIO",
   "NOTC",
   "NCTO",
+  "NOTO",
+  "NCTC",
   "OTE",
   "OTL",
   "OTU"
@@ -49,7 +54,13 @@ type TargetType =
   | "BREAKER_2P"
   | "LAMP"
   | "NOTC"
-  | "SELECTOR_3POS";
+  | "NOTO"
+  | "NCTC"
+  | "LEVEL_SWITCH_NO"
+  | "LEVEL_SWITCH_NC"
+  | "SELECTOR_3POS"
+  | "SWITCH_1P"
+  | "POWER_SOURCE";
 
 const TARGET_TYPES: TargetType[] = [
   "XIC",
@@ -59,7 +70,13 @@ const TARGET_TYPES: TargetType[] = [
   "BREAKER_2P",
   "LAMP",
   "NOTC",
-  "SELECTOR_3POS"
+  "NOTO",
+  "NCTC",
+  "LEVEL_SWITCH_NO",
+  "LEVEL_SWITCH_NC",
+  "SELECTOR_3POS",
+  "SWITCH_1P",
+  "POWER_SOURCE"
 ];
 
 const BODY_POINTS: Record<TargetType, Point> = {
@@ -70,7 +87,28 @@ const BODY_POINTS: Record<TargetType, Point> = {
   BREAKER_2P: { x: 80, y: 75 },
   LAMP: { x: 80, y: 51 },
   NOTC: { x: 80, y: 50 },
-  SELECTOR_3POS: { x: 80, y: 51 }
+  NOTO: { x: 80, y: 50 },
+  NCTC: { x: 80, y: 50 },
+  LEVEL_SWITCH_NO: { x: 80, y: 94.79 },
+  LEVEL_SWITCH_NC: { x: 86.88, y: 85.9 },
+  SELECTOR_3POS: { x: 80, y: 51 },
+  SWITCH_1P: { x: 80, y: 37.4 },
+  POWER_SOURCE: { x: 80, y: 51 }
+};
+
+const OLD_BOX_CORNERS: Partial<Record<TargetType, Point[]>> = {
+  SWITCH_1P: [
+    { x: 30, y: 31 },
+    { x: 130, y: 31 },
+    { x: 30, y: 91 },
+    { x: 130, y: 91 }
+  ],
+  POWER_SOURCE: [
+    { x: 37.5, y: 33.5 },
+    { x: 122.5, y: 33.5 },
+    { x: 37.5, y: 91 },
+    { x: 122.5, y: 91 }
+  ]
 };
 
 const EMPTY_CORNER: Point = { x: 4, y: 130 };
@@ -141,6 +179,55 @@ describe("HITBOXES table and tight bounds", () => {
       expect(bounds.width * bounds.height).toBeLessThan(COMPONENT_WIDTH * COMPONENT_HEIGHT);
     }
   });
+
+  it("keeps the new art-derived hitboxes materially smaller than the old box", () => {
+    for (const type of ["NOTO", "NCTC", "LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC"] as const) {
+      const bounds = getComponentHitBounds(component(type));
+
+      expect(bounds.width * bounds.height).toBeLessThan(COMPONENT_WIDTH * COMPONENT_HEIGHT * 0.7);
+    }
+  });
+
+  it("NCTC hit bounds contain the NOTO open-bar endpoint", () => {
+    const nctc = component("NCTC");
+    const bounds = getComponentHitBounds(nctc);
+    const endpoint = { x: 123.33826, y: 73.28408 };
+
+    expect(endpoint.x).toBeGreaterThanOrEqual(bounds.left);
+    expect(endpoint.x).toBeLessThanOrEqual(bounds.right);
+    expect(endpoint.y).toBeGreaterThanOrEqual(bounds.top);
+    expect(endpoint.y).toBeLessThanOrEqual(bounds.bottom);
+    expect(hitTestComponentPoint(nctc, endpoint)).toBe("component");
+  });
+
+  it("uses art-derived tight bounds for SWITCH_1P and POWER_SOURCE", () => {
+    for (const type of ["SWITCH_1P", "POWER_SOURCE"] as const) {
+      const bounds = getComponentHitBounds(component(type));
+
+      expect(bounds.width * bounds.height).toBeLessThan(COMPONENT_WIDTH * COMPONENT_HEIGHT * 0.7);
+    }
+  });
+
+  it("derives switch and source body shapes from the glyph art", () => {
+    const sourceShapes = getComponentHitShapes(component("POWER_SOURCE"));
+    const openSwitchShapes = getComponentHitShapes(component("SWITCH_1P"));
+    const closedSwitchShapes = getComponentHitShapes({
+      ...component("SWITCH_1P"),
+      isClosed: true
+    });
+
+    expect(sourceShapes.body.some((shape) => shape.kind === "circle")).toBe(true);
+
+    expect(openSwitchShapes.body.filter((shape) => shape.kind === "circle")).toHaveLength(2);
+    expect(closedSwitchShapes.body.filter((shape) => shape.kind === "circle")).toHaveLength(2);
+    expect(openSwitchShapes.body.some((shape) => shape.kind === "polygon")).toBe(true);
+    expect(closedSwitchShapes.body.some((shape) => shape.kind === "polygon")).toBe(true);
+
+    const openPolygon = openSwitchShapes.body.find((shape) => shape.kind === "polygon");
+    const closedPolygon = closedSwitchShapes.body.find((shape) => shape.kind === "polygon");
+
+    expect(openPolygon).not.toEqual(closedPolygon);
+  });
 });
 
 describe("hit matrix", () => {
@@ -193,6 +280,20 @@ describe("hit matrix", () => {
       }
     }
   });
+
+  it("lets the old switch/source rectangle corners fall through at rotations 0..3", () => {
+    for (const [type, corners] of Object.entries(OLD_BOX_CORNERS) as Array<[TargetType, Point[]]>) {
+      const base = component(type);
+
+      for (const rotation of [0, 1, 2, 3]) {
+        const current = { ...base, rotation };
+
+        for (const corner of corners) {
+          expect(hitTestComponentPoint(current, rotatedPoint(corner, rotation))).toBeNull();
+        }
+      }
+    }
+  });
 });
 
 describe("label layout", () => {
@@ -202,7 +303,7 @@ describe("label layout", () => {
 
       for (const rotation of [0, 1, 2, 3]) {
         const current = { ...base, rotation };
-        const bounds = getComponentHitBounds(current);
+        const bounds = getComponentLabelBounds(current);
         const layout = getComponentLabelLayout(current);
         const left = Number(layout.left);
         const top = Number(layout.top);
@@ -258,6 +359,62 @@ describe("label layout", () => {
       }
     });
   }
+
+  it("level switches follow the toggled art for hit and label bounds", () => {
+    for (const type of ["LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC"] as const) {
+      const open = { ...component(type), isClosed: false };
+      const closed = { ...open, isClosed: true };
+      const openBounds = getComponentHitBounds(open);
+      const closedBounds = getComponentHitBounds(closed);
+
+      expect(openBounds).not.toEqual(closedBounds);
+      expect(getComponentLabelLayout(open).top).not.toBe(getComponentLabelLayout(closed).top);
+      expect(hitTestComponentPoint(open, { x: 80, y: 94.79 })).toBe("component");
+      expect(hitTestComponentPoint(closed, { x: 86.88, y: 85.9 })).toBe("component");
+
+      for (const rotation of [0, 1, 2, 3]) {
+        for (const current of [{ ...open, rotation }, { ...closed, rotation }]) {
+          const labelBounds = getComponentLabelBounds(current);
+          const layout = getComponentLabelLayout(current);
+          const left = Number(layout.left);
+          const top = Number(layout.top);
+          const vertical = rotation === 1 || rotation === 3;
+
+          if (vertical) {
+            expect(left - labelBounds.right).toBeCloseTo(LABEL_GAP, 6);
+          } else {
+            expect(top - labelBounds.bottom).toBeCloseTo(LABEL_GAP, 6);
+          }
+        }
+      }
+    }
+  });
+
+  it("SWITCH_1P closed label follows the closed art and keeps the fixed gap", () => {
+    const open = component("SWITCH_1P");
+    const closed = { ...component("SWITCH_1P"), isClosed: true };
+    const openBounds = getComponentLabelBounds(open);
+    const closedBounds = getComponentLabelBounds(closed);
+
+    expect(openBounds.top).toBeLessThan(closedBounds.top);
+
+    for (const fixture of [open, closed] as const) {
+      for (const rotation of [0, 1, 2, 3]) {
+        const current = { ...fixture, rotation };
+        const bounds = getComponentLabelBounds(current);
+        const layout = getComponentLabelLayout(current);
+        const left = Number(layout.left);
+        const top = Number(layout.top);
+        const vertical = rotation === 1 || rotation === 3;
+
+        if (vertical) {
+          expect(left - bounds.right).toBeCloseTo(LABEL_GAP, 6);
+        } else {
+          expect(top - bounds.bottom).toBeCloseTo(LABEL_GAP, 6);
+        }
+      }
+    }
+  });
 });
 
 describe("spawn spacing", () => {

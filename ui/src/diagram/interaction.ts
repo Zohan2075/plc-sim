@@ -2,12 +2,21 @@ import { clampComponentToPlane, snapComponentToPlaneGrid } from "./grid";
 import type { BuilderComponent, BuilderPlaneSettings, Point } from "../DiagramBuilder";
 
 export const WIRE_ORIGIN_CANCEL_DISTANCE = 6;
+export const WIRE_CREATION_BLOCKED_MESSAGE = "Stop the simulation to create wires";
+
+export function canEditConnections(running: boolean): boolean {
+  return !running;
+}
 
 export type DiagramShortcut =
+  | { type: "command-palette" }
   | { type: "copy" }
   | { type: "redo" }
   | { type: "rotate"; direction: "ccw" | "cw" }
-  | { type: "undo" };
+  | { type: "run" }
+  | { type: "stop" }
+  | { type: "undo" }
+  | { type: "zoom"; action: "actual" | "fit" | "in" | "out" };
 
 export function resolveDiagramShortcut(event: {
   ctrlKey: boolean;
@@ -17,6 +26,30 @@ export function resolveDiagramShortcut(event: {
 }): DiagramShortcut | null {
   const key = event.key.toLowerCase();
   const modifier = event.ctrlKey || event.metaKey;
+
+  if (event.key === "F5" && !modifier) {
+    return event.shiftKey ? { type: "stop" } : { type: "run" };
+  }
+
+  if (modifier && key === "k") {
+    return { type: "command-palette" };
+  }
+
+  if (modifier && key === "0") {
+    return { action: "fit", type: "zoom" };
+  }
+
+  if (modifier && key === "1") {
+    return { action: "actual", type: "zoom" };
+  }
+
+  if (modifier && (key === "+" || key === "=")) {
+    return { action: "in", type: "zoom" };
+  }
+
+  if (modifier && (key === "-" || key === "_")) {
+    return { action: "out", type: "zoom" };
+  }
 
   if (modifier && key === "z") {
     return event.shiftKey ? { type: "redo" } : { type: "undo" };
@@ -35,6 +68,17 @@ export function resolveDiagramShortcut(event: {
   }
 
   return null;
+}
+
+export function computeFitZoom(
+  content: { height: number; width: number },
+  viewport: { height: number; width: number }
+): number {
+  if (content.height <= 0 || content.width <= 0) {
+    return 1;
+  }
+
+  return Math.min(viewport.width / content.width, viewport.height / content.height);
 }
 
 export function updateComponentSelection(

@@ -9,7 +9,7 @@ import type { RibbonAuditGroup } from "./ribbonMapping";
 
 const expectedGroupCounts: Record<RibbonAuditGroup, number> = {
   H: 3,
-  P: 19,
+  P: 23,
   T: 15,
   S: 4,
   R: 6,

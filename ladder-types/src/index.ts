@@ -1,4 +1,4 @@
-export type TimedContactInstructionType = "NOTC" | "NCTO";
+export type TimedContactInstructionType = "NOTC" | "NCTO" | "NOTO" | "NCTC";
 export type InstructionType = "XIC" | "XIO" | TimedContactInstructionType | "OTE" | "OTL" | "OTU";
 
 interface InstructionCommon {

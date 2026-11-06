@@ -32,6 +32,10 @@ const TYPES: BuilderComponentType[] = [
   "SELECTOR_3POS",
   "NCTO",
   "NOTC",
+  "NOTO",
+  "NCTC",
+  "LEVEL_SWITCH_NO",
+  "LEVEL_SWITCH_NC",
   "BREAKER_1P",
   "POWER_SOURCE"
 ];

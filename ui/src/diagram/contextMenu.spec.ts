@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   clampMenuPosition,
+  CONTEXT_MENU_CLOSE_MS,
+  getContextMenuClassName,
   getNextMenuIndex,
   getSubmenuSide,
   isLongPressCancelled,
@@ -83,6 +85,17 @@ describe("shouldRestoreMenuFocus", () => {
   it("does not steal focus when close() runs without an open menu", () => {
     expect(shouldRestoreMenuFocus(false)).toBe(false);
     expect(shouldRestoreMenuFocus(true)).toBe(true);
+  });
+});
+
+describe("context menu closing state", () => {
+  it("uses an 80 ms close animation", () => {
+    expect(CONTEXT_MENU_CLOSE_MS).toBe(80);
+  });
+
+  it("adds the closing class while the menu fades out", () => {
+    expect(getContextMenuClassName(false)).toBe("context-menu");
+    expect(getContextMenuClassName(true)).toBe("context-menu context-menu--closing");
   });
 });
 

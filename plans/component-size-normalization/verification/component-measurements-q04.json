@@ -1,0 +1,532 @@
+{
+  "viewport": {
+    "width": 1800,
+    "height": 1650,
+    "devicePixelRatio": 1
+  },
+  "canvas": {
+    "rect": {
+      "x": 70,
+      "y": 371.938,
+      "width": 1720,
+      "height": 1160
+    },
+    "styleTransform": "matrix(1, 0, 0, 1, 0, 0)"
+  },
+  "zoomText": "import { injectIntoGlobalHook } from \"/@react-refresh\";\ninjectIntoGlobalHook(window);\nwindow.$RefreshReg$ = () => {};\nwindow.$RefreshSig$ = () => (type) => type;\n\n    \n\n    \n    \n    Ansi ECS ΓÇö PLC & electrical control simulator\n    \n    \n    \n\n    \n    \n    \n\n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n    \n\n    \n    \n    \n    \n    \n  :root {\n\tcolor-scheme: light;\n\t--bg-canvas: #f0e8db;\n\t--bg-canvas-deep: #e3d4c0;\n\t--bg-surface: rgba(255, 250, 244, 0.82);\n\t--bg-surface-strong: #fffdfa;\n\t--bg-surface-muted: rgba(245, 237, 226, 0.9);\n\t--border-strong: #c6aa86;\n\t--border-muted: #e2d2bd;\n\t--border-soft: #efe4d6;\n\t--text-strong: #201814;\n\t--text-muted: #6c594a;\n\t--text-soft: #927d6a;\n\t--brand: #b85b2c;\n\t--brand-deep: #8d431d;\n\t--accent: #274b69;\n\t--accent-deep: #1c3449;\n\t--success: #187a51;\n\t--success-bg: #ebfbf2;\n\t--danger: #b4432a;\n\t--danger-bg: #fff0eb;\n\t--warning: #8c5b10;\n\t--warning-bg: #fff6e6;\n\t--shadow-lg: 0 18px 40px rgba(71, 43, 23, 0.12);\n\t--shadow-md: 0 10px 24px rgba(71, 43, 23, 0.08);\n\t--radius-xl: 28px;\n\t--radius-lg: 22px;\n\t--radius-md: 18px;\n\t--radius-sm: 14px;\n\t--space-1: 4px;\n\t--space-2: 8px;\n\t--space-3: 12px;\n\t--space-4: 16px;\n\t--space-5: 20px;\n\t--space-6: 24px;\n\t--space-7: 32px;\n\t--space-8: 40px;\n\t--font-ui: \"Segoe UI Variable\", Aptos, \"Segoe UI\", sans-serif;\n\t--font-display: Bahnschrift, \"Segoe UI Variable\", \"Segoe UI\", sans-serif;\n}\n\n* {\n\tbox-sizing: border-box;\n}\n\nhtml,\nbody,\n#root {\n\tmin-height: 100%;\n}\n\nhtml {\n\tfont-size: 16px;\n}\n\nbody {\n\tmargin: 0;\n\tfont-family: var(--font-ui);\n\tcolor: var(--text-strong);\n\tbackground:\n\t\tradial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 36%),\n\t\tlinear-gradient(135deg, var(--bg-canvas) 0%, var(--bg-canvas-deep) 100%);\n}\n\nbody::before {\n\tcontent: \"\";\n\tposition: fixed;\n\tinset: 0;\n\tbackground-image:\n\t\tlinear-gradient(rgba(255, 255, 255, 0.22) 1px, transparent 1px),\n\t\tlinear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);\n\tbackground-size: 32px 32px;\n\topacity: 0.28;\n\tpointer-events: none;\n}\n\nbody,\nbutton,\ninput,\nselect,\ntextarea {\n\tfont: inherit;\n}\n\nbutton {\n\tborder: 0;\n\tbackground: none;\n}\n\nbutton,\nselect,\ninput {\n\tborder-radius: 999px;\n}\n\nbutton:disabled,\nselect:disabled,\ninput:disabled {\n\tcursor: not-allowed;\n\topacity: 0.56;\n}\n\nbutton:focus-visible,\nselect:focus-visible,\ninput:focus-visible {\n\toutline: 3px solid rgba(39, 75, 105, 0.3);\n\toutline-offset: 3px;\n}\n\np,\nh1,\nh2,\nh3,\nh4,\nol,\nul {\n\tmargin-top: 0;\n}\n.app-shell {\n\tposition: relative;\n\tz-index: 1;\n\tpadding: var(--space-7) var(--space-5) var(--space-8);\n}\n\n.app-shell--playground {\n\tpadding-top: var(--space-5);\n\tpadding-bottom: var(--space-6);\n}\n\n.dashboard {\n\twidth: min(1420px, 100%);\n\tmargin: 0 auto;\n\tdisplay: grid;\n\tgap: var(--space-6);\n}\n\n.dashboard--playground {\n\twidth: min(1640px, 100%);\n\tgap: var(--space-4);\n}\n\n.panel {\n\tbackground: var(--bg-surface);\n\tbackdrop-filter: blur(14px);\n\tborder: 1px solid var(--border-soft);\n\tborder-radius: var(--radius-xl);\n\tbox-shadow: var(--shadow-md);\n\tpadding: var(--space-6);\n}\n\n.panel__header {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: flex-start;\n\tgap: var(--space-4);\n\tmargin-bottom: var(--space-5);\n}\n\n.panel__eyebrow {\n\tmargin-bottom: var(--space-2);\n\tcolor: var(--brand);\n\tfont-size: 0.78rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.14em;\n\ttext-transform: uppercase;\n}\n\n.panel__title {\n\tmargin-bottom: var(--space-2);\n\tfont-family: var(--font-display);\n\tfont-size: clamp(1.1rem, 1rem + 0.9vw, 1.55rem);\n\tline-height: 1.1;\n}\n\n.panel__subtitle {\n\tmargin: 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.5;\n}\n\n.hero {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);\n\tgap: var(--space-6);\n\tbackground:\n\t\tradial-gradient(circle at top right, rgba(255, 255, 255, 0.72), transparent 42%),\n\t\tlinear-gradient(145deg, rgba(255, 248, 241, 0.98), rgba(247, 236, 222, 0.94));\n\tborder-color: var(--border-strong);\n\tbox-shadow: var(--shadow-lg);\n}\n\n.hero__title {\n\tmargin: 0 0 var(--space-3);\n\tfont-family: var(--font-display);\n\tfont-size: clamp(2rem, 1.6rem + 1.8vw, 3.35rem);\n\tline-height: 0.98;\n\tletter-spacing: -0.02em;\n}\n\n.hero__lead {\n\tmargin: 0;\n\tmax-width: 68ch;\n\tcolor: var(--text-muted);\n\tfont-size: 1.03rem;\n\tline-height: 1.6;\n}\n\n.hero__metrics {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(2, minmax(0, 1fr));\n\tgap: var(--space-3);\n\talign-content: start;\n}\n\n.metric-card {\n\tpadding: var(--space-4);\n\tborder-radius: var(--radius-lg);\n\tborder: 1px solid var(--border-muted);\n\tbackground: rgba(255, 255, 255, 0.72);\n}\n\n.metric-card__label {\n\tdisplay: block;\n\tmargin-bottom: var(--space-2);\n\tcolor: var(--text-soft);\n\tfont-size: 0.76rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.12em;\n\ttext-transform: uppercase;\n}\n\n.metric-card__value {\n\tdisplay: block;\n\tmargin-bottom: var(--space-1);\n\tfont-family: var(--font-display);\n\tfont-size: clamp(1.7rem, 1.2rem + 1vw, 2.3rem);\n\tline-height: 1;\n}\n\n.metric-card__detail {\n\tcolor: var(--text-muted);\n\tfont-size: 0.92rem;\n}\n\n.dashboard__top-grid {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);\n\tgap: var(--space-6);\n}\n\n.panel--builder {\n\toverflow: hidden;\n}\n\n.builder__layout {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(260px, 320px) minmax(0, 1fr);\n\tgap: var(--space-5);\n\talign-items: start;\n}\n\n.builder__palette,\n.builder__workspace {\n\tdisplay: grid;\n\tgap: var(--space-4);\n}\n\n.builder__palette-title {\n\tfont-family: var(--font-display);\n\tfont-size: 1.06rem;\n}\n\n.builder__palette-copy,\n.builder__hint {\n\tmargin: 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.5;\n}\n\n.builder__palette-list {\n\tdisplay: grid;\n\tgap: var(--space-3);\n}\n\n.builder__palette-button {\n\tjustify-content: flex-start;\n\tgap: var(--space-3);\n\tmin-height: 72px;\n\tpadding: var(--space-3) var(--space-4);\n\ttext-align: left;\n\tborder-radius: var(--radius-md);\n\tcursor: grab;\n}\n\n.builder__palette-button:active {\n\tcursor: grabbing;\n}\n\n.builder__palette-symbol,\n.diagram-block__symbol,\n.diagram-empty .builder__palette-symbol {\n\tfont-family: Consolas, \"Cascadia Mono\", \"Courier New\", monospace;\n\tfont-size: 1.15rem;\n\tletter-spacing: 0.02em;\n\twhite-space: nowrap;\n}\n\n.builder__palette-button > span:last-child {\n\tdisplay: grid;\n\tgap: var(--space-1);\n\ttext-align: left;\n}\n\n.builder__palette-description {\n\tdisplay: block;\n\tcolor: var(--text-muted);\n\tfont-size: 0.88rem;\n\tfont-weight: 500;\n\tline-height: 1.4;\n}\n\n.builder__footer,\n.builder__workspace-header {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: flex-start;\n\tgap: var(--space-3);\n\tflex-wrap: wrap;\n}\n\n.diagram-canvas {\n\tpadding: var(--space-5);\n\tborder: 1px solid #b8b8b8;\n\tborder-radius: var(--radius-lg);\n\tbackground:\n\t\tlinear-gradient(rgba(15, 15, 15, 0.05) 1px, transparent 1px),\n\t\tlinear-gradient(90deg, rgba(15, 15, 15, 0.05) 1px, transparent 1px),\n\t\t#fff;\n\tbackground-size: 24px 24px;\n\ttransition: border-color 160ms ease, background-color 160ms ease;\n\tmin-height: 254px;\n}\n\n.diagram-canvas--active {\n\tborder-color: var(--accent);\n\tbackground:\n\t\tlinear-gradient(rgba(39, 75, 105, 0.1) 1px, transparent 1px),\n\t\tlinear-gradient(90deg, rgba(39, 75, 105, 0.1) 1px, transparent 1px),\n\t\t#fff;\n\tbackground-size: 24px 24px;\n}\n\n.diagram-rung {\n\tdisplay: grid;\n\tgrid-template-columns: 14px minmax(0, 1fr) 14px;\n\tgap: var(--space-4);\n\talign-items: stretch;\n\tmin-height: 190px;\n}\n\n.diagram-rung__rail {\n\talign-self: stretch;\n\tjustify-self: center;\n\twidth: 5px;\n\tborder-radius: 999px;\n\tbackground: linear-gradient(180deg, #222, #555);\n}\n\n.diagram-rung__track {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: var(--space-2);\n\toverflow-x: auto;\n\tpadding-bottom: var(--space-2);\n\tmin-height: 190px;\n}\n\n.diagram-rung__group {\n\tdisplay: flex;\n\talign-items: stretch;\n\tgap: var(--space-2);\n\tmin-height: 100%;\n}\n\n.diagram-drop-slot {\n\twidth: 22px;\n\tmin-width: 22px;\n\tborder-radius: 999px;\n\tborder: 1px dashed transparent;\n\tbackground: transparent;\n\ttransition: background-color 120ms ease, border-color 120ms ease;\n}\n\n.diagram-drop-slot--active {\n\tbackground: rgba(39, 75, 105, 0.16);\n\tborder-color: var(--accent);\n}\n\n.diagram-block {\n\tdisplay: grid;\n\tgap: var(--space-2);\n\tmin-width: 170px;\n\tpadding: var(--space-3);\n\tborder: 1px solid #bbb;\n\tborder-radius: 16px;\n\tbackground: rgba(255, 255, 255, 0.95);\n\tcursor: grab;\n\tbox-shadow: 0 4px 10px rgba(28, 28, 28, 0.04);\n}\n\n.diagram-block:active {\n\tcursor: grabbing;\n}\n\n.diagram-block__header,\n.diagram-block__meta {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: center;\n\tgap: var(--space-3);\n\tflex-wrap: wrap;\n}\n\n.diagram-block__type {\n\tfont-family: var(--font-display);\n\tfont-size: 0.92rem;\n\tletter-spacing: 0.04em;\n}\n\n.diagram-block__symbol-wrap {\n\tposition: relative;\n\tdisplay: grid;\n\tplace-items: center;\n\tpadding: var(--space-2) var(--space-1);\n\tmin-height: 76px;\n\tborder: 1px solid #ddd;\n\tborder-radius: var(--radius-sm);\n\tbackground: #fff;\n}\n\n.diagram-block__symbol-wrap::before,\n.diagram-block__symbol-wrap::after {\n\tcontent: \"\";\n\tposition: absolute;\n\ttop: 50%;\n\twidth: 18px;\n\theight: 2px;\n\tbackground: #111;\n\ttransform: translateY(-50%);\n}\n\n.diagram-block__symbol-wrap::before {\n\tleft: -18px;\n}\n\n.diagram-block__symbol-wrap::after {\n\tright: -18px;\n}\n\n.diagram-symbol {\n\twidth: 100%;\n\theight: 64px;\n\toverflow: visible;\n\tcolor: #153047;\n}\n\n.diagram-symbol--energized {\n\tcolor: #d97706;\n}\n\n.diagram-symbol--pushbutton-no {\n\tcolor: #16a34a;\n}\n\n.diagram-symbol--pushbutton-nc {\n\tcolor: #dc2626;\n}\n\n.diagram-symbol--estop {\n\tcolor: #dc2626;\n}\n\n.diagram-symbol--ol {\n\tcolor: #ea580c;\n}\n\n.diagram-symbol__line {\n\tstroke: currentColor;\n\tstroke-width: 3.5;\n\tfill: none;\n\tstroke-linecap: round;\n\tstroke-linejoin: round;\n}\n\n.diagram-symbol__breaker-lead {\n\tstroke-width: 3.5;\n}\n\n.diagram-symbol__shape {\n\tstroke: currentColor;\n\tstroke-width: 3.5;\n\tfill: rgba(255, 255, 255, 0.94);\n}\n\n.diagram-symbol__terminal {\n\tstroke: currentColor;\n\tstroke-width: 3.5;\n\tfill: rgba(255, 255, 255, 0.98);\n}\n\n.diagram-symbol__linkage {\n\tstroke: currentColor;\n\tstroke-width: 2.8;\n\tfill: none;\n\tstroke-linecap: round;\n\tstroke-dasharray: 3 3;\n\topacity: 1;\n}\n\n.diagram-symbol__fill {\n\tfill: currentColor;\n}\n\n/* Trazos vectoriales del usuario: el arte de referencia viene con lineas de\n   ~1.2 unidades, asi que el contorno se engrosa con stroke (2 unidades del\n   viewBox 128x64) hasta el peso 3.2 que usa el resto de los simbolos. El\n   relleno se dibuja aparte, exacto, para no cerrar los huecos decorativos. */\n.diagram-symbol__vector {\n\tfill: currentColor;\n\tstroke: none;\n}\n\n.diagram-symbol__vector--normalized {\n\tfill: currentColor;\n\tstroke: currentColor;\n\tstroke-linecap: butt;\n\tstroke-linejoin: miter;\n}\n\n.diagram-symbol__vector--outline {\n\tfill: none;\n\tstroke: currentColor;\n\tstroke-linecap: round;\n\tstroke-linejoin: round;\n}\n\n/* Anillos de bornes dibujados como trazo (SPST): mismo relleno que los\n   terminales del resto de simbolos. */\n.diagram-symbol__vector-ring {\n\tstroke: currentColor;\n\tfill: rgba(255, 255, 255, 0.98);\n}\n\n.diagram-symbol__coil-core {\n\tfill: rgba(20, 184, 166, 0.18);\n\topacity: 0;\n\ttransform-origin: 64px 30px;\n\ttransform-box: fill-box;\n\ttransition: opacity 140ms ease, transform 140ms ease, fill 140ms ease;\n}\n\n.diagram-symbol__contact-arm,\n.diagram-symbol__contact-slash {\n\ttransform-origin: 64px 30px;\n\ttransform-box: fill-box;\n\ttransition: transform 140ms ease, stroke 140ms ease, opacity 140ms ease;\n}\n\n.diagram-symbol__text {\n\tfill: currentColor;\n\tfont-size: 11.5px;\n\tfont-family: \"Aptos\", \"Segoe UI Variable\", \"Segoe UI\", sans-serif;\n\tfont-weight: 800;\n\tletter-spacing: 0.06em;\n}\n\n.diagram-symbol__terminal-label {\n\tfill: currentColor;\n\tfont-size: 9px;\n\tfont-family: \"Aptos\", \"Segoe UI Variable\", \"Segoe UI\", sans-serif;\n\tfont-weight: 700;\n\tletter-spacing: 0;\n}\n\n.diagram-symbol--energized .diagram-symbol__shape {\n\tfill: rgba(254, 243, 199, 0.54);\n}\n\n.diagram-symbol--coil-active {\n\tcolor: #d97706;\n}\n\n.diagram-symbol--coil-active .diagram-symbol__shape {\n\tfill: rgba(254, 243, 199, 0.74);\n\tstroke: currentColor;\n}\n\n.diagram-symbol--coil-active .diagram-symbol__coil-core {\n\topacity: 1;\n\tfill: rgba(250, 204, 21, 0.24);\n\ttransform: scale(1.05);\n}\n\n.diagram-symbol--contact-closed {\n\tcolor: #0f766e;\n}\n\n.diagram-symbol--contact-closed .diagram-symbol__contact-arm {\n\tstroke-width: 3.5;\n}\n\n.diagram-symbol--contact-actuated .diagram-symbol__contact-arm,\n.diagram-symbol--contact-actuated .diagram-symbol__contact-slash {\n\tstroke: #ea580c;\n\ttransform: scale(1.04);\n}\n\n.diagram-symbol__motor-rotor {\n\ttransform-origin: 64px 32px;\n\ttransform-box: fill-box;\n\twill-change: transform;\n}\n\n.diagram-block__symbol-fallback {\n\tfont-family: Consolas, \"Cascadia Mono\", \"Courier New\", monospace;\n\tfont-size: 0.8rem;\n\tcolor: var(--text-soft);\n\ttext-align: center;\n}\n\n.diagram-block__remove {\n\tmin-height: 30px;\n\tpadding: 0.35rem 0.7rem;\n}\n\n.diagram-block__field {\n\tdisplay: grid;\n\tgap: 0.35rem;\n}\n\n.diagram-block__select {\n\tmin-height: 38px;\n\tpadding: 0 var(--space-3);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-sm);\n\tbackground: var(--bg-surface-strong);\n\tcolor: var(--text-strong);\n\tfont-size: 0.92rem;\n}\n\n.diagram-block__tag {\n\tcolor: var(--text-muted);\n\tfont-weight: 700;\n\tline-height: 1.4;\n}\n\n.diagram-empty {\n\tdisplay: grid;\n\tplace-items: center;\n\tgap: var(--space-3);\n\twidth: 100%;\n\tpadding: var(--space-6);\n\tborder: 1px dashed var(--border-muted);\n\tborder-radius: var(--radius-md);\n\tbackground: rgba(255, 255, 255, 0.54);\n\tcolor: var(--text-muted);\n\ttext-align: center;\n\tcursor: copy;\n}\n\n.project-panel__toolbar {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\talign-items: end;\n\tgap: var(--space-4);\n}\n\n.field {\n\tdisplay: grid;\n\tgap: var(--space-2);\n\tmin-width: 240px;\n\tflex: 1 1 280px;\n}\n\n.field__label {\n\tcolor: var(--text-muted);\n\tfont-size: 0.78rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.1em;\n\ttext-transform: uppercase;\n}\n\n.select {\n\tmin-height: 48px;\n\tpadding: 0 var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tbackground: var(--bg-surface-strong);\n\tcolor: var(--text-strong);\n}\n\n.project-panel__actions {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-3);\n}\n\n.button {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tjustify-content: center;\n\tmin-height: 46px;\n\tpadding: 0 var(--space-4);\n\tborder: 1px solid transparent;\n\tbackground: var(--bg-surface-muted);\n\tcolor: var(--text-strong);\n\tfont-weight: 800;\n\tletter-spacing: 0.01em;\n\tcursor: pointer;\n\ttransition:\n\t\ttransform 160ms ease,\n\t\tbox-shadow 160ms ease,\n\t\tborder-color 160ms ease,\n\t\tbackground-color 160ms ease;\n}\n\n.button:hover:not(:disabled) {\n\ttransform: translateY(-1px);\n\tbox-shadow: 0 10px 20px rgba(71, 43, 23, 0.12);\n}\n\n.button--primary {\n\tbackground: linear-gradient(180deg, var(--brand), var(--brand-deep));\n\tcolor: #fff;\n}\n\n.button--secondary {\n\tbackground: linear-gradient(180deg, var(--accent), var(--accent-deep));\n\tcolor: #fff;\n}\n\n.button--ghost {\n\tborder-color: var(--border-strong);\n\tbackground: transparent;\n}\n\n.button--danger {\n\tbackground: linear-gradient(180deg, #c6583f, var(--danger));\n\tcolor: #fff;\n}\n\n.button--small {\n\tmin-height: 40px;\n\tpadding: 0 var(--space-3);\n\tfont-size: 0.92rem;\n}\n\n.project-panel__summary {\n\tdisplay: grid;\n\tgap: var(--space-3);\n\tmargin-top: var(--space-5);\n\tpadding: var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-lg);\n\tbackground: rgba(255, 255, 255, 0.58);\n}\n\n.project-panel__summary-title {\n\tfont-family: var(--font-display);\n\tfont-size: 1.18rem;\n}\n\n.project-panel__summary-copy {\n\tcolor: var(--text-muted);\n\tline-height: 1.55;\n}\n\n.notice {\n\tmargin-top: var(--space-5);\n\tpadding: var(--space-4);\n\tborder-radius: var(--radius-md);\n\tborder: 1px solid var(--border-muted);\n\tfont-weight: 700;\n\tline-height: 1.45;\n}\n\n.notice--info {\n\tbackground: rgba(239, 246, 255, 0.92);\n\tborder-color: #c2d6eb;\n\tcolor: #274b69;\n}\n\n.notice--error {\n\tbackground: var(--danger-bg);\n\tborder-color: #edc2b6;\n\tcolor: #8a2d1d;\n}\n\n.guide-list {\n\tlist-style: none;\n\tpadding: 0;\n\tmargin: 0;\n\tdisplay: grid;\n\tgap: var(--space-4);\n}\n\n.guide-list__item {\n\tdisplay: grid;\n\tgrid-template-columns: auto 1fr;\n\tgap: var(--space-3);\n}\n\n.guide-list__index {\n\tdisplay: grid;\n\tplace-items: center;\n\twidth: 34px;\n\theight: 34px;\n\tborder-radius: 50%;\n\tbackground: linear-gradient(180deg, var(--brand), var(--brand-deep));\n\tcolor: #fff;\n\tfont-weight: 800;\n}\n\n.guide-list__title {\n\tmargin-bottom: var(--space-1);\n\tfont-size: 1rem;\n}\n\n.guide-list__body {\n\tmargin: 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.5;\n}\n\n.status-pill {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tjustify-content: center;\n\tmin-height: 34px;\n\tpadding: 0 var(--space-3);\n\tborder-radius: 999px;\n\tborder: 1px solid transparent;\n\tfont-size: 0.85rem;\n\tfont-weight: 800;\n}\n\n.status-pill--on {\n\tbackground: var(--success-bg);\n\tborder-color: #c0e6d0;\n\tcolor: var(--success);\n}\n\n.status-pill--off {\n\tbackground: rgba(245, 237, 226, 0.95);\n\tborder-color: var(--border-muted);\n\tcolor: var(--text-muted);\n}\n\n.status-pill--danger {\n\tbackground: var(--danger-bg);\n\tborder-color: #edc2b6;\n\tcolor: var(--danger);\n}\n\n.status-pill--neutral {\n\tbackground: rgba(255, 255, 255, 0.68);\n\tborder-color: var(--border-muted);\n\tcolor: var(--text-muted);\n}\n\n.detail-chip {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tmin-height: 30px;\n\tpadding: 0 var(--space-3);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: 999px;\n\tbackground: rgba(255, 255, 255, 0.68);\n\tcolor: var(--text-muted);\n\tfont-size: 0.83rem;\n\tfont-weight: 700;\n}\n\n.detail-chip--on {\n\tborder-color: #c4e4d0;\n\tbackground: #f4fff8;\n\tcolor: var(--success);\n}\n\n.detail-chip--off {\n\tborder-color: var(--border-muted);\n\tcolor: var(--text-muted);\n}\n\n.detail-chip--pending {\n\tborder-color: #f0d7a5;\n\tbackground: var(--warning-bg);\n\tcolor: var(--warning);\n}\n\n.panel--controls .panel__header {\n\tmargin-bottom: var(--space-4);\n}\n\n.control-panel__stats {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-2);\n}\n\n.control-panel__body {\n\tdisplay: grid;\n\tgrid-template-columns: auto minmax(0, 1fr);\n\tgap: var(--space-5);\n\talign-items: start;\n}\n\n.control-panel__actions {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-3);\n}\n\n.scan-cycle {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(3, minmax(0, 1fr));\n\tgap: var(--space-3);\n}\n\n.scan-cycle__step {\n\tpadding: var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-md);\n\tbackground: var(--bg-surface-strong);\n}\n\n.scan-cycle__step--live {\n\tborder-color: rgba(39, 75, 105, 0.35);\n\tbox-shadow: inset 0 0 0 1px rgba(39, 75, 105, 0.15);\n}\n\n.scan-cycle__label {\n\tmargin-bottom: var(--space-2);\n\tfont-family: var(--font-display);\n\tfont-size: 1rem;\n}\n\n.scan-cycle__text {\n\tmargin: 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.45;\n}\n\n.dashboard__main-grid {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.95fr);\n\tgap: var(--space-6);\n\talign-items: start;\n}\n\n.dashboard__workspace,\n.dashboard__sidebar {\n\tdisplay: grid;\n\tgap: var(--space-6);\n}\n\n.summary-grid {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(2, minmax(0, 1fr));\n\tgap: var(--space-3);\n}\n\n.summary-card {\n\tpadding: var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-md);\n\tbackground: rgba(255, 255, 255, 0.62);\n}\n\n.summary-card__label {\n\tdisplay: block;\n\tmargin-bottom: var(--space-2);\n\tcolor: var(--text-soft);\n\tfont-size: 0.76rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.1em;\n\ttext-transform: uppercase;\n}\n\n.summary-card__value {\n\tfont-family: var(--font-display);\n\tfont-size: 1.45rem;\n}\n\n.empty-state {\n\tmargin: 0;\n\tpadding: var(--space-4);\n\tborder: 1px dashed var(--border-strong);\n\tborder-radius: var(--radius-md);\n\tbackground: rgba(255, 255, 255, 0.48);\n\tcolor: var(--text-muted);\n\tline-height: 1.5;\n}\n\n.ladder-rungs,\n.trace-list,\n.tag-groups,\n.tag-list {\n\tdisplay: grid;\n\tgap: var(--space-4);\n}\n\n.ladder-rung,\n.trace-rung,\n.tag-card {\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-lg);\n\tbackground: rgba(255, 255, 255, 0.6);\n}\n\n.ladder-rung {\n\tpadding: var(--space-5);\n}\n\n.ladder-rung__meta,\n.trace-rung__header,\n.tag-card__header,\n.tag-group__header,\n.trace-step__headline {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\tgap: var(--space-3);\n\talign-items: flex-start;\n}\n\n.ladder-rung__index {\n\tmargin-bottom: var(--space-1);\n\tcolor: var(--text-soft);\n\tfont-size: 0.8rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.1em;\n\ttext-transform: uppercase;\n}\n\n.ladder-rung__title,\n.trace-rung__title,\n.tag-group__title {\n\tmargin: 0;\n\tfont-family: var(--font-display);\n\tfont-size: 1.12rem;\n}\n\n.trace-rung__subtitle,\n.tag-group__subtitle {\n\tmargin: var(--space-1) 0 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.45;\n}\n\n.ladder-rung__lane {\n\tdisplay: grid;\n\tgrid-template-columns: 14px minmax(0, 1fr) 14px;\n\tgap: var(--space-3);\n\talign-items: stretch;\n}\n\n.ladder-rung__rail {\n\talign-self: stretch;\n\tjustify-self: center;\n\twidth: 4px;\n\tmin-height: 132px;\n\tborder-radius: 999px;\n\tbackground: linear-gradient(180deg, #d3b898, #a88458);\n}\n\n.ladder-rung__instructions {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(auto-fit, minmax(210px, 1fr));\n\tgap: var(--space-3);\n}\n\n.instruction-card {\n\tdisplay: grid;\n\tgap: var(--space-3);\n\tmin-height: 168px;\n\tpadding: var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-md);\n\tbackground: var(--bg-surface-strong);\n}\n\n.instruction-card--energized {\n\tbackground: linear-gradient(180deg, #f2fff7, #e6f8ee);\n\tborder-color: #b8dcc6;\n\tbox-shadow: inset 0 0 0 1px rgba(24, 122, 81, 0.12);\n}\n\n.instruction-card__header {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\tgap: var(--space-3);\n\talign-items: flex-start;\n}\n\n.instruction-card__type {\n\tfont-family: var(--font-display);\n\tfont-size: 1.06rem;\n}\n\n.instruction-card__label {\n\tfont-weight: 800;\n\tline-height: 1.35;\n}\n\n.instruction-card__description,\n.trace-step__summary,\n.tag-card__description {\n\tmargin: 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.5;\n}\n\n.instruction-card__tag,\n.trace-step__tag,\n.tag-card__name {\n\tcolor: var(--text-soft);\n\tfont-size: 0.84rem;\n}\n\n.instruction-card__chips,\n.trace-step__badges {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-2);\n\tmargin-top: auto;\n}\n\n.tag-group {\n\tdisplay: grid;\n\tgap: var(--space-3);\n}\n\n.tag-card {\n\tpadding: var(--space-4);\n\tdisplay: grid;\n\tgap: var(--space-3);\n}\n\n.tag-card--input {\n\tborder-left: 4px solid var(--accent);\n}\n\n.tag-card--output {\n\tborder-left: 4px solid var(--brand);\n}\n\n.tag-card--internal {\n\tborder-left: 4px solid #6d5d49;\n}\n\n.tag-card__title {\n\tmargin: 0 0 var(--space-1);\n\tfont-size: 1rem;\n}\n\n.tag-card__footer {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: center;\n\tgap: var(--space-3);\n\tflex-wrap: wrap;\n}\n\n.tag-card__kind {\n\tcolor: var(--text-soft);\n\tfont-size: 0.76rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.1em;\n\ttext-transform: uppercase;\n}\n\n.trace-rung {\n\tpadding: var(--space-4);\n}\n\n.trace-steps {\n\tdisplay: grid;\n\tgap: var(--space-3);\n}\n\n.trace-step {\n\tpadding: var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: var(--radius-md);\n\tbackground: var(--bg-surface-strong);\n}\n\n.trace-step__title {\n\tmargin: 0;\n\tfont-weight: 800;\n}\n\n.builder-freeplay {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(208px, 240px) minmax(0, 1fr) minmax(240px, 292px);\n\tgap: var(--space-4);\n\talign-items: start;\n}\n\n.builder-sidebar {\n\tdisplay: contents;\n}\n\n.builder-card {\n\tdisplay: grid;\n\tgap: var(--space-3);\n\tpadding: var(--space-4);\n\tborder: 1px solid rgba(34, 52, 72, 0.1);\n\tborder-radius: 22px;\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(249, 250, 252, 0.9));\n\tbox-shadow: 0 18px 38px rgba(31, 41, 55, 0.08);\n\tbackdrop-filter: blur(12px);\n\ttransition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;\n}\n\n.builder-card--active {\n\tborder-color: rgba(30, 64, 175, 0.22);\n\tbox-shadow: 0 20px 42px rgba(30, 64, 175, 0.12);\n}\n\n.builder-card--tools,\n.builder-card--components {\n\tgrid-column: 1;\n}\n\n.builder-card--tools {\n\tposition: sticky;\n\ttop: var(--space-4);\n\talign-self: start;\n}\n\n.builder-card--components-docked {\n\tgrid-column: auto;\n\twidth: 100%;\n\tmax-height: none;\n\toverflow: hidden;\n\talign-self: stretch;\n\tposition: relative;\n\ttop: auto;\n\tpadding: 1rem;\n\tborder-radius: 24px;\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));\n\tbox-shadow: 0 18px 38px rgba(31, 41, 55, 0.08);\n}\n\n.builder-card--components-horizontal {\n\tgap: 0.85rem;\n}\n\n.builder-right-rail {\n\tgrid-column: 3;\n\tgrid-row: 1 / span 2;\n\tdisplay: grid;\n\tgap: var(--space-3);\n\talign-self: start;\n\tmin-width: 0;\n}\n\n.builder-card--properties {\n\tmax-height: none;\n\toverflow-y: auto;\n\tposition: relative;\n\ttop: auto;\n}\n\n.builder-card__title {\n\tfont-family: var(--font-display);\n\tfont-size: 1.02rem;\n\tletter-spacing: 0.06em;\n}\n\n.builder-card__copy,\n.builder-stage__hint {\n\tmargin: 0;\n\tcolor: var(--text-muted);\n\tline-height: 1.5;\n}\n\n.builder-mode-switch,\n.builder-stage__status {\n\tdisplay: flex;\n\tgap: var(--space-2);\n\tflex-wrap: wrap;\n\talign-items: center;\n}\n\n.builder-action-row {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(2, minmax(0, 1fr));\n\tgap: var(--space-2);\n}\n\n.builder-mode-button {\n\tflex: 1 1 0;\n\tmin-height: 44px;\n}\n\n.builder-color-field {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: center;\n\tgap: var(--space-3);\n}\n\n.builder-wire-settings {\n\tdisplay: grid;\n\tgap: 0.8rem;\n\tpadding: 0.9rem 1rem;\n\tborder-radius: 18px;\n\tbackground: linear-gradient(180deg, rgba(246, 249, 252, 0.9), rgba(239, 244, 249, 0.76));\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n}\n\n.builder-wire-settings__label {\n\tmargin: 0;\n\tfont-size: 0.74rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.09em;\n\ttext-transform: uppercase;\n\tcolor: var(--text-muted);\n}\n\n.builder-slider-field {\n\tdisplay: grid;\n\tgap: 0.45rem;\n}\n\n.builder-slider-row {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(0, 1fr) auto;\n\tgap: var(--space-3);\n\talign-items: center;\n}\n\n.builder-slider-input {\n\twidth: 100%;\n\taccent-color: #1d4ed8;\n\tcursor: pointer;\n}\n\n.builder-slider-value {\n\tmin-width: 3.6rem;\n\ttext-align: right;\n\tcolor: var(--text-strong);\n\tfont-weight: 800;\n}\n\n.builder-color-input {\n\twidth: 64px;\n\theight: 42px;\n\tpadding: 0;\n\tborder: none;\n\tbackground: transparent;\n\tcursor: pointer;\n}\n\n.builder-number-input {\n\tmin-width: 0;\n\twidth: 100%;\n\tmin-height: 48px;\n\tpadding: 0 var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: 14px;\n\tbackground: var(--bg-surface-strong);\n\tcolor: var(--text-strong);\n\tfont-weight: 700;\n}\n\n.builder-text-input {\n\tmin-height: 46px;\n\tpadding: 0 var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: 14px;\n\tbackground: var(--bg-surface-strong);\n\tcolor: var(--text-strong);\n\tfont-weight: 700;\n\toutline: none;\n\ttransition: border-color 140ms ease, box-shadow 140ms ease;\n}\n\n.builder-select-input {\n\tmin-height: 46px;\n\tpadding: 0 var(--space-4);\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: 14px;\n\tbackground: var(--bg-surface-strong);\n\tcolor: var(--text-strong);\n\tfont-weight: 700;\n\toutline: none;\n\ttransition: border-color 140ms ease, box-shadow 140ms ease;\n}\n\n.builder-text-input:focus {\n\tborder-color: rgba(37, 99, 235, 0.44);\n\tbox-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);\n}\n\n.builder-select-input:focus {\n\tborder-color: rgba(37, 99, 235, 0.44);\n\tbox-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);\n}\n\n.builder-palette-list {\n\tdisplay: grid;\n\tgap: 0.75rem;\n\tmax-height: min(46vh, 520px);\n\toverflow-y: auto;\n\tpadding-right: 0.3rem;\n}\n\n.builder-palette-list--horizontal {\n\tdisplay: flex;\n\tgap: 0.75rem;\n\tmax-height: none;\n\toverflow-x: auto;\n\toverflow-y: hidden;\n\tpadding-right: 0;\n\tpadding-bottom: 0.25rem;\n\tscrollbar-width: thin;\n}\n\n.builder-palette-list::-webkit-scrollbar,\n.builder-card--properties::-webkit-scrollbar {\n\twidth: 10px;\n}\n\n.builder-palette-list--horizontal::-webkit-scrollbar {\n\theight: 10px;\n\twidth: auto;\n}\n\n.builder-palette-list::-webkit-scrollbar-thumb,\n.builder-card--properties::-webkit-scrollbar-thumb {\n\tborder-radius: 999px;\n\tbackground: rgba(148, 163, 184, 0.42);\n}\n\n.builder-palette-tile {\n\tdisplay: grid;\n\tgrid-template-columns: 110px minmax(0, 1fr);\n\talign-items: center;\n\tgap: var(--space-3);\n\tpadding: var(--space-3);\n\ttext-align: left;\n\tmin-height: 112px;\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n\tborder-radius: 20px;\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 247, 250, 0.92));\n\ttransition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;\n\tuser-select: none;\n}\n\n.builder-palette-tile--horizontal {\n\tflex: 0 0 240px;\n\tmin-height: 96px;\n\tpadding: 0.85rem;\n\tgrid-template-columns: 84px minmax(0, 1fr);\n\talign-self: stretch;\n}\n\n.builder-palette-tile__symbol {\n\tdisplay: grid;\n\tplace-items: center;\n\twidth: 100%;\n\tmin-height: 84px;\n\tpadding: 0.5rem;\n\tborder-radius: 18px;\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(241, 245, 249, 0.96));\n\tbox-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(15, 23, 42, 0.04);\n}\n\n.builder-palette-tile__symbol .diagram-symbol {\n\theight: 74px;\n}\n\n.builder-palette-tile__symbol--power,\n.freeplay-component__symbol-rotator--power {\n\tcolor: #b45309;\n}\n\n.builder-palette-tile__symbol--breaker,\n.freeplay-component__symbol-rotator--breaker {\n\tcolor: #0f766e;\n}\n\n.builder-palette-tile__symbol--load,\n.freeplay-component__symbol-rotator--load {\n\tcolor: #92400e;\n}\n\n.builder-palette-tile__symbol--contact,\n.freeplay-component__symbol-rotator--contact {\n\tcolor: #1d4ed8;\n}\n\n.builder-palette-tile__symbol--coil,\n.freeplay-component__symbol-rotator--coil {\n\tcolor: #b91c1c;\n}\n\n.builder-palette-tile__info {\n\tdisplay: grid;\n\tgap: 0.32rem;\n\tjustify-items: start;\n\tmin-width: 0;\n}\n\n.builder-palette-tile__label {\n\tfont-weight: 800;\n\tcolor: var(--text-strong);\n}\n\n.builder-palette-tile__copy {\n\tfont-size: 0.86rem;\n\tline-height: 1.45;\n\tcolor: var(--text-muted);\n}\n\n.builder-palette-tile:hover {\n\ttransform: translateY(-1px);\n\tborder-color: rgba(29, 78, 216, 0.14);\n\tbox-shadow: 0 14px 30px rgba(30, 41, 59, 0.08);\n}\n\n.builder-palette-tile--selected {\n\tborder-color: rgba(29, 78, 216, 0.22);\n\tbox-shadow: 0 18px 36px rgba(29, 78, 216, 0.12);\n\ttransform: translateX(4px);\n}\n\n.builder-rules {\n\tdisplay: grid;\n\tgap: 0.75rem;\n}\n\n.builder-props-grid {\n\tdisplay: grid;\n\tgrid-template-columns: auto minmax(0, 1fr);\n\tgap: 0.7rem 1rem;\n\talign-items: center;\n\tpadding: 0.95rem 1rem;\n\tborder-radius: 18px;\n\tbackground: linear-gradient(180deg, rgba(246, 249, 252, 0.9), rgba(239, 244, 249, 0.76));\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n}\n\n.builder-wire-status {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-2);\n\talign-items: center;\n}\n\n.builder-props-label {\n\tfont-size: 0.74rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.08em;\n\ttext-transform: uppercase;\n\tcolor: var(--text-muted);\n}\n\n.builder-props-value {\n\tjustify-self: end;\n\ttext-align: right;\n\tcolor: var(--text-strong);\n\tfont-weight: 800;\n}\n\n.builder-selection__row {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: center;\n\tgap: var(--space-3);\n\tcolor: var(--text-muted);\n}\n\n.builder-selection__row strong {\n\tcolor: var(--text-strong);\n\tfont-weight: 800;\n}\n\n.builder-selection__actions {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(2, minmax(0, 1fr));\n\tgap: var(--space-2);\n}\n\n.builder-properties-fields {\n\tdisplay: grid;\n\tgap: 0.9rem;\n}\n\n.builder-terminal-fields {\n\tdisplay: grid;\n\tgap: 0.65rem;\n}\n\n.builder-terminal-fields__grid {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(auto-fit, minmax(132px, 1fr));\n\tgap: var(--space-2);\n}\n\n.builder-terminal-field {\n\tdisplay: grid;\n\tgap: 0.35rem;\n}\n\n.builder-terminal-field__label {\n\tfont-size: 0.74rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.04em;\n\tcolor: var(--text-muted);\n\ttext-transform: uppercase;\n}\n\n.builder-selection__action-button {\n\tmin-height: 42px;\n}\n\n.builder-selection__swatch {\n\twidth: 28px;\n\theight: 18px;\n\tborder-radius: 999px;\n\tborder: 1px solid rgba(15, 23, 42, 0.14);\n\tbox-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);\n\tjustify-self: end;\n}\n\n.builder-wire-endpoints {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(0, 1fr);\n\tgap: var(--space-3);\n}\n\n.builder-wire-endpoint {\n\tdisplay: grid;\n\tgap: 0.7rem;\n\tpadding: 0.95rem;\n\tborder-radius: 18px;\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(242, 245, 249, 0.94));\n\tbox-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);\n}\n\n.builder-wire-endpoint--connected {\n\tborder-color: rgba(22, 163, 74, 0.16);\n\tbackground: linear-gradient(180deg, rgba(243, 252, 247, 0.96), rgba(238, 249, 243, 0.94));\n}\n\n.builder-wire-endpoint--loose {\n\tborder-color: rgba(220, 38, 38, 0.12);\n\tbackground: linear-gradient(180deg, rgba(255, 248, 248, 0.96), rgba(252, 243, 243, 0.94));\n}\n\n.builder-wire-endpoint__header {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\tgap: var(--space-2);\n\talign-items: center;\n}\n\n.builder-wire-endpoint__label {\n\tfont-size: 0.72rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.08em;\n\ttext-transform: uppercase;\n\tcolor: var(--text-muted);\n}\n\n.builder-wire-endpoint__title {\n\tdisplay: block;\n\tfont-size: 0.98rem;\n\tline-height: 1.3;\n\tcolor: var(--text-strong);\n}\n\n.builder-wire-endpoint__detail {\n\tmargin: 0;\n\tfont-size: 0.85rem;\n\tline-height: 1.45;\n\tcolor: var(--text-muted);\n}\n\n.builder-wire-endpoint__actions {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(auto-fit, minmax(132px, 1fr));\n\tgap: var(--space-2);\n}\n\n.builder-wire-actions {\n\tdisplay: grid;\n\tgrid-template-columns: repeat(auto-fit, minmax(120px, 1fr));\n\tgap: var(--space-2);\n}\n\n.builder-wire-endpoint__actions .button,\n.builder-wire-actions .button {\n\tmin-height: 40px;\n}\n\n.builder-rule {\n\tdisplay: flex;\n\tgap: 0.7rem;\n\talign-items: flex-start;\n\tcolor: var(--text-muted);\n\tline-height: 1.45;\n}\n\n.builder-rule__dot {\n\twidth: 10px;\n\theight: 10px;\n\tborder-radius: 999px;\n\tbackground: var(--accent);\n\tmargin-top: 0.35rem;\n\tflex: 0 0 auto;\n}\n\n.builder-stage {\n\tdisplay: grid;\n\tgrid-template-rows: auto minmax(0, 1fr);\n\tgap: var(--space-3);\n\tmin-width: 0;\n\tmin-height: calc(100vh - 12rem);\n\talign-content: start;\n\tgrid-column: 2;\n\tgrid-row: 1 / span 2;\n}\n\n.builder-stage__top-row {\n\tdisplay: grid;\n\tgrid-template-columns: minmax(0, 1fr);\n\tgap: var(--space-3);\n\talign-items: start;\n}\n\n.builder-stage__state-panel {\n\tdisplay: grid;\n\tgap: var(--space-3);\n\tpadding: var(--space-3);\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n\tborder-radius: 22px;\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 249, 251, 0.92));\n\tbox-shadow: 0 16px 34px rgba(31, 41, 55, 0.06);\n\tposition: relative;\n\ttop: auto;\n\talign-self: start;\n\tmax-height: none;\n\toverflow: hidden;\n}\n\n.builder-stage__state-panel--sidebar {\n\tposition: sticky;\n\ttop: var(--space-4);\n\tmax-height: calc(100vh - var(--space-8));\n\toverflow-y: auto;\n}\n\n.builder-stage__state-actions {\n\tdisplay: grid;\n\tgap: var(--space-2);\n\tposition: sticky;\n\ttop: 0;\n\tpadding-bottom: var(--space-2);\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 249, 251, 0.96));\n\tz-index: 1;\n}\n\n.builder-stage__state-copy {\n\tdisplay: grid;\n\tgap: 0.75rem;\n\tmin-width: 0;\n}\n\n.builder-palette-drag-preview {\n\tposition: fixed;\n\tleft: 0;\n\ttop: 0;\n\twidth: 168px;\n\tpadding: 0.5rem;\n\tdisplay: grid;\n\tgap: 0.45rem;\n\tborder-radius: 20px;\n\tborder: 1px solid rgba(37, 99, 235, 0.2);\n\tbackground: rgba(255, 255, 255, 0.96);\n\tbox-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);\n\tcolor: var(--text-strong);\n\tpointer-events: none;\n\ttransform: translate(-50%, -50%);\n\twill-change: transform, left, top;\n\tz-index: 40;\n}\n\n.builder-palette-drag-preview__symbol {\n\tmin-height: 90px;\n\tpadding: 0.35rem;\n\tbox-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), inset 0 0 0 1px rgba(15, 23, 42, 0.05);\n}\n\n.builder-palette-drag-preview__symbol .diagram-symbol {\n\theight: 78px;\n\twidth: 100%;\n}\n\n.builder-palette-drag-preview__label {\n\tpadding: 0 0.25rem 0.1rem;\n\ttext-align: center;\n\tfont-size: 0.78rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.04em;\n\tcolor: var(--text-strong);\n}\n\n.builder-stage__toolbar {\n\tdisplay: flex;\n\tjustify-content: space-between;\n\talign-items: flex-start;\n\tgap: var(--space-3);\n\tflex-wrap: wrap;\n\tmin-width: 0;\n\tpadding: var(--space-3);\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n\tborder-radius: 22px;\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 249, 251, 0.9));\n\tbox-shadow: 0 16px 34px rgba(31, 41, 55, 0.06);\n}\n\n.builder-stage__toolbar-copy {\n\tdisplay: grid;\n\tgap: 0.75rem;\n\tflex: 1 1 540px;\n\tmin-width: 0;\n}\n\n.builder-stage__notice {\n\tmargin: 0;\n\tpadding: 0.85rem 1rem;\n\tborder-radius: 18px;\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n\tline-height: 1.5;\n\tcolor: var(--text-strong);\n\tbackground: linear-gradient(180deg, rgba(246, 249, 252, 0.94), rgba(239, 244, 249, 0.82));\n}\n\n.builder-stage__notice strong {\n\tfont-weight: 800;\n}\n\n.builder-stage__notice--error {\n\tborder-color: rgba(220, 38, 38, 0.16);\n\tbackground: linear-gradient(180deg, rgba(255, 245, 245, 0.98), rgba(252, 238, 238, 0.94));\n\tcolor: #991b1b;\n}\n\n.builder-stage__notice--info {\n\tborder-color: rgba(29, 78, 216, 0.14);\n\tbackground: linear-gradient(180deg, rgba(245, 249, 255, 0.98), rgba(236, 244, 255, 0.94));\n}\n\n.builder-stage__run-button {\n\tmin-width: 132px;\n\tmin-height: 48px;\n\talign-self: stretch;\n}\n\n.builder-stage__run-button--prominent,\n.builder-stage__run-button--secondary {\n\twidth: 100%;\n\tmin-height: 52px;\n}\n\n.builder-stage__toolbar-actions {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-3);\n\talign-items: stretch;\n}\n\n.builder-stage__zoom-controls {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tgap: var(--space-2);\n\talign-items: center;\n}\n\n.builder-stage__zoom-controls--panel {\n\tjustify-content: flex-start;\n}\n\n.builder-stage__zoom-button {\n\tmin-height: 40px;\n}\n\n.builder-stage__zoom-readout {\n\tmin-width: 4.5rem;\n\tjustify-content: center;\n}\n\n.builder-stage__scroll {\n\toverflow: auto;\n\tmin-height: 0;\n\theight: clamp(480px, calc(100vh - 18rem), 860px);\n\tpadding: 0;\n\tborder: 1px solid rgba(34, 52, 72, 0.08);\n\tborder-radius: 28px;\n\tbackground: linear-gradient(180deg, rgba(253, 252, 248, 0.96), rgba(246, 248, 252, 0.92));\n\tbox-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);\n\toverscroll-behavior: contain;\n\tscrollbar-color: rgba(100, 116, 139, 0.55) transparent;\n\tscrollbar-width: thin;\n}\n\n.builder-stage__scroll::-webkit-scrollbar {\n\theight: 12px;\n\twidth: 12px;\n}\n\n.builder-stage__scroll::-webkit-scrollbar-track {\n\tbackground: transparent;\n}\n\n.builder-stage__scroll::-webkit-scrollbar-thumb {\n\tborder: 2px solid transparent;\n\tborder-radius: 999px;\n\tbackground: rgba(100, 116, 139, 0.45);\n\tbackground-clip: padding-box;\n}\n\n.builder-stage__scroll::-webkit-scrollbar-thumb:hover {\n\tbackground: rgba(100, 116, 139, 0.65);\n\tbackground-clip: padding-box;\n}\n\n.builder-stage__scroll--hand,\n.builder-stage__scroll--hand *,\n.freeplay-canvas--hand,\n.freeplay-canvas--hand * {\n\tcursor: grab !important;\n}\n\n.builder-stage__scroll--panning,\n.builder-stage__scroll--panning *,\n.freeplay-canvas--panning,\n.freeplay-canvas--panning * {\n\tcursor: grabbing !important;\n}\n\n.builder-stage__scroll--pan,\n.freeplay-canvas--pan {\n\tcursor: grab;\n\tuser-select: none;\n}\n\n.builder-stage__scroll--panning,\n.freeplay-canvas--panning {\n\tcursor: grabbing;\n}\n\n.freeplay-canvas-viewport {\n\tposition: relative;\n\tmin-width: 0;\n\tmin-height: 0;\n}\n\n.freeplay-canvas {\n\tposition: absolute;\n\twidth: 1720px;\n\theight: 940px;\n\toverflow: hidden;\n\tborder-radius: 28px;\n\t/* Sin border: con box-sizing:border-box el contenido media 2 px menos que\n\t   el viewBox del SVG y todos los cables se escalaban ~0.9979 (el error\n\t   crecia con la Y). El borde se dibuja con box-shadow, que no ocupa layout. */\n\tborder: 0;\n\ttransform-origin: top left;\n\tbackground:\n\t\tradial-gradient(circle at top left, rgba(255, 255, 255, 0.95), transparent 28%),\n\t\tlinear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 251, 0.98));\n\tbox-shadow:\n\t\tinset 0 0 0 1px rgba(134, 148, 166, 0.5),\n\t\tinset 0 1px 0 rgba(255, 255, 255, 0.95),\n\t\tinset 0 0 0 1px rgba(255, 255, 255, 0.55);\n}\n\n/* Sheet layer: the SVG grid is the only grid; it shares gridSpacing with grid.ts snap. */\n.sheet-grid__line {\n\tpointer-events: none;\n\tstroke-linecap: square;\n\tvector-effect: non-scaling-stroke;\n}\n\n.sheet-grid__line--minor {\n\tstroke: rgba(15, 23, 42, 0.05);\n\tstroke-width: 1;\n\topacity: var(--grid-minor-opacity, 1);\n}\n\n.sheet-grid__line--major {\n\tstroke: rgba(30, 41, 59, 0.12);\n\tstroke-width: 1;\n}\n\n.sheet-frame {\n\tfill: none;\n\tpointer-events: none;\n\tstroke: rgba(30, 41, 59, 0.45);\n\tstroke-width: 2;\n}\n\n.sheet-zone-label {\n\tfill: rgba(30, 41, 59, 0.55);\n\tfont-size: 10px;\n\tfont-weight: 600;\n\tpointer-events: none;\n\tuser-select: none;\n}\n\n.sheet-title-block__frame {\n\tfill: rgba(255, 255, 255, 0.85);\n\tstroke: rgba(30, 41, 59, 0.45);\n\tstroke-width: 1.5;\n}\n\n.sheet-title-block__label {\n\tfill: rgba(30, 41, 59, 0.55);\n\tfont-size: 10px;\n\tfont-weight: 600;\n\tpointer-events: none;\n\tuser-select: none;\n}\n\n.sheet-title-block__value {\n\tfill: rgba(15, 23, 42, 0.9);\n\tfont-size: 12px;\n\tpointer-events: none;\n\tuser-select: none;\n}\n\n.freeplay-canvas--wire {\n\tcursor: crosshair;\n}\n\n.freeplay-canvas--wire.freeplay-canvas--panning {\n\tcursor: grabbing;\n}\n\n.freeplay-plane-overlay {\n\tposition: absolute;\n\tinset: 0;\n\tpointer-events: none;\n\tz-index: 1;\n}\n\n.freeplay-axis {\n\tposition: absolute;\n\tbackground: linear-gradient(180deg, rgba(30, 64, 175, 0.58), rgba(37, 99, 235, 0.76));\n\tbox-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8), 0 6px 14px rgba(37, 99, 235, 0.12);\n\topacity: 0.94;\n}\n\n.freeplay-axis--x {\n\tleft: 0;\n\tright: 0;\n\ttop: 0;\n\theight: 3px;\n}\n\n.freeplay-axis--y {\n\tleft: 0;\n\ttop: 0;\n\tbottom: 0;\n\twidth: 3px;\n}\n\n.freeplay-axis__label,\n.freeplay-plane-origin {\n\tposition: absolute;\n\tdisplay: inline-flex;\n\talign-items: center;\n\tjustify-content: center;\n\tmin-height: 24px;\n\tpadding: 0.12rem 0.5rem;\n\tborder-radius: 999px;\n\tbackground: rgba(255, 255, 255, 0.92);\n\tborder: 1px solid rgba(37, 99, 235, 0.18);\n\tbox-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);\n\tcolor: #1d4ed8;\n\tfont-size: 0.72rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.08em;\n\ttext-transform: uppercase;\n}\n\n.freeplay-axis__label--x {\n\tright: 0.9rem;\n\ttop: 0.55rem;\n}\n\n.freeplay-axis__label--y {\n\tleft: 0.65rem;\n\tbottom: 0.75rem;\n}\n\n.freeplay-plane-origin {\n\tleft: 0.65rem;\n\ttop: 0.55rem;\n\tcolor: #0f172a;\n\tletter-spacing: 0.04em;\n\ttext-transform: none;\n}\n\n.freeplay-svg {\n\tposition: absolute;\n\tinset: 0;\n\twidth: 100%;\n\theight: 100%;\n\toverflow: visible;\n\tz-index: 2;\n}\n\n.freeplay-wire {\n\tfill: none;\n\tstroke-linecap: round;\n\tstroke-linejoin: round;\n\tstroke-width: 3.5;\n}\n\n.freeplay-wire--selected {\n\tstroke: #1d4ed8;\n}\n\n.freeplay-wire--draft {\n\tstroke-dasharray: 10 6;\n\topacity: 0.85;\n}\n\n.freeplay-wire--energized {\n\tstroke: #f59e0b;\n\tstroke-dasharray: 12 7;\n}\n\n.freeplay-wire--energized-ac {\n\tanimation: freeplay-wire-flow-ac 0.95s ease-in-out infinite;\n}\n\n.freeplay-wire--energized-dc {\n\tanimation: freeplay-wire-flow-dc 1.15s linear infinite;\n}\n\n.freeplay-wire--idle {\n\tstroke-dasharray: 7 9;\n\topacity: 0.72;\n\tfilter: drop-shadow(0 0 7px rgba(96, 165, 250, 0.18));\n}\n\n.freeplay-wire--idle-ac {\n\tstroke: #60a5fa;\n\tanimation: freeplay-wire-flow-ac 1.25s ease-in-out infinite;\n}\n\n.freeplay-wire--idle-dc {\n\tstroke: #fb923c;\n\tanimation: freeplay-wire-flow-dc 1.45s linear infinite;\n}\n\n.freeplay-wire__hit {\n\tfill: none;\n\tstroke: transparent;\n\tstroke-linecap: round;\n\tstroke-linejoin: round;\n\tstroke-width: 18;\n\tcursor: pointer;\n}\n\n.freeplay-wire__node {\n\tfill: #fff;\n\tstroke-width: 2;\n\ttransition: fill 120ms ease, filter 120ms ease, stroke-width 120ms ease;\n}\n\n.freeplay-debug-overlay {\n\tposition: absolute;\n\tinset: 0;\n\tz-index: 4;\n\tpointer-events: none;\n}\n\n.freeplay-terminal-debug {\n\tfill: #e11d48;\n\tstroke: #ffffff;\n\tstroke-width: 1;\n\tpointer-events: none;\n}\n\n.freeplay-terminal-debug--stub {\n\tfill: #0e7490;\n}\n\n.freeplay-wire__snap-marker {\n\tfill: rgba(14, 116, 144, 0.16);\n\tstroke: #0e7490;\n\tstroke-width: 2;\n\tstroke-dasharray: 2 2;\n\tpointer-events: none;\n}\n\n.freeplay-wire__node--selected {\n\tcursor: grab;\n\tfilter: drop-shadow(0 0 10px rgba(29, 78, 216, 0.18));\n}\n\n.freeplay-wire__node--selected:active {\n\tcursor: grabbing;\n}\n\n.freeplay-wire__node--endpoint {\n\tstroke-width: 2.4;\n}\n\n.freeplay-wire__node--bend {\n\topacity: 0.96;\n}\n\n.freeplay-component {\n\tposition: absolute;\n\twidth: 160px;\n\tmin-height: 136px;\n\tpadding: 0;\n\tborder: 0;\n\tborder-radius: 16px;\n\tbackground: transparent;\n\tbox-shadow: none;\n\tdisplay: grid;\n\tjustify-items: center;\n\talign-content: start;\n\tgap: 0.2rem;\n\tuser-select: none;\n\tz-index: 3;\n\tpointer-events: none;\n}\n\n.freeplay-component--tight {\n\tdisplay: block;\n\tmin-height: 0;\n\tgrid-template: none;\n\tjustify-items: initial;\n\talign-content: initial;\n\toverflow: visible;\n}\n\n.freeplay-component__logical-stage {\n\tdisplay: contents;\n}\n\n.freeplay-component--tight > .freeplay-component__logical-stage {\n\tdisplay: block;\n\tposition: absolute;\n}\n\n.freeplay-component--selected {\n\tborder-color: transparent;\n\tbackground: transparent;\n\tbox-shadow: none;\n}\n\n.freeplay-component__glyph {\n\tposition: relative;\n\twidth: 100%;\n\tmin-height: 102px;\n\tdisplay: grid;\n\tplace-items: center;\n\tpointer-events: none;\n}\n\n.freeplay-component__timer-indicator {\n\tposition: absolute;\n\tleft: 50%;\n\ttop: 0.55rem;\n\ttransform: translateX(-50%);\n\tdisplay: grid;\n\tgap: 0.22rem;\n\tmin-width: 4.9rem;\n\tpadding: 0.28rem 0.45rem;\n\tborder-radius: 14px;\n\tbackground: rgba(255, 255, 255, 0.96);\n\tborder: 1px solid rgba(37, 99, 235, 0.16);\n\tbox-shadow: 0 10px 18px rgba(37, 99, 235, 0.1);\n\tpointer-events: none;\n\tz-index: 2;\n}\n\n.freeplay-component__timer-label {\n\tfont-size: 0.66rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.04em;\n\ttext-align: center;\n\tcolor: #1d4ed8;\n\tfont-variant-numeric: tabular-nums;\n}\n\n.freeplay-component__timer-track {\n\tposition: relative;\n\tdisplay: block;\n\theight: 0.28rem;\n\tborder-radius: 999px;\n\tbackground: rgba(191, 219, 254, 0.7);\n\toverflow: hidden;\n}\n\n.freeplay-component__timer-fill {\n\tdisplay: block;\n\theight: 100%;\n\tborder-radius: inherit;\n\tbackground: linear-gradient(90deg, #60a5fa, #2563eb);\n\ttransition: width 120ms linear;\n}\n\n.freeplay-component__glyph-handle {\n\tposition: absolute;\n\tleft: 50%;\n\ttop: 50%;\n\ttransform: translate(-50%, -50%);\n\tborder-radius: 18px;\n\tbackground: transparent;\n\tpointer-events: none;\n\tz-index: 1;\n}\n\n.freeplay-selector-hitarea {\n\tposition: absolute;\n\tleft: 0;\n\ttop: 0;\n\twidth: 160px;\n\theight: 102px;\n\ttransform-origin: 50% 50%;\n\tbackground: transparent;\n\tborder: 0;\n\tbox-shadow: none;\n\tcursor: pointer;\n\tpointer-events: auto;\n\tz-index: 1;\n}\n\n\n.freeplay-component__symbol-rotator {\n\tdisplay: grid;\n\tplace-items: center;\n\twidth: 100%;\n\t/* Debe coincidir con COMPONENT_GLYPH_HEIGHT (102): la proyeccion de los\n\t   terminales centra el glifo en 102 px. Con 96 el cable quedaba 3 px por\n\t   encima de la pata de todos los simbolos. */\n\theight: 102px;\n\tpadding: 0;\n\tposition: relative;\n\ttransition: transform 140ms ease;\n\ttransform-origin: center;\n\t/* Sin filter: crea una capa de composicion separada del SVG de cables y a\n\t   zoom/scroll fraccionarios el glifo se desplaza medio pixel. */\n\tpointer-events: none;\n}\n\n.freeplay-component--manual:hover .freeplay-component__symbol-rotator,\n.freeplay-component__press-target:hover ~ .freeplay-component__symbol-rotator,\n.freeplay-component--manual-active .freeplay-component__symbol-rotator {\n\topacity: 0.98;\n}\n\n.freeplay-component__hit-shapes {\n\tposition: absolute;\n\tinset: 0;\n\twidth: 100%;\n\theight: 100%;\n\toverflow: visible;\n\tpointer-events: none;\n}\n\n.freeplay-component__hit-shape {\n\tcursor: grab;\n}\n\n.freeplay-component__hit-shape:active {\n\tcursor: grabbing;\n}\n\n.freeplay-component--manual .freeplay-component__hit-shape {\n\tcursor: pointer;\n}\n\n.freeplay-component--manual .freeplay-component__hit-shape:active {\n\tcursor: grabbing;\n}\n\n.freeplay-component--selector-ring-hover .freeplay-component__hit-shape {\n\tcursor: default;\n}\n\n.freeplay-component__hit-debug-bounds {\n\tposition: absolute;\n\toutline: 1px dashed rgba(220, 38, 38, 0.9);\n\toutline-offset: 1px;\n\tpointer-events: none;\n\tz-index: 4;\n}\n\n.freeplay-component__glyph .diagram-symbol {\n\theight: 84px;\n\twidth: 100%;\n}\n\n.freeplay-component--energized .freeplay-component__symbol-rotator,\n.freeplay-component--coil-on .freeplay-component__symbol-rotator,\n.freeplay-component--contact-active .freeplay-component__symbol-rotator,\n.freeplay-component--pushbutton-down .freeplay-component__symbol-rotator {\n\t/* El estado se comunica con color/clase; sin capas de filtro. */\n\topacity: 0.98;\n}\n\n.freeplay-component__press-target {\n\tposition: absolute;\n\tleft: 50%;\n\ttop: 28px;\n\twidth: 68px;\n\theight: 46px;\n\ttransform: translate(-50%, -50%);\n\tborder: none;\n\tbackground: transparent;\n\tpadding: 0;\n\tmargin: 0;\n\tz-index: 2;\n\tcursor: pointer;\n\tpointer-events: auto;\n}\n\n.freeplay-component__badge,\n.freeplay-component__label-row,\n.freeplay-port {\n\tpointer-events: auto;\n}\n\n.freeplay-component__press-target:focus-visible {\n\toutline: 2px solid rgba(14, 116, 144, 0.42);\n\toutline-offset: 2px;\n\tborder-radius: 12px;\n}\n\n.freeplay-component--lamp-on .diagram-symbol__shape {\n\tfill: var(--lamp-glow-fill, rgba(250, 204, 21, 0.4));\n\tstroke: var(--lamp-glow-stroke, #ca8a04);\n}\n\n.freeplay-component--coil-on .diagram-symbol__line,\n.freeplay-component--coil-on .diagram-symbol__text,\n.freeplay-component--coil-on .diagram-symbol__shape,\n.freeplay-component--contact-closed .diagram-symbol__line,\n.freeplay-component--contact-closed .diagram-symbol__text,\n.freeplay-component--contact-active .diagram-symbol__line,\n.freeplay-component--contact-active .diagram-symbol__text,\n.freeplay-component--lamp-on .diagram-symbol__line,\n.freeplay-component--lamp-on .diagram-symbol__text,\n.freeplay-component--motor-on .diagram-symbol__line,\n.freeplay-component--motor-on .diagram-symbol__text,\n.freeplay-component--motor-on .diagram-symbol__shape {\n\tcolor: var(--lamp-symbol-color, #d97706);\n\tstroke: currentColor;\n}\n\n.freeplay-component--motor-on .diagram-symbol__line,\n.freeplay-component--motor-on .diagram-symbol__text,\n.freeplay-component--motor-on .diagram-symbol__shape {\n\tcolor: #d97706;\n}\n\n.freeplay-component--motor-on .diagram-symbol__motor-rotor {\n\tanimation: diagram-motor-spin 1.45s linear infinite;\n}\n\n.freeplay-component__badge {\n\tposition: absolute;\n\tleft: 50%;\n\ttop: -0.55rem;\n\ttransform: translateX(-50%);\n\tpadding: 0.18rem 0.55rem;\n\tborder-radius: 999px;\n\tbackground: rgba(255, 255, 255, 0.96);\n\tborder: 1px solid rgba(15, 23, 42, 0.08);\n\tbox-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);\n\tfont-size: 0.72rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.04em;\n\tcolor: var(--text-strong);\n\tz-index: 3;\n}\n\n.freeplay-component__badge--live {\n\tbackground: linear-gradient(180deg, rgba(255, 244, 214, 0.98), rgba(254, 231, 176, 0.96));\n\tborder-color: rgba(245, 158, 11, 0.22);\n\tcolor: #9a3412;\n}\n\n.freeplay-component__badge--timer {\n\tbackground: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(219, 234, 254, 0.94));\n\tborder-color: rgba(37, 99, 235, 0.18);\n\tcolor: #1d4ed8;\n\tfont-variant-numeric: tabular-nums;\n\tmin-width: 4.8rem;\n}\n\n.freeplay-component__label-row {\n\tposition: absolute;\n\tleft: 0;\n\tright: 0;\n\tdisplay: flex;\n\tjustify-content: center;\n\tpadding: 0 0.3rem;\n}\n\n.freeplay-component__label-row--debug {\n\toutline: 1px dashed rgba(220, 38, 38, 0.9);\n\toutline-offset: 2px;\n}\n\n.freeplay-component__label,\n.freeplay-component__label-input {\n\tmax-width: 150px;\n\twidth: 100%;\n\tpadding: 0.22rem 0.55rem;\n\tfont-size: 0.8rem;\n\tfont-weight: 700;\n\tline-height: 1.35;\n\ttext-align: center;\n\tcolor: var(--text-strong);\n\tbackground: rgba(255, 255, 255, 0.9);\n\tborder-radius: 999px;\n\tbox-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);\n}\n\n.freeplay-component__label {\n\twhite-space: nowrap;\n\toverflow: hidden;\n\ttext-overflow: ellipsis;\n}\n\n.freeplay-component__label-input {\n\tborder: 1px solid rgba(29, 78, 216, 0.18);\n\tbackground: rgba(255, 255, 255, 0.96);\n\toutline: none;\n}\n\n.freeplay-component-menu {\n\tposition: absolute;\n\tz-index: 6;\n\tdisplay: flex;\n\tflex-direction: column;\n\tgap: 0.15rem;\n\tmin-width: 9.5rem;\n\tpadding: 0.3rem;\n\tbackground: rgba(255, 255, 255, 0.98);\n\tborder: 1px solid rgba(29, 78, 216, 0.18);\n\tborder-radius: 0.5rem;\n\tbox-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);\n}\n\n.freeplay-component-menu__action {\n\tpadding: 0.32rem 0.6rem;\n\tfont-size: 0.8rem;\n\tfont-weight: 600;\n\ttext-align: left;\n\tcolor: var(--text-strong);\n\tbackground: transparent;\n\tborder-radius: 0.35rem;\n\tcursor: pointer;\n}\n\n.freeplay-wire-menu {\n\tmin-width: 11rem;\n}\n\n.freeplay-wire-menu__row {\n\tdisplay: flex;\n\talign-items: center;\n\tjustify-content: space-between;\n\tgap: 0.5rem;\n\tpadding: 0.3rem 0.6rem;\n\tfont-size: 0.78rem;\n\tcolor: #334155;\n}\n\n.freeplay-wire-menu__label {\n\tfont-weight: 700;\n}\n\n.freeplay-wire-menu__color {\n\twidth: 2.1rem;\n\theight: 1.4rem;\n\tpadding: 0;\n\tborder: 1px solid rgba(15, 23, 42, 0.18);\n\tborder-radius: 0.35rem;\n\tbackground: transparent;\n\tcursor: pointer;\n}\n\n.freeplay-wire-menu__thickness {\n\tdisplay: inline-flex;\n\tgap: 0.2rem;\n}\n\n.freeplay-wire-menu__thickness-button {\n\tpadding: 0.12rem 0.38rem;\n\tfont-size: 0.72rem;\n\tfont-weight: 600;\n\tcolor: #334155;\n\tbackground: #f8fafc;\n\tborder: 1px solid rgba(15, 23, 42, 0.16);\n\tborder-radius: 0.35rem;\n\tcursor: pointer;\n}\n\n.freeplay-wire-menu__thickness-button--active {\n\tcolor: #0e7490;\n\tbackground: rgba(14, 116, 144, 0.12);\n\tborder-color: rgba(14, 116, 144, 0.45);\n}\n\n.freeplay-component-menu__action:hover {\n\tbackground: rgba(37, 99, 235, 0.1);\n}\n\n.freeplay-component-menu__input {\n\twidth: 100%;\n\tmax-width: none;\n}\n\n.freeplay-toast {\n\tposition: fixed;\n\tleft: 50%;\n\tbottom: 28px;\n\tz-index: 1200;\n\tmax-width: min(520px, calc(100vw - 32px));\n\tpadding: 10px 16px;\n\tcolor: #f8fafc;\n\tfont-size: 0.82rem;\n\tfont-weight: 600;\n\ttext-align: center;\n\tbackground: rgba(15, 23, 42, 0.94);\n\tborder: 1px solid rgba(148, 163, 184, 0.28);\n\tborder-radius: 999px;\n\tbox-shadow: 0 12px 30px rgba(15, 23, 42, 0.24);\n\ttransform: translateX(-50%);\n\tpointer-events: none;\n\tanimation: freeplay-toast-in 120ms ease-out;\n}\n\n@keyframes freeplay-toast-in {\n\tfrom {\n\t\topacity: 0;\n\t\ttransform: translate(-50%, 6px);\n\t}\n\tto {\n\t\topacity: 1;\n\t\ttransform: translate(-50%, 0);\n\t}\n}\n\n.context-menu {\n\tposition: fixed;\n\tz-index: 1000;\n\tdisplay: flex;\n\tflex-direction: column;\n\tgap: 2px;\n\tmin-width: 180px;\n\tmax-width: min(320px, calc(100vw - 16px));\n\tmax-height: calc(100vh - 16px);\n\tpadding: 6px;\n\toverflow-x: hidden;\n\toverflow-y: auto;\n\tbackground: rgba(255, 255, 255, 0.99);\n\tborder: 1px solid rgba(29, 78, 216, 0.18);\n\tborder-radius: 10px;\n\tbox-shadow: 0 14px 36px rgba(15, 23, 42, 0.2);\n\ttransition:\n\t\topacity 80ms ease,\n\t\ttransform 80ms ease;\n}\n\n.context-menu--closing {\n\topacity: 0;\n\tpointer-events: none;\n\ttransform: translateY(-3px);\n}\n\n.context-menu--submenu {\n\tmin-width: 190px;\n}\n\n.context-menu__item {\n\tdisplay: grid;\n\tgrid-template-columns: 16px 14px minmax(0, 1fr) auto;\n\talign-items: center;\n\tgap: 8px;\n\tmin-height: 32px;\n\tpadding: 0 8px;\n\tcolor: var(--text-strong);\n\tfont-size: 0.82rem;\n\tfont-weight: 600;\n\ttext-align: left;\n\tbackground: transparent;\n\tborder: 0;\n\tborder-radius: 6px;\n\tcursor: pointer;\n}\n\n.context-menu__item:hover,\n.context-menu__item:focus-visible {\n\tbackground: rgba(37, 99, 235, 0.1);\n\toutline: none;\n}\n\n.context-menu__item--danger {\n\tcolor: #b91c1c;\n}\n\n.context-menu__item--danger:hover {\n\tbackground: rgba(220, 38, 38, 0.1);\n}\n\n.context-menu__check {\n\twidth: 16px;\n\tcolor: #0e7490;\n\tfont-size: 0.78rem;\n\ttext-align: center;\n}\n\n.context-menu__icon {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tjustify-content: center;\n\twidth: 14px;\n\theight: 14px;\n}\n\n.context-menu__swatch {\n\twidth: 14px;\n\theight: 14px;\n\tborder: 1px solid rgba(15, 23, 42, 0.18);\n\tborder-radius: 999px;\n}\n\n.context-menu__label {\n\toverflow: hidden;\n\ttext-overflow: ellipsis;\n\twhite-space: nowrap;\n}\n\n.context-menu__shortcut {\n\tcolor: #64748b;\n\tfont-size: 0.7rem;\n\tfont-weight: 600;\n}\n\n.context-menu__separator {\n\theight: 1px;\n\tmargin: 4px 6px;\n\tbackground: rgba(15, 23, 42, 0.1);\n}\n\n.context-menu__field {\n\tdisplay: flex;\n\talign-items: center;\n\tjustify-content: space-between;\n\tgap: 10px;\n\tmin-height: 32px;\n\tpadding: 0 8px;\n\tcolor: #334155;\n\tfont-size: 0.78rem;\n}\n\n.context-menu__field input[type=\"color\"] {\n\twidth: 34px;\n\theight: 22px;\n\tpadding: 0;\n\tbackground: transparent;\n\tborder: 1px solid rgba(15, 23, 42, 0.18);\n\tborder-radius: 6px;\n\tcursor: pointer;\n}\n\n.context-menu__thickness {\n\tdisplay: inline-flex;\n\tgap: 3px;\n}\n\n.context-menu__thickness button {\n\tmin-width: 26px;\n\tpadding: 2px 5px;\n\tfont-size: 0.7rem;\n\tfont-weight: 600;\n\tbackground: #f8fafc;\n\tborder: 1px solid rgba(15, 23, 42, 0.16);\n\tborder-radius: 5px;\n\tcursor: pointer;\n}\n\n.context-menu__thickness button.context-menu__thickness--active {\n\tcolor: #0e7490;\n\tbackground: rgba(14, 116, 144, 0.12);\n\tborder-color: rgba(14, 116, 144, 0.45);\n}\n\n.context-menu__input {\n\twidth: 100%;\n\tmin-height: 34px;\n\tpadding: 0 8px;\n\tbackground: #fff;\n\tborder: 1px solid rgba(29, 78, 216, 0.25);\n\tborder-radius: 6px;\n\toutline: none;\n}\n\n@media (pointer: coarse) {\n\t.context-menu__item {\n\t\tmin-height: 44px;\n\t}\n\n\t.context-menu__field {\n\t\tmin-height: 44px;\n\t}\n\n\t.context-menu__thickness button {\n\t\tmin-width: 44px;\n\t\tmin-height: 44px;\n\t}\n}\n\n.command-palette__backdrop {\n\tposition: fixed;\n\tinset: 0;\n\tz-index: 1300;\n\tdisplay: flex;\n\talign-items: flex-start;\n\tjustify-content: center;\n\tpadding: 10vh 1rem 1rem;\n\tbackground: rgba(15, 23, 42, 0.28);\n}\n\n.command-palette {\n\tdisplay: flex;\n\tflex-direction: column;\n\twidth: min(640px, 100%);\n\tmax-height: 70vh;\n\toverflow: hidden;\n\tbackground: #fff;\n\tborder: 1px solid rgba(29, 78, 216, 0.18);\n\tborder-radius: 14px;\n\tbox-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);\n}\n\n.command-palette__input {\n\tflex: 0 0 auto;\n\tmin-height: 48px;\n\tpadding: 0 1rem;\n\tcolor: var(--text-strong);\n\tfont-size: 0.95rem;\n\tfont-weight: 600;\n\tbackground: #fff;\n\tborder: 0;\n\tborder-bottom: 1px solid rgba(34, 52, 72, 0.1);\n\toutline: none;\n}\n\n.command-palette__input::placeholder {\n\tcolor: var(--text-soft);\n}\n\n.command-palette__list {\n\tdisplay: flex;\n\tflex: 1 1 auto;\n\tflex-direction: column;\n\tmin-height: 0;\n\tpadding: 0.35rem;\n\toverflow-y: auto;\n}\n\n.command-palette__item {\n\tdisplay: grid;\n\tgrid-template-columns: 20px minmax(0, 1fr) auto;\n\talign-items: center;\n\tgap: 0.6rem;\n\tmin-height: 40px;\n\tpadding: 0 0.65rem;\n\tcolor: var(--text-strong);\n\tfont-size: 0.82rem;\n\tfont-weight: 700;\n\ttext-align: left;\n\tbackground: transparent;\n\tborder: 0;\n\tborder-radius: 8px;\n\tcursor: pointer;\n}\n\n.command-palette__item:hover,\n.command-palette__item--active {\n\tbackground: rgba(37, 99, 235, 0.1);\n}\n\n.command-palette__item--disabled {\n\topacity: 0.45;\n\tcursor: not-allowed;\n}\n\n.command-palette__icon {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tjustify-content: center;\n\twidth: 20px;\n\theight: 20px;\n}\n\n.command-palette__label {\n\toverflow: hidden;\n\ttext-overflow: ellipsis;\n\twhite-space: nowrap;\n}\n\n.command-palette__shortcut {\n\tcolor: #64748b;\n\tfont-size: 0.7rem;\n\tfont-weight: 600;\n}\n\n.command-palette__empty {\n\tmargin: 0;\n\tpadding: 1rem;\n\tcolor: var(--text-muted);\n\tfont-size: 0.82rem;\n}\n\n.command-palette__footer {\n\tflex: 0 0 auto;\n\tpadding: 0.45rem 1rem;\n\tcolor: var(--text-soft);\n\tfont-size: 0.68rem;\n\tborder-top: 1px solid rgba(34, 52, 72, 0.08);\n}\n\n@media (pointer: coarse) {\n\t.command-palette__item {\n\t\tmin-height: 44px;\n\t}\n}\n\n.freeplay-terminal-label-input {\n\tposition: absolute;\n\tmin-width: 2.4rem;\n\tmax-width: 4.8rem;\n\tpadding: 0.16rem 0.38rem;\n\tfont-size: 0.68rem;\n\tfont-weight: 700;\n\tline-height: 1.2;\n\ttext-align: center;\n\tcolor: var(--text-strong);\n\tbackground: rgba(255, 255, 255, 0.98);\n\tborder: 1px solid rgba(29, 78, 216, 0.22);\n\tborder-radius: 999px;\n\tbox-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);\n\ttransform: translate(-50%, -50%);\n\tz-index: 4;\n\toutline: none;\n}\n\n.freeplay-terminal-label-input:focus {\n\tborder-color: rgba(37, 99, 235, 0.5);\n\tbox-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);\n}\n\n.freeplay-port {\n\tposition: absolute;\n\twidth: 18px;\n\theight: 18px;\n\tborder-radius: 999px;\n\tborder: 0;\n\tbackground: transparent;\n\ttransform: translate(-50%, -50%);\n\tpadding: 0;\n\tz-index: 2;\n\tbox-shadow: none;\n\topacity: 1;\n\tcursor: default;\n\ttransition:\n\t\ttransform 140ms ease,\n\t\tbox-shadow 140ms ease,\n\t\topacity 140ms ease;\n}\n\n.freeplay-port--active {\n\tbox-shadow: none;\n\topacity: 1;\n\tcursor: crosshair;\n}\n\n.freeplay-port--active:hover {\n\ttransform: translate(-50%, -50%);\n\tbox-shadow: 0 0 0 4px rgba(39, 75, 105, 0.14);\n}\n\n.freeplay-port--connections-locked {\n\tcursor: not-allowed;\n}\n\n.freeplay-port--connections-locked:hover {\n\ttransform: translate(-50%, -50%);\n\tbox-shadow: none;\n}\n\n@keyframes freeplay-wire-flow-ac {\n\t0% {\n\t\tstroke-dashoffset: -18;\n\t}\n\t50% {\n\t\tstroke-dashoffset: 18;\n\t}\n\t100% {\n\t\tstroke-dashoffset: -18;\n\t}\n}\n\n@keyframes freeplay-wire-flow-dc {\n\tfrom {\n\t\tstroke-dashoffset: 0;\n\t}\n\tto {\n\t\tstroke-dashoffset: -38;\n\t}\n}\n\n@keyframes diagram-motor-spin {\n\tfrom {\n\t\ttransform: rotate(0deg);\n\t}\n\tto {\n\t\ttransform: rotate(360deg);\n\t}\n}\n\n@media (max-width: 1180px) {\n\t.hero,\n\t.builder-freeplay,\n\t.builder__layout,\n\t.dashboard__top-grid,\n\t.dashboard__main-grid,\n\t.control-panel__body {\n\t\tgrid-template-columns: 1fr;\n\t}\n\n\t.builder-wire-endpoints {\n\t\tgrid-template-columns: 1fr;\n\t}\n\n\t.builder-stage__top-row {\n\t\tgrid-template-columns: 1fr;\n\t}\n\n\t.builder-card--tools,\n\t.builder-right-rail,\n\t.builder-stage {\n\t\tgrid-column: auto;\n\t\tgrid-row: auto;\n\t}\n\n\t.builder-card--components-docked {\n\t\twidth: 100%;\n\t\tmax-height: none;\n\t}\n\n\t.builder-card--tools,\n\t.builder-right-rail,\n\t.builder-stage__state-panel--sidebar,\n\t.builder-card--properties {\n\t\tposition: relative;\n\t\ttop: auto;\n\t\tmax-height: none;\n\t}\n\n\t.builder-stage__state-actions {\n\t\tposition: relative;\n\t}\n}\n\n@media (max-width: 860px) {\n\t.app-shell {\n\t\tpadding: var(--space-5) var(--space-3) var(--space-7);\n\t}\n\n\t.panel {\n\t\tpadding: var(--space-5);\n\t}\n\n\t.hero__metrics,\n\t.summary-grid {\n\t\tgrid-template-columns: 1fr 1fr;\n\t}\n\n\t.builder-palette-grid {\n\t\tgrid-template-columns: repeat(2, minmax(0, 1fr));\n\t}\n\n\t.diagram-rung {\n\t\tgrid-template-columns: 1fr;\n\t}\n\n\t.diagram-rung__rail {\n\t\tdisplay: none;\n\t}\n\n\t.ladder-rung__lane {\n\t\tgrid-template-columns: 1fr;\n\t}\n\n\t.ladder-rung__rail {\n\t\tdisplay: none;\n\t}\n\n\t.scan-cycle {\n\t\tgrid-template-columns: 1fr;\n\t}\n}\n\n@media (max-width: 620px) {\n\t.hero__metrics,\n\t.summary-grid {\n\t\tgrid-template-columns: 1fr;\n\t}\n\n\t.project-panel__actions,\n\t.control-panel__actions {\n\t\twidth: 100%;\n\t}\n\n\t.button {\n\t\twidth: 100%;\n\t}\n\n\t.project-panel__toolbar {\n\t\talign-items: stretch;\n\t}\n\n\t.field {\n\t\tmin-width: 100%;\n\t}\n\n\t.diagram-block {\n\t\tmin-width: 200px;\n\t}\n}\n\n/* Builder ribbon shell */\n.app-shell--playground {\n\theight: 100vh;\n\tmin-height: 100vh;\n\toverflow: hidden;\n\tdisplay: flex;\n\tflex-direction: column;\n}\n\n.dashboard--playground {\n\twidth: 100%;\n\tmax-width: none;\n\tflex: 1;\n\tmin-height: 0;\n\tmin-width: 0;\n\tdisplay: flex;\n\tflex-direction: column;\n}\n\n.panel--builder {\n\tdisplay: flex;\n\tflex: 1;\n\tflex-direction: column;\n\tmin-height: 0;\n\tpadding: 0;\n}\n\n.builder-shell {\n\tmin-width: 0;\n\toverflow: hidden;\n}\n\n.builder-ribbon {\n\tflex: 0 0 auto;\n\tposition: relative;\n\tz-index: 30;\n\tborder-bottom: 1px solid rgba(34, 52, 72, 0.1);\n\tbackground: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 252, 0.96));\n}\n\n.builder-ribbon__titlebar {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\tjustify-content: space-between;\n\talign-items: center;\n\tgap: 0.5rem 1rem;\n\tpadding: 0.55rem 1rem 0.35rem;\n}\n\n.builder-ribbon__brand {\n\tfont-family: var(--font-display);\n\tfont-size: 0.92rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.04em;\n\tcolor: var(--text-strong);\n\twhite-space: nowrap;\n}\n\n.builder-ribbon__brand span {\n\tmargin-left: 0.5rem;\n\tcolor: var(--text-soft);\n\tfont-family: inherit;\n\tfont-size: 0.68rem;\n\tfont-weight: 700;\n\tletter-spacing: 0.1em;\n\ttext-transform: uppercase;\n}\n\n.builder-ribbon__context {\n\tflex: 1 1 auto;\n\tmin-width: 0;\n\toverflow: hidden;\n\ttext-overflow: ellipsis;\n\twhite-space: nowrap;\n\tcolor: var(--text-muted);\n\tfont-size: 0.72rem;\n\tfont-weight: 700;\n}\n\n.builder-ribbon__run-cluster {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: 0.35rem;\n\tmargin-left: auto;\n}\n\n.builder-run-cluster__button {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tjustify-content: center;\n\tgap: 0.35rem;\n\tmin-width: 104px;\n\tmin-height: 34px;\n\tpadding: 0 0.6rem;\n\tborder: 1px solid rgba(34, 52, 72, 0.16);\n\tborder-radius: 8px;\n\tbackground: rgba(255, 255, 255, 0.9);\n\tcolor: var(--text-strong);\n\tfont-size: 0.72rem;\n\tfont-weight: 800;\n\twhite-space: nowrap;\n\tcursor: pointer;\n}\n\n.builder-run-cluster__button:hover:not(:disabled) {\n\tborder-color: rgba(37, 99, 235, 0.32);\n\tbackground: rgba(37, 99, 235, 0.08);\n}\n\n.builder-run-cluster__button:disabled {\n\topacity: 0.45;\n\tcursor: not-allowed;\n}\n\n.builder-run-cluster__button--run {\n\tcolor: var(--brand);\n\tborder-color: rgba(37, 99, 235, 0.28);\n}\n\n.builder-run-cluster__button--stop {\n\tcolor: #b91c1c;\n\tborder-color: rgba(220, 38, 38, 0.28);\n}\n\n.builder-run-cluster__button--reset {\n\tmin-width: 86px;\n}\n\n.builder-run-cluster__status {\n\tmin-width: 96px;\n\twhite-space: nowrap;\n}\n\n.builder-run-cluster__dot {\n\twidth: 8px;\n\theight: 8px;\n\tmargin-right: 0.35rem;\n\tborder-radius: 999px;\n\tbackground: currentColor;\n}\n\n@media (pointer: coarse) {\n\t.builder-run-cluster__button,\n\t.builder-run-cluster__status {\n\t\tmin-height: 44px;\n\t}\n}\n\n.ribbon-tabs-row {\n\tdisplay: flex;\n\talign-items: flex-end;\n\tgap: 0.5rem;\n\tpadding: 0 1rem;\n}\n\n.ribbon-tabs {\n\tdisplay: flex;\n\tgap: 0.15rem;\n\toverflow-x: auto;\n\tscrollbar-width: none;\n}\n\n.ribbon-tabs::-webkit-scrollbar {\n\tdisplay: none;\n}\n\n.ribbon-tab {\n\tborder: 0;\n\tborder-bottom: 2px solid transparent;\n\tbackground: transparent;\n\tcolor: var(--text-muted);\n\tfont-size: 0.76rem;\n\tfont-weight: 800;\n\tmin-height: 40px;\n\tpadding: 0.4rem 0.7rem;\n\tcursor: pointer;\n\twhite-space: nowrap;\n}\n\n.ribbon-tab:hover {\n\tcolor: var(--text-strong);\n\tbackground: rgba(37, 99, 235, 0.06);\n}\n\n.ribbon-tab--active {\n\tcolor: var(--brand);\n\tborder-bottom-color: var(--brand);\n\tbackground: rgba(37, 99, 235, 0.08);\n}\n\n.ribbon-tab--contextual {\n\tfont-style: italic;\n}\n\n.ribbon-collapse-button {\n\tmargin-left: auto;\n\tborder: 1px solid rgba(34, 52, 72, 0.12);\n\tborder-radius: 8px;\n\tbackground: rgba(255, 255, 255, 0.8);\n\tcolor: var(--text-muted);\n\tcursor: pointer;\n\tfont-size: 0.8rem;\n\tline-height: 1;\n\tpadding: 0.3rem 0.55rem;\n}\n\n.ribbon-collapse-button:hover {\n\tcolor: var(--text-strong);\n\tborder-color: rgba(37, 99, 235, 0.3);\n}\n\n.ribbon-body {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\talign-items: stretch;\n\tgap: 0.5rem;\n\tpadding: 0.5rem 1rem 0.65rem;\n\toverflow: visible;\n}\n\n.ribbon-body[hidden] {\n\tdisplay: none;\n}\n\n.ribbon-group {\n\tdisplay: flex;\n\tflex-direction: column;\n\tgap: 0.3rem;\n\tmin-width: 0;\n\tpadding: 0 0.65rem;\n\tborder-right: 1px solid rgba(34, 52, 72, 0.08);\n}\n\n.ribbon-group:last-child {\n\tborder-right: 0;\n}\n\n.ribbon-group__label {\n\tcolor: var(--text-soft);\n\tfont-size: 0.62rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.1em;\n\ttext-transform: uppercase;\n}\n\n.ribbon-group__body {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\talign-items: flex-start;\n\tgap: 0.3rem;\n}\n\n.ribbon-group--compact {\n\tposition: relative;\n\tborder-right: 0;\n}\n\n.ribbon-group--compact > summary {\n\tlist-style: none;\n\tcursor: pointer;\n\tpadding: 0.3rem 0.5rem;\n\tborder: 1px solid rgba(34, 52, 72, 0.12);\n\tborder-radius: 8px;\n\tbackground: rgba(255, 255, 255, 0.8);\n}\n\n.ribbon-group--compact > summary::-webkit-details-marker {\n\tdisplay: none;\n}\n\n.ribbon-group--compact[open] > summary {\n\tcolor: var(--brand);\n\tborder-color: rgba(37, 99, 235, 0.3);\n\tbackground: rgba(37, 99, 235, 0.08);\n}\n\n.ribbon-group--compact > .ribbon-group__body {\n\tposition: absolute;\n\ttop: 100%;\n\tleft: 0;\n\tz-index: 50;\n\tmin-width: 220px;\n\tmax-height: min(60vh, 420px);\n\toverflow: auto;\n\tpadding: 0.6rem;\n\tborder: 1px solid rgba(34, 52, 72, 0.12);\n\tborder-radius: 14px;\n\tbackground: var(--bg-surface-strong);\n\tbox-shadow: 0 18px 38px rgba(31, 41, 55, 0.18);\n}\n\n.ribbon-button {\n\tdisplay: inline-flex;\n\tflex-direction: column;\n\talign-items: center;\n\tjustify-content: flex-start;\n\tgap: 0.1rem;\n\tmin-width: 54px;\n\tpadding: 0.3rem 0.4rem;\n\tborder: 1px solid transparent;\n\tborder-radius: 10px;\n\tbackground: transparent;\n\tcolor: var(--text-strong);\n\tcursor: pointer;\n}\n\n.ribbon-button:hover {\n\tbackground: rgba(37, 99, 235, 0.07);\n\tborder-color: rgba(37, 99, 235, 0.18);\n}\n\n.ribbon-button--active {\n\tbackground: rgba(37, 99, 235, 0.12);\n\tborder-color: rgba(37, 99, 235, 0.3);\n\tcolor: var(--brand);\n}\n\n.ribbon-button:disabled {\n\topacity: 0.45;\n\tcursor: not-allowed;\n}\n\n.ribbon-button__icon {\n\tfont-size: 1.05rem;\n\tline-height: 1;\n}\n\n.ribbon-button__label {\n\tfont-size: 0.66rem;\n\tfont-weight: 800;\n\twhite-space: nowrap;\n}\n\n@media (pointer: coarse) {\n\t.ribbon-tab,\n\t.ribbon-button,\n\t.ribbon-collapse-button {\n\t\tmin-width: 44px;\n\t\tmin-height: 44px;\n\t}\n}\n\n.ribbon-button-row {\n\tdisplay: flex;\n\tgap: 0.25rem;\n}\n\n.ribbon-field {\n\tdisplay: grid;\n\tgap: 0.15rem;\n\tmin-width: 110px;\n}\n\n.ribbon-field__label {\n\tcolor: var(--text-soft);\n\tfont-size: 0.62rem;\n\tfont-weight: 800;\n\tletter-spacing: 0.06em;\n\ttext-transform: uppercase;\n}\n\n.ribbon-field input,\n.ribbon-field select {\n\tmin-height: 32px;\n\tpadding: 0.25rem 0.45rem;\n\tborder: 1px solid var(--border-muted);\n\tborder-radius: 8px;\n\tbackground: var(--bg-surface-strong);\n\tcolor: var(--text-strong);\n\tfont-size: 0.78rem;\n}\n\n.ribbon-field input[type=\"color\"] {\n\twidth: 48px;\n\tmin-height: 32px;\n\tpadding: 0;\n}\n\n.ribbon-field input[type=\"range\"] {\n\tmin-width: 110px;\n}\n\n.ribbon-inline-details {\n\tposition: relative;\n}\n\n.ribbon-inline-details > summary {\n\tcursor: pointer;\n\tcolor: var(--text-muted);\n\tfont-size: 0.68rem;\n\tfont-weight: 800;\n}\n\n.ribbon-inline-details .builder-terminal-fields__grid {\n\tmargin-top: 0.35rem;\n\tmax-height: 180px;\n\toverflow: auto;\n}\n\n.builder-component-bar {\n\tflex: 0 0 auto;\n\tposition: relative;\n\tz-index: 10;\n\tmin-width: 0;\n\twidth: 100%;\n\tmax-width: 100%;\n\tpadding: 0.45rem 1rem;\n\tborder-bottom: 1px solid rgba(34, 52, 72, 0.1);\n\tbackground: rgba(255, 255, 255, 0.72);\n}\n\n.builder-component-bar .builder-card--components {\n\tpadding: 0;\n\tborder: 0;\n\tborder-radius: 0;\n\tbackground: transparent;\n\tbox-shadow: none;\n}\n\n.builder-component-bar .builder-card__title {\n\tcolor: var(--text-soft);\n\tfont-size: 0.66rem;\n\tletter-spacing: 0.12em;\n\ttext-transform: uppercase;\n}\n\n.builder-component-bar .builder-palette-tile--horizontal {\n\tflex: 0 0 176px;\n\theight: 70px;\n\tmin-height: 70px;\n\tmax-height: 70px;\n\talign-self: center;\n\tpadding: 0.5rem;\n\tgap: 0.5rem;\n\tgrid-template-columns: 52px minmax(0, 1fr);\n}\n\n.builder-component-bar .builder-palette-list--horizontal {\n\tmin-height: 82px;\n\tmax-height: 82px;\n}\n\n.builder-component-bar .builder-palette-tile__copy {\n\tdisplay: none;\n}\n\n.builder-component-bar .builder-palette-tile__label {\n\tmax-width: 100%;\n\toverflow: hidden;\n\ttext-overflow: ellipsis;\n\twhite-space: nowrap;\n}\n\n.builder-component-bar .builder-palette-tile__symbol {\n\tmin-height: 50px;\n\tpadding: 0.25rem;\n}\n\n.builder-component-bar .builder-palette-tile__symbol .diagram-symbol {\n\theight: 46px;\n}\n\n.builder-freeplay {\n\tflex: 1;\n\tmin-height: 0;\n\tmin-width: 0;\n\twidth: 100%;\n\tdisplay: flex;\n\tflex-direction: column;\n\tgap: 0;\n}\n\n.builder-stage {\n\tflex: 1;\n\tmin-height: 0;\n\tmin-width: 0;\n\twidth: 100%;\n\tdisplay: flex;\n\tflex-direction: column;\n\tgrid-column: auto;\n\tgrid-row: auto;\n}\n\n.builder-stage__scroll {\n\tflex: 1;\n\tmin-height: 0;\n\tmin-width: 0;\n\twidth: 100%;\n\tmax-width: 100%;\n\theight: auto;\n}\n\n.builder-statusbar {\n\tflex: 0 0 auto;\n\tmin-width: 0;\n\twidth: 100%;\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\talign-items: center;\n\tgap: 0.35rem 0.75rem;\n\tpadding: 0.4rem 1rem;\n\tborder-top: 1px solid rgba(34, 52, 72, 0.1);\n\tbackground: rgba(255, 255, 255, 0.82);\n\tfont-size: 0.7rem;\n}\n\n.builder-statusbar__copy {\n\tdisplay: grid;\n\tgap: 0.1rem;\n\tflex: 1 1 320px;\n\tmin-width: min(320px, 100%);\n}\n\n.builder-statusbar__notice,\n.builder-statusbar__hint {\n\tmargin: 0;\n\tline-height: 1.35;\n}\n\n.builder-statusbar__notice--error {\n\tcolor: #b91c1c;\n}\n\n.builder-statusbar__hint {\n\tcolor: var(--text-muted);\n}\n\n.builder-statusbar__group {\n\tdisplay: flex;\n\tflex-wrap: wrap;\n\talign-items: center;\n\tgap: 0.3rem;\n}\n\n.builder-statusbar .status-pill {\n\tfont-size: 0.66rem;\n\tpadding: 0.2rem 0.45rem;\n}\n\n.canvas-zoom {\n\tposition: relative;\n\tdisplay: inline-flex;\n}\n\n.canvas-zoom__trigger {\n\tcursor: pointer;\n\tfont-variant-numeric: tabular-nums;\n}\n\n.canvas-zoom__menu-focus {\n\tposition: absolute;\n\tright: 0;\n\tbottom: calc(100% + 6px);\n\tz-index: 40;\n\toutline: none;\n}\n\n.canvas-zoom__menu {\n\tdisplay: grid;\n\tmin-width: 190px;\n\tpadding: 0.25rem;\n\tborder: 1px solid var(--border-soft);\n\tborder-radius: 14px;\n\tbackground: var(--bg-surface);\n\tbox-shadow: var(--shadow-md);\n}\n\n.canvas-zoom__menu-item {\n\tdisplay: flex;\n\talign-items: center;\n\tjustify-content: space-between;\n\tgap: 0.75rem;\n\tmin-height: 34px;\n\tpadding: 0 0.6rem;\n\tborder: 0;\n\tborder-radius: 9px;\n\tbackground: transparent;\n\tcolor: var(--text-strong);\n\tfont: inherit;\n\tfont-size: 0.78rem;\n\tcursor: pointer;\n}\n\n.canvas-zoom__menu-item--active {\n\tbackground: rgba(29, 78, 216, 0.1);\n}\n\n.canvas-zoom__menu-item:disabled {\n\topacity: 0.45;\n\tcursor: default;\n}\n\n.canvas-zoom__menu-shortcut {\n\tcolor: var(--text-muted);\n\tfont-size: 0.7rem;\n}\n\n@media (max-width: 1180px) {\n\t.builder-ribbon__titlebar {\n\t\talign-items: flex-start;\n\t}\n\n\t.ribbon-body {\n\t\tpadding: 0.4rem 0.5rem;\n\t}\n\n\t.builder-component-bar {\n\t\tpadding: 0.4rem 0.5rem;\n\t}\n\n\t.builder-statusbar {\n\t\tpadding: 0.35rem 0.5rem;\n\t}\n}\n\n  \n    PLC Sim Graphic simulatorComponent size measurement fixtureΓû╢RunΓƒ▓ResetStoppedFileHomeInsertSimulationViewΓîâHistoryΓå╢UndoΓå╖RedoClipboardΓºëCopy≡ƒôïPasteΓºëDuplicateEdit≡ƒùæDeleteΓå║Rotate -90Γå╗Rotate +90Γƒ▓Reset canvasWiringΓîüWire onWire colorThickness3.5pxΓ£ôFinish wireΓ£òCancelComponentsL1L2AC sourceAlternating source L1/L2-+DC sourceDirect source + / -121P breakerSingle-pole breaker12342P breakerTwo-pole breakerSingle switchMaintained open/closed switchNO push buttonMomentary normally open switchNC push buttonMomentary normally closed switchE-stopEmergency stop, mushroom NC button3-pos selectorThree-position selector, 4 terminalsLimit switch NOPlunger roller, normally openLimit switch NCPlunger roller, normally closedLevel switch NOLiquid level switch, normally openLevel switch NCLiquid level switch, normally closedOL1OL contactOverload contact, toggle from inspectorLampIndicator lamp loadMMotorMotor loadXICNormally open contactXIONormally closed contactNOTCNormally open on-delay contactNCTONormally closed on-delay contactNOTONormally open off-delay contactNCTCNormally closed off-delay contactOTEOutput energize coilXY0,01234567891011121314151617181920ABCDEFGHIJKLMProjectComponent size measurement fixtureDate2026-11-05Scale1:1Page1XICPUSH_BUTTON_NO1.0sNOTCLAMPSELECTOR_3POS1.0sNOTO1.0sNCTCOpenLEVEL_SWITCH_NOClosedLEVEL_SWITCH_NCXIOPUSH_BUTTON_NCESTOP1.0sNCTO120VACL1L2POWER_SOURCE24VDC-+DC_SOURCEOpenSWITCH_1POpenLIMIT_SWITCH_NOClosedLIMIT_SWITCH_NC12BREAKER_1P1234BREAKER_2POpenOL1OL_CONTACTOTELOTLUOTUMMOTORReady: Press Run to simulate the current diagram.Drag empty space to pan. Touch a terminal to start a wire.ReadyWire onPan onMove readyTick 1150 ms0 connected wires0 loose wires25 symbols0 wires0 runnable rungs100%Playground wiring drives the simLoaded Component size measurement fixture.",
+  "componentCount": 25,
+  "components": [
+    {
+      "label": "XIC",
+      "component": {
+        "x": 190,
+        "y": 491.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 23.813,
+        "width": 148.375,
+        "height": 54.375
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 4
+    },
+    {
+      "label": "PUSH_BUTTON_NO",
+      "component": {
+        "x": 430,
+        "y": 491.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 10.291,
+        "y": 16.291,
+        "width": 139.417,
+        "height": 43.166
+      },
+      "svgViewBox": "0 0 128 72",
+      "shapeCount": 6
+    },
+    {
+      "label": "NOTC",
+      "component": {
+        "x": 670,
+        "y": 491.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 21.813,
+        "y": 38.313,
+        "width": 116.375,
+        "height": 51.125
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 6
+    },
+    {
+      "label": "LAMP",
+      "component": {
+        "x": 910,
+        "y": 491.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 27.212,
+        "width": 148.375,
+        "height": 47.575
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 5
+    },
+    {
+      "label": "SELECTOR_3POS",
+      "component": {
+        "x": 1150,
+        "y": 491.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 40.89,
+        "y": -6.13,
+        "width": 78.219,
+        "height": 94.589
+      },
+      "svgViewBox": "0 0 160 102",
+      "shapeCount": 9
+    },
+    {
+      "label": "NOTO",
+      "component": {
+        "x": 240.688,
+        "y": 710.359,
+        "width": 58.563,
+        "height": 39.344
+      },
+      "tightPaint": {
+        "x": 0.013,
+        "y": 0.015,
+        "width": 58.563,
+        "height": 38.414
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 4
+    },
+    {
+      "label": "NCTC",
+      "component": {
+        "x": 480.766,
+        "y": 710.359,
+        "width": 58.469,
+        "height": 39.344
+      },
+      "tightPaint": {
+        "x": 0.007,
+        "y": 0.012,
+        "width": 58.47,
+        "height": 38.412
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 3
+    },
+    {
+      "label": "LEVEL_SWITCH_NO",
+      "component": {
+        "x": 720.797,
+        "y": 710.453,
+        "width": 58.359,
+        "height": 44.641
+      },
+      "tightPaint": {
+        "x": 0.011,
+        "y": 0.014,
+        "width": 58.363,
+        "height": 44.645
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 4
+    },
+    {
+      "label": "LEVEL_SWITCH_NC",
+      "component": {
+        "x": 960.828,
+        "y": 710.453,
+        "width": 58.328,
+        "height": 39.969
+      },
+      "tightPaint": {
+        "x": 0.002,
+        "y": 0.014,
+        "width": 58.34,
+        "height": 39.982
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 7
+    },
+    {
+      "label": "XIO",
+      "component": {
+        "x": 1150,
+        "y": 671.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 23.813,
+        "width": 148.375,
+        "height": 54.375
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 5
+    },
+    {
+      "label": "PUSH_BUTTON_NC",
+      "component": {
+        "x": 190,
+        "y": 851.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 10.291,
+        "y": 16.291,
+        "width": 139.417,
+        "height": 36.75
+      },
+      "svgViewBox": "0 0 128 72",
+      "shapeCount": 6
+    },
+    {
+      "label": "ESTOP",
+      "component": {
+        "x": 430,
+        "y": 851.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 6.659,
+        "y": 21.034,
+        "width": 146.682,
+        "height": 39.746
+      },
+      "svgViewBox": "0 0 128 72",
+      "shapeCount": 8
+    },
+    {
+      "label": "NCTO",
+      "component": {
+        "x": 670,
+        "y": 851.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 21.813,
+        "y": 37.563,
+        "width": 116.375,
+        "height": 51.875
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 6
+    },
+    {
+      "label": "POWER_SOURCE",
+      "component": {
+        "x": 910,
+        "y": 851.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 1.25,
+        "y": 12.5,
+        "width": 157.178,
+        "height": 76.186
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 6
+    },
+    {
+      "label": "DC_SOURCE",
+      "component": {
+        "x": 1150,
+        "y": 851.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.313,
+        "y": 23.813,
+        "width": 149.375,
+        "height": 54.375
+      },
+      "svgViewBox": "0 0 128 60",
+      "shapeCount": 5
+    },
+    {
+      "label": "SWITCH_1P",
+      "component": {
+        "x": 190,
+        "y": 1031.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 22.294,
+        "width": 148.375,
+        "height": 39.575
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 3
+    },
+    {
+      "label": "LIMIT_SWITCH_NO",
+      "component": {
+        "x": 430,
+        "y": 1031.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 2.846,
+        "y": 26.167,
+        "width": 154.344,
+        "height": 49.456
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 10
+    },
+    {
+      "label": "LIMIT_SWITCH_NC",
+      "component": {
+        "x": 670,
+        "y": 1031.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 2.963,
+        "y": 26.296,
+        "width": 154.107,
+        "height": 34.587
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 8
+    },
+    {
+      "label": "BREAKER_1P",
+      "component": {
+        "x": 910,
+        "y": 1031.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.313,
+        "y": 16.5,
+        "width": 149.375,
+        "height": 43.563
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 7
+    },
+    {
+      "label": "BREAKER_2P",
+      "component": {
+        "x": 1150,
+        "y": 1031.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": -7.157,
+        "width": 148.375,
+        "height": 92.031
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 15
+    },
+    {
+      "label": "OL_CONTACT",
+      "component": {
+        "x": 190,
+        "y": 1211.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.975,
+        "y": 9,
+        "width": 148.05,
+        "height": 67.376
+      },
+      "svgViewBox": "0 0 128 72",
+      "shapeCount": 5
+    },
+    {
+      "label": "OTE",
+      "component": {
+        "x": 430,
+        "y": 1211.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 23.813,
+        "width": 148.375,
+        "height": 54.375
+      },
+      "svgViewBox": "0 0 128 60",
+      "shapeCount": 4
+    },
+    {
+      "label": "OTL",
+      "component": {
+        "x": 670,
+        "y": 1211.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 23.813,
+        "width": 148.375,
+        "height": 54.375
+      },
+      "svgViewBox": "0 0 128 60",
+      "shapeCount": 5
+    },
+    {
+      "label": "OTU",
+      "component": {
+        "x": 910,
+        "y": 1211.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 23.813,
+        "width": 148.375,
+        "height": 54.375
+      },
+      "svgViewBox": "0 0 128 60",
+      "shapeCount": 5
+    },
+    {
+      "label": "MOTOR",
+      "component": {
+        "x": 1150,
+        "y": 1211.938,
+        "width": 160,
+        "height": 136
+      },
+      "tightPaint": {
+        "x": 5.813,
+        "y": 21.313,
+        "width": 148.375,
+        "height": 66.188
+      },
+      "svgViewBox": "0 0 128 64",
+      "shapeCount": 9
+    }
+  ],
+  "paletteCount": 23,
+  "palette": [
+    {
+      "label": "XIC",
+      "tile": {
+        "x": 3045,
+        "y": 231.75,
+        "width": 176,
+        "height": 70
+      },
+      "symbol": {
+        "x": 3058,
+        "y": 243.75,
+        "width": 44,
+        "height": 46
+      },
+      "tight": {
+        "width": 39.6,
+        "height": 13.75
+      },
+      "viewBox": "0 0 128 64",
+      "selectorOverride": false
+    },
+    {
+      "label": "NOTC",
+      "tile": {
+        "x": 3421,
+        "y": 231.75,
+        "width": 176,
+        "height": 70
+      },
+      "symbol": {
+        "x": 3434,
+        "y": 243.75,
+        "width": 44,
+        "height": 46
+      },
+      "tight": {
+        "width": 30.8,
+        "height": 12.856
+      },
+      "viewBox": "0 0 128 64",
+      "selectorOverride": false
+    },
+    {
+      "label": "NOTO",
+      "tile": {
+        "x": 3797,
+        "y": 231.75,
+        "width": 176,
+        "height": 70
+      },
+      "symbol": {
+        "x": 3810,
+        "y": 243.75,
+        "width": 44,
+        "height": 46
+      },
+      "tight": {
+        "width": 14.9,
+        "height": 9.359
+      },
+      "viewBox": "0 0 128 64",
+      "selectorOverride": false
+    },
+    {
+      "label": "NCTC",
+      "tile": {
+        "x": 3985,
+        "y": 231.75,
+        "width": 176,
+        "height": 70
+      },
+      "symbol": {
+        "x": 3998,
+        "y": 243.75,
+        "width": 44,
+        "height": 46
+      },
+      "tight": {
+        "width": 14.875,
+        "height": 9.359
+      },
+      "viewBox": "0 0 128 64",
+      "selectorOverride": false
+    }
+  ]
+}

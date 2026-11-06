@@ -213,6 +213,83 @@ describe("breaker snapshot canonicalization", () => {
   });
 });
 
+describe("off-delay and level switch snapshot persistence", () => {
+  it("loads and saves all four new types with delayMs and isClosed intact", () => {
+    const raw = JSON.parse(JSON.stringify(rawV1)) as {
+      components: Array<Record<string, unknown>>;
+    };
+
+    raw.components.push(
+      {
+        id: "off-delay-no",
+        label: "NOTO",
+        rotation: 0,
+        tag: "T",
+        type: "NOTO",
+        usesCustomLabel: false,
+        x: 100,
+        y: 100,
+        delayMs: 500
+      },
+      {
+        id: "off-delay-nc",
+        label: "NCTC",
+        rotation: 0,
+        tag: "T",
+        type: "NCTC",
+        usesCustomLabel: false,
+        x: 300,
+        y: 100,
+        delayMs: 3000
+      },
+      {
+        id: "level-no",
+        label: "LVL-NO",
+        rotation: 0,
+        tag: null,
+        type: "LEVEL_SWITCH_NO",
+        usesCustomLabel: false,
+        x: 500,
+        y: 100,
+        isClosed: false
+      },
+      {
+        id: "level-nc",
+        label: "LVL-NC",
+        rotation: 0,
+        tag: null,
+        type: "LEVEL_SWITCH_NC",
+        usesCustomLabel: false,
+        x: 700,
+        y: 100,
+        isClosed: true
+      }
+    );
+
+    const parsed = parseCircuitSnapshot(raw);
+    expect(parsed.components.find((component) => component.id === "off-delay-no")?.delayMs).toBe(500);
+    expect(parsed.components.find((component) => component.id === "off-delay-nc")?.delayMs).toBe(3000);
+    expect(parsed.components.find((component) => component.id === "level-no")?.isClosed).toBe(false);
+    expect(parsed.components.find((component) => component.id === "level-nc")?.isClosed).toBe(true);
+
+    const saved = createCircuitSnapshot(
+      parsed.components,
+      parsed.wires,
+      parsed.program,
+      parsed.tags,
+      parsed.settings.scanIntervalMs,
+      parsed.settings,
+      parsed.sheet
+    );
+    const reparsed = parseCircuitSnapshot(JSON.parse(JSON.stringify(saved)));
+
+    expect(reparsed.components.find((component) => component.id === "off-delay-no")?.delayMs).toBe(500);
+    expect(reparsed.components.find((component) => component.id === "off-delay-nc")?.delayMs).toBe(3000);
+    expect(reparsed.components.find((component) => component.id === "level-no")?.isClosed).toBe(false);
+    expect(reparsed.components.find((component) => component.id === "level-nc")?.isClosed).toBe(true);
+  });
+});
+
 describe("unknown snapshot versions are rejected", () => {
   it.each([0, 3, 99, "2", null, undefined])("rejects version %j with a clear message", (version) => {
     const raw = { ...(rawV1 as Record<string, unknown>), version };

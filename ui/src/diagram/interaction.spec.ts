@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDuplicatedComponent,
+  canEditConnections,
   closeComponentMenuOnEvent,
+  computeFitZoom,
   isWireOriginHit,
   resolveCanvasContextMenuAction,
   resolveDiagramShortcut,
-  updateComponentSelection
+  updateComponentSelection,
+  WIRE_CREATION_BLOCKED_MESSAGE
 } from "./interaction";
 import type { ComponentMenuCloseEvent, ComponentMenuState } from "./interaction";
 import { getComponentPlaneSnapOffset } from "./grid";
@@ -26,6 +29,17 @@ function makeComponent(overrides: Partial<BuilderComponent> = {}): BuilderCompon
   };
 }
 
+describe("canEditConnections", () => {
+  it("blocks connection editing only while the simulator is running", () => {
+    expect(canEditConnections(false)).toBe(true);
+    expect(canEditConnections(true)).toBe(false);
+  });
+
+  it("exposes the single terminal feedback message", () => {
+    expect(WIRE_CREATION_BLOCKED_MESSAGE).toBe("Stop the simulation to create wires");
+  });
+});
+
 describe("updateComponentSelection", () => {
   it("replaces the selection on a plain click", () => {
     expect([...updateComponentSelection(new Set(["a"]), "b", false)]).toEqual(["b"]);
@@ -45,6 +59,32 @@ describe("resolveDiagramShortcut", () => {
       .toEqual({ direction: "ccw", type: "rotate" });
   });
 
+  it("maps F5/Shift+F5 to run/stop", () => {
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "F5", metaKey: false, shiftKey: false }))
+      .toEqual({ type: "run" });
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "F5", metaKey: false, shiftKey: true }))
+      .toEqual({ type: "stop" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "F5", metaKey: false, shiftKey: false }))
+      .toBeNull();
+  });
+
+  it("maps the command palette and view shortcuts", () => {
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "k", metaKey: false, shiftKey: false }))
+      .toEqual({ type: "command-palette" });
+    expect(resolveDiagramShortcut({ ctrlKey: false, key: "k", metaKey: true, shiftKey: false }))
+      .toEqual({ type: "command-palette" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "0", metaKey: false, shiftKey: false }))
+      .toEqual({ action: "fit", type: "zoom" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "1", metaKey: false, shiftKey: false }))
+      .toEqual({ action: "actual", type: "zoom" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "+", metaKey: false, shiftKey: true }))
+      .toEqual({ action: "in", type: "zoom" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "=", metaKey: false, shiftKey: false }))
+      .toEqual({ action: "in", type: "zoom" });
+    expect(resolveDiagramShortcut({ ctrlKey: true, key: "-", metaKey: false, shiftKey: false }))
+      .toEqual({ action: "out", type: "zoom" });
+  });
+
   it("keeps undo/redo/copy on their modifiers and ignores plain letters", () => {
     expect(resolveDiagramShortcut({ ctrlKey: true, key: "z", metaKey: false, shiftKey: false }))
       .toEqual({ type: "undo" });
@@ -56,6 +96,26 @@ describe("resolveDiagramShortcut", () => {
       .toEqual({ type: "copy" });
     expect(resolveDiagramShortcut({ ctrlKey: false, key: "x", metaKey: false, shiftKey: false }))
       .toBeNull();
+  });
+});
+
+describe("computeFitZoom", () => {
+  it("fits the limiting axis", () => {
+    expect(computeFitZoom(
+      { height: 940, width: 1720 },
+      { height: 470, width: 860 }
+    )).toBe(0.5);
+    expect(computeFitZoom(
+      { height: 940, width: 1720 },
+      { height: 1000, width: 860 }
+    )).toBe(0.5);
+  });
+
+  it("falls back to 1 for empty content", () => {
+    expect(computeFitZoom(
+      { height: 0, width: 1720 },
+      { height: 470, width: 860 }
+    )).toBe(1);
   });
 });
 

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   applyMomentaryPress,
   applyMomentaryRelease,
+  computeElectricalState,
+  getComponentTerminals,
   isBreakerClosed,
   toggleComponentOperateState
 } from "../DiagramBuilder";
-import type { BuilderComponent, BuilderComponentType } from "../DiagramBuilder";
+import type { BuilderComponent, BuilderComponentType, BuilderWire } from "../DiagramBuilder";
 
 function component(type: BuilderComponentType, overrides: Partial<BuilderComponent> = {}): BuilderComponent {
   return {
@@ -18,6 +20,25 @@ function component(type: BuilderComponentType, overrides: Partial<BuilderCompone
     x: 100,
     y: 100,
     ...overrides
+  };
+}
+
+function wire(
+  from: BuilderComponent,
+  fromTerminal: string,
+  to: BuilderComponent,
+  toTerminal: string
+): BuilderWire {
+  const start = getComponentTerminals(from).find((terminal) => terminal.terminalId === fromTerminal)!;
+  const end = getComponentTerminals(to).find((terminal) => terminal.terminalId === toTerminal)!;
+
+  return {
+    color: "#111827",
+    endPortId: end.portId,
+    id: `wire-${from.id}-${to.id}-${fromTerminal}-${toTerminal}`,
+    points: [{ x: start.x, y: start.y }, { x: end.x, y: end.y }],
+    startPortId: start.portId,
+    thickness: 3.5
   };
 }
 
@@ -44,7 +65,14 @@ describe("operate actions (no simulator-running dependency)", () => {
   });
 
   it("toggles maintained switches, leaves breakers fixed closed, and leaves push buttons alone", () => {
-    for (const type of ["SWITCH_1P", "LIMIT_SWITCH_NO", "LIMIT_SWITCH_NC", "OL_CONTACT"] as const) {
+    for (const type of [
+      "SWITCH_1P",
+      "LIMIT_SWITCH_NO",
+      "LIMIT_SWITCH_NC",
+      "LEVEL_SWITCH_NO",
+      "LEVEL_SWITCH_NC",
+      "OL_CONTACT"
+    ] as const) {
       const initial = component(type, { isClosed: false });
       const toggled = toggleComponentOperateState([initial], initial.id);
       expect(toggled[0]!.isClosed).toBe(true);
@@ -66,5 +94,30 @@ describe("operate actions (no simulator-running dependency)", () => {
 
     const pushButton = component("PUSH_BUTTON_NO", { isPressed: false });
     expect(toggleComponentOperateState([pushButton], pushButton.id)[0]).toBe(pushButton);
+  });
+
+  it("conducts level switches through the same maintained-switch path as limit switches", () => {
+    for (const type of ["LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC"] as const) {
+      const source = component("POWER_SOURCE", { id: "level-source", x: 40, y: 40 });
+      const coil = component("OTE", { id: "level-coil", tag: "M", x: 440, y: 40 });
+      const level = component(type, {
+        id: `level-${type}`,
+        isClosed: type === "LEVEL_SWITCH_NC",
+        x: 240,
+        y: 40
+      });
+      const wires = [
+        wire(source, "right", level, "in"),
+        wire(level, "out", coil, "in"),
+        wire(coil, "out", source, "left")
+      ];
+
+      const rest = computeElectricalState([source, level, coil], wires, true, {});
+      expect(rest.resolvedTagValues.M).toBe(type === "LEVEL_SWITCH_NC");
+
+      const toggled = toggleComponentOperateState([level], level.id)[0]!;
+      const operated = computeElectricalState([source, toggled, coil], wires, true, {});
+      expect(operated.resolvedTagValues.M).toBe(type === "LEVEL_SWITCH_NO");
+    }
   });
 });

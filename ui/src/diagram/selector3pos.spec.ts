@@ -223,6 +223,8 @@ describe("SELECTOR_3POS", () => {
       renderSelector3Pos(2, "diagram-symbol", false)
     ));
 
+    expect((withoutDebug.match(/<rect\b/g) ?? [])).toHaveLength(0);
+    expect((withDebug.match(/<rect\b/g) ?? [])).toHaveLength(3);
     expect(withDebug).toContain("stroke-dasharray");
     expect(withoutDebug).not.toContain("stroke-dasharray");
   });
