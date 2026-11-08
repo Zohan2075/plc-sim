@@ -1,6 +1,7 @@
 export interface ViewSettings {
   componentMenuCategory?: string;
   mouseWheelZooms: boolean;
+  ribbonCollapsed?: boolean;
 }
 
 export const DEFAULT_VIEW_SETTINGS: ViewSettings = { mouseWheelZooms: false };
@@ -38,6 +39,10 @@ export function parseViewSettings(value: unknown): ViewSettings {
     settings.componentMenuCategory = record.componentMenuCategory;
   }
 
+  if (typeof record.ribbonCollapsed === "boolean") {
+    settings.ribbonCollapsed = record.ribbonCollapsed;
+  }
+
   return settings;
 }
 
@@ -70,6 +75,10 @@ export function saveViewSettings(settings: ViewSettings, storage?: WritableStora
 
     if (typeof settings.componentMenuCategory === "string") {
       payload.componentMenuCategory = settings.componentMenuCategory;
+    }
+
+    if (typeof settings.ribbonCollapsed === "boolean") {
+      payload.ribbonCollapsed = settings.ribbonCollapsed;
     }
 
     target.setItem(VIEW_SETTINGS_STORAGE_KEY, JSON.stringify(payload));

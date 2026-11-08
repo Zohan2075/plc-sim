@@ -60,6 +60,25 @@ describe("view settings persistence", () => {
     });
   });
 
+  it("round-trips ribbon collapsed state", () => {
+    const { storage, values } = createFakeStorage();
+
+    saveViewSettings({ mouseWheelZooms: false, ribbonCollapsed: true }, storage);
+
+    expect(JSON.parse(values.get(VIEW_SETTINGS_STORAGE_KEY) ?? "null")).toEqual({
+      mouseWheelZooms: false,
+      ribbonCollapsed: true
+    });
+    expect(loadViewSettings(storage)).toEqual({
+      mouseWheelZooms: false,
+      ribbonCollapsed: true
+    });
+  });
+
+  it("ignores an invalid ribbon height", () => {
+    expect(parseViewSettings({ ribbonHeight: Number.NaN })).toEqual(DEFAULT_VIEW_SETTINGS);
+  });
+
   it("falls back to defaults when the stored JSON is corrupt", () => {
     const { storage, values } = createFakeStorage();
 

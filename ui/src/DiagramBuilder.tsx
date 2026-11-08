@@ -6033,7 +6033,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const commandPaletteOpenRef = useRef(commandPaletteOpen);
   commandPaletteOpenRef.current = commandPaletteOpen;
-  const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
+  const [ribbonCollapsed, setRibbonCollapsed] = useState(() => initialViewSettings.ribbonCollapsed === true);
+  const [toolsHidden, setToolsHidden] = useState(false);
   const [componentMenuQuery, setComponentMenuQuery] = useState("");
   const [componentMenuCategory, setComponentMenuCategory] = useState<ComponentMenuCategoryId>(() => {
     const saved = viewSettingsRef.current.componentMenuCategory;
@@ -6144,6 +6145,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     return () => window.removeEventListener("keydown", handleFullscreenEscape);
   }, [canvasFullscreen]);
+
+  useEffect(() => {
+    if (!toolsHidden) {
+      return;
+    }
+
+    const handleToolsEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setToolsHidden(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleToolsEscape);
+
+    return () => window.removeEventListener("keydown", handleToolsEscape);
+  }, [toolsHidden]);
 
   useEffect(() => {
     if (!canEditConnections) {
@@ -7737,6 +7754,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         <span className="component-menu__result-count" aria-live="polite">
           {menuQuery ? `${visibleMenuEntries.length} match${visibleMenuEntries.length === 1 ? "" : "es"}` : ""}
         </span>
+        <button
+          type="button"
+          className="component-menu__hide-tools"
+          title="Hide ribbon and component list (Esc to restore)"
+          aria-label="Hide ribbon and component list"
+          onClick={() => setToolsHidden(true)}
+        >
+          <span aria-hidden="true">⤢</span>
+          <span>Hide</span>
+        </button>
       </div>
 
       <div
@@ -8715,9 +8742,25 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     setHasCustomLayout(true);
   }
 
+  function persistRibbonCollapsed(nextCollapsed: boolean) {
+    viewSettingsRef.current = {
+      ...viewSettingsRef.current,
+      ribbonCollapsed: nextCollapsed
+    };
+    saveViewSettings(viewSettingsRef.current);
+  }
+
+  function toggleRibbonCollapsed() {
+    const nextCollapsed = !ribbonCollapsed;
+
+    setRibbonCollapsed(nextCollapsed);
+    persistRibbonCollapsed(nextCollapsed);
+  }
+
   function handleRibbonTabSelect(tab: RibbonTabId) {
     setActiveRibbonTab(tab);
     setRibbonCollapsed(false);
+    persistRibbonCollapsed(false);
   }
 
   function handleSelectedFamilyVariantChange(variant: ComponentFamilyVariant) {
@@ -10697,6 +10740,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     setActiveRibbonTab("component");
     setRibbonCollapsed(false);
+    persistRibbonCollapsed(false);
     window.requestAnimationFrame(() => {
       componentLabelInputRef.current?.focus();
       componentLabelInputRef.current?.select();
@@ -11043,7 +11087,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   ];
 
   return (
-    <section className={`panel panel--builder builder-shell ${canvasFullscreen ? "builder-shell--canvas-fullscreen" : ""}`.trim()}>
+    <section className={`panel panel--builder builder-shell ${canvasFullscreen ? "builder-shell--canvas-fullscreen" : ""} ${toolsHidden ? "builder-shell--tools-hidden" : ""}`.trim()}>
       <header className={`builder-ribbon ${ribbonCollapsed ? "builder-ribbon--collapsed" : ""}`.trim()}>
         <div className="builder-ribbon__titlebar">
           <div className="builder-ribbon__brand">
@@ -11057,6 +11101,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                 ? `Wire ${selectedWire.color} selected`
                 : sheetMetadata.projectName}
           </div>
+          <button
+            type="button"
+            className="builder-ribbon__hide-tools"
+            title="Hide ribbon and component list (Esc to restore)"
+            aria-label="Hide ribbon and component list"
+            onClick={() => setToolsHidden(true)}
+          >
+            <span aria-hidden="true">⤢</span>
+            <span>Hide tools</span>
+          </button>
           <div className="builder-ribbon__run-cluster" role="group" aria-label="Simulation controls">
             <button
               type="button"
@@ -11093,7 +11147,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           collapsed={ribbonCollapsed}
           onEscape={() => canvasRef.current?.focus({ preventScroll: true })}
           onSelect={handleRibbonTabSelect}
-          onToggleCollapse={() => setRibbonCollapsed((current) => !current)}
+          onToggleCollapse={toggleRibbonCollapsed}
           tabs={ribbonTabs}
         />
         <RibbonBody collapsed={ribbonCollapsed}>
@@ -11117,6 +11171,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           title="Exit canvas full screen (Esc)"
         >
           Exit full screen
+        </button>
+      ) : null}
+      {toolsHidden && !canvasFullscreen ? (
+        <button
+          type="button"
+          className="canvas-fullscreen-exit tools-hidden-toggle"
+          onClick={() => setToolsHidden(false)}
+          title="Show ribbon and component list (Esc)"
+        >
+          Show tools
         </button>
       ) : null}
       <div className="builder-freeplay">
