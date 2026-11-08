@@ -1,4 +1,5 @@
 export interface ViewSettings {
+  componentMenuCategory?: string;
   mouseWheelZooms: boolean;
 }
 
@@ -27,12 +28,17 @@ export function parseViewSettings(value: unknown): ViewSettings {
   }
 
   const record = value as Record<string, unknown>;
+  const settings: ViewSettings = { mouseWheelZooms: false };
 
   if (typeof record.mouseWheelZooms === "boolean") {
-    return { mouseWheelZooms: record.mouseWheelZooms };
+    settings.mouseWheelZooms = record.mouseWheelZooms;
   }
 
-  return { ...DEFAULT_VIEW_SETTINGS };
+  if (typeof record.componentMenuCategory === "string") {
+    settings.componentMenuCategory = record.componentMenuCategory;
+  }
+
+  return settings;
 }
 
 export function loadViewSettings(storage?: ReadableStorage): ViewSettings {
@@ -60,10 +66,13 @@ export function saveViewSettings(settings: ViewSettings, storage?: WritableStora
   }
 
   try {
-    target.setItem(
-      VIEW_SETTINGS_STORAGE_KEY,
-      JSON.stringify({ mouseWheelZooms: Boolean(settings.mouseWheelZooms) })
-    );
+    const payload: ViewSettings = { mouseWheelZooms: Boolean(settings.mouseWheelZooms) };
+
+    if (typeof settings.componentMenuCategory === "string") {
+      payload.componentMenuCategory = settings.componentMenuCategory;
+    }
+
+    target.setItem(VIEW_SETTINGS_STORAGE_KEY, JSON.stringify(payload));
   } catch (error) {
     console.warn("Failed to save view settings", error);
   }

@@ -25,7 +25,7 @@ export function CanvasZoomRibbonButtons(props: {
 
 export interface CanvasZoomAction {
   disabled?: boolean;
-  id: "actual" | "fit" | "preset-200" | "preset-50" | "selection";
+  id: "actual" | "fit" | "preset-125" | "preset-200" | "selection";
   label: string;
   shortcut?: string;
 }
@@ -39,7 +39,7 @@ export function getZoomMenuActions(hasSelection: boolean): CanvasZoomAction[] {
   return [
     { id: "fit", label: "Fit", shortcut: "Ctrl+0" },
     { id: "actual", label: "100%", shortcut: "Ctrl+1" },
-    { id: "preset-50", label: "50%" },
+    { id: "preset-125", label: "125%" },
     { id: "preset-200", label: "200%" },
     { disabled: !hasSelection, id: "selection", label: "Zoom to selection" }
   ];
@@ -197,8 +197,8 @@ export function CanvasZoomIndicator(props: {
       props.onFit();
     } else if (action.id === "actual") {
       props.onActual();
-    } else if (action.id === "preset-50") {
-      props.onPreset(50);
+    } else if (action.id === "preset-125") {
+      props.onPreset(125);
     } else if (action.id === "preset-200") {
       props.onPreset(200);
     } else {

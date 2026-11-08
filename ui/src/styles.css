@@ -39,6 +39,35 @@
 	--font-display: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
 }
 
+@media (prefers-color-scheme: dark) {
+	:root {
+		color-scheme: dark;
+		--bg-canvas: #0e1116;
+		--bg-canvas-deep: #171b22;
+		--bg-surface: rgba(28, 32, 39, 0.94);
+		--bg-surface-strong: #1d222b;
+		--bg-surface-muted: #262c36;
+		--border-strong: #536070;
+		--border-muted: #39424e;
+		--border-soft: #2c333d;
+		--text-strong: #f4f0e9;
+		--text-muted: #aab3c0;
+		--text-soft: #7f8a99;
+		--brand: #e1935d;
+		--brand-deep: #b96a37;
+		--accent: #91bde0;
+		--accent-deep: #c4dcf0;
+		--success: #5fd39c;
+		--success-bg: #143227;
+		--danger: #ff8b78;
+		--danger-bg: #3a1e1c;
+		--warning: #e9b765;
+		--warning-bg: #352813;
+		--shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.42);
+		--shadow-md: 0 10px 26px rgba(0, 0, 0, 0.32);
+	}
+}
+
 * {
 	box-sizing: border-box;
 }

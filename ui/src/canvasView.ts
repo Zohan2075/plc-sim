@@ -1,7 +1,7 @@
 export const MIN_VIEW_ZOOM = 0.1;
 export const MAX_VIEW_ZOOM = 8;
 export const VIEW_ZOOM_STEP = 1.25;
-export const VIEW_MARGIN = 48;
+export const VIEW_MARGIN = 0;
 const MAX_WHEEL_AXIS_DELTA = 240;
 const ZOOM_FACTOR_PER_PIXEL = 0.0015;
 
@@ -34,6 +34,22 @@ export interface FitViewInput {
   margin: number;
   viewportHeight: number;
   viewportWidth: number;
+}
+
+/** Smallest uniform scale that makes the content cover the viewport. */
+export function computeCoverScale(input: {
+  contentHeight: number;
+  contentWidth: number;
+  viewportHeight: number;
+  viewportWidth: number;
+}): number {
+  const contentWidth = Math.max(input.contentWidth, 1);
+  const contentHeight = Math.max(input.contentHeight, 1);
+
+  return Math.max(
+    Math.max(input.viewportWidth, 0) / contentWidth,
+    Math.max(input.viewportHeight, 0) / contentHeight
+  );
 }
 
 function clamp(value: number, min: number, max: number): number {

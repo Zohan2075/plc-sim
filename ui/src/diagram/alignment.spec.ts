@@ -16,7 +16,9 @@ import type { BuilderComponent, BuilderComponentType, BuilderScene, Point } from
 
 const planeSettings = DEFAULT_PLANE_SETTINGS;
 const spacing = planeSettings.gridSpacing;
-const PALETTE_TYPES = instructionPalette.map((entry) => entry.type);
+const PALETTE_TYPES = instructionPalette.flatMap((entry) =>
+  entry.altType ? [entry.type, entry.altType] : [entry.type]
+);
 const ROTATIONS = [0, 1, 2, 3];
 
 function makeComponent(type: BuilderComponentType, x: number, y: number, rotation = 0): BuilderComponent {

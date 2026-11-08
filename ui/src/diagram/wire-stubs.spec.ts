@@ -14,6 +14,9 @@ import { SELECTOR_3POS_RING_RADII } from "./selector3posArt.generated";
 const planeSettings: BuilderPlaneSettings = { gridSpacing: 18, height: 20000, width: 4200 };
 const Y_POSITIONS = [0, 500, 5000, 20000];
 const ROTATIONS = [0, 1, 2, 3];
+const PALETTE_TYPES = instructionPalette.flatMap((entry) =>
+  entry.altType ? [entry.type, entry.altType] : [entry.type]
+);
 
 let sequence = 0;
 
@@ -258,7 +261,7 @@ describe("manual wire bends", () => {
 });
 
 describe("stacked components across large Y and all rotations", () => {
-  for (const type of instructionPalette.map((entry) => entry.type)) {
+  for (const type of PALETTE_TYPES) {
     for (const rotation of ROTATIONS) {
       for (const y of Y_POSITIONS) {
         it(`${type} rotation ${rotation} at y=${y}: display route is a 2-point vertical at the terminal X`, () => {

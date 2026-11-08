@@ -12,9 +12,9 @@ import {
 import { createCanvasZoomStore } from "./canvasZoomStore";
 
 describe("zoom menu actions", () => {
-  it("lists Fit, 100%, 50%, 200% and Zoom to selection", () => {
+  it("lists Fit, 100%, 125%, 200% and Zoom to selection", () => {
     expect(getZoomMenuActions(true).map((action) => action.label))
-      .toEqual(["Fit", "100%", "50%", "200%", "Zoom to selection"]);
+      .toEqual(["Fit", "100%", "125%", "200%", "Zoom to selection"]);
   });
 
   it("disables zoom-to-selection without a selection", () => {
@@ -78,7 +78,7 @@ describe("zoom controls markup", () => {
 
     expect(markup).toContain("Fit");
     expect(markup).toContain("100%");
-    expect(markup).toContain("50%");
+    expect(markup).toContain("125%");
     expect(markup).toContain("200%");
     expect(markup).toContain("Zoom to selection");
     expect(markup).toContain("disabled");

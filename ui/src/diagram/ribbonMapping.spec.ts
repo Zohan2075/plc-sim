@@ -9,12 +9,12 @@ import type { RibbonAuditGroup } from "./ribbonMapping";
 
 const expectedGroupCounts: Record<RibbonAuditGroup, number> = {
   H: 3,
-  P: 27,
+  P: 25,
   T: 15,
   S: 4,
   R: 6,
   ST: 10,
-  C: 18,
+  C: 19,
   W: 21,
   M: 14
 };
@@ -46,6 +46,8 @@ describe("ribbon control audit map", () => {
       instructionPalette.map((item) => item.label)
     );
     expect(paletteEntries.every((item) => item.destination.includes("Insert tab"))).toBe(true);
+    expect(paletteEntries.filter((item) => item.label === "Limit switch")).toHaveLength(1);
+    expect(paletteEntries.filter((item) => item.label === "Level switch")).toHaveLength(1);
   });
 
   it("keeps the specific destinations from the phase-4 mapping", () => {
@@ -92,7 +94,7 @@ describe("ribbon control audit map", () => {
       expect(getRibbonAuditEntry(`W${index}`)?.destination).toContain("Wire tab");
     }
 
-    for (let index = 1; index <= 18; index += 1) {
+    for (let index = 1; index <= 19; index += 1) {
       expect(getRibbonAuditEntry(`C${index}`)?.destination).toContain("Component tab");
     }
   });

@@ -6,6 +6,7 @@ import {
   VIEW_ZOOM_STEP,
   clampViewZoom,
   computeAnchoredScroll,
+  computeCoverScale,
   computeFitView,
   computeGridMinorOpacity,
   normalizeWheelAxis,
@@ -152,8 +153,55 @@ describe("computeAnchoredScroll", () => {
   });
 });
 
+describe("computeCoverScale", () => {
+  it("covers wide, short viewports by width and tall viewports by height", () => {
+    expect(computeCoverScale({
+      contentHeight: 940,
+      contentWidth: 1720,
+      viewportHeight: 576,
+      viewportWidth: 1800
+    })).toBeCloseTo(1800 / 1720, 8);
+    expect(computeCoverScale({
+      contentHeight: 940,
+      contentWidth: 1720,
+      viewportHeight: 344,
+      viewportWidth: 1366
+    })).toBeCloseTo(1366 / 1720, 8);
+    expect(computeCoverScale({
+      contentHeight: 940,
+      contentWidth: 1720,
+      viewportHeight: 926,
+      viewportWidth: 2400
+    })).toBeCloseTo(2400 / 1720, 8);
+    expect(computeCoverScale({
+      contentHeight: 940,
+      contentWidth: 1720,
+      viewportHeight: 1000,
+      viewportWidth: 800
+    })).toBeCloseTo(1000 / 940, 8);
+  });
+
+  it("never returns a scale below the fit scale", () => {
+    const fit = computeFitView({
+      contentHeight: 940,
+      contentWidth: 1720,
+      margin: 0,
+      viewportHeight: 344,
+      viewportWidth: 1366
+    });
+    const cover = computeCoverScale({
+      contentHeight: 940,
+      contentWidth: 1720,
+      viewportHeight: 344,
+      viewportWidth: 1366
+    });
+
+    expect(cover).toBeGreaterThanOrEqual(fit.zoom);
+  });
+});
+
 describe("computeFitView", () => {
-  it("fits the plane inside the viewport with margins", () => {
+  it("fits the plane inside the viewport", () => {
     const fit = computeFitView({
       contentHeight: 940,
       contentWidth: 1720,
@@ -162,7 +210,7 @@ describe("computeFitView", () => {
       viewportWidth: 1200
     });
 
-    expect(fit.zoom).toBeCloseTo(1104 / 1720, 6);
+    expect(fit.zoom).toBeCloseTo((1200 - VIEW_MARGIN * 2) / 1720, 6);
     expect(fit.scrollLeft).toBe(0);
     expect(fit.scrollTop).toBe(0);
   });

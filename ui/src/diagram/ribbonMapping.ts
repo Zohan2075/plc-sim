@@ -38,22 +38,20 @@ const paletteEntries: RibbonAuditEntry[] = [
   entry("P9", "P", "E-stop", "Insert tab / Electrical and component list", "tab"),
   entry("P10", "P", "3-pos selector", "Insert tab / Electrical and component list", "tab"),
   entry("P11", "P", "Single switch", "Insert tab / Electrical and component list", "tab"),
-  entry("P12", "P", "Limit switch NO", "Insert tab / Electrical and component list", "tab"),
-  entry("P13", "P", "Limit switch NC", "Insert tab / Electrical and component list", "tab"),
-  entry("P14", "P", "Level switch NO", "Insert tab / Electrical and component list", "tab"),
-  entry("P15", "P", "Level switch NC", "Insert tab / Electrical and component list", "tab"),
-  entry("P16", "P", "Temperature switch", "Insert tab / Electrical and component list", "tab"),
-  entry("P17", "P", "Flow switch", "Insert tab / Electrical and component list", "tab"),
-  entry("P18", "P", "Pressure switch", "Insert tab / Electrical and component list", "tab"),
-  entry("P19", "P", "XIC", "Insert tab / Logic and component list", "tab"),
-  entry("P20", "P", "XIO", "Insert tab / Logic and component list", "tab"),
-  entry("P21", "P", "NOTC", "Insert tab / Logic and component list", "tab"),
-  entry("P22", "P", "NCTO", "Insert tab / Logic and component list", "tab"),
-  entry("P23", "P", "NOTO", "Insert tab / Logic and component list", "tab"),
-  entry("P24", "P", "NCTC", "Insert tab / Logic and component list", "tab"),
-  entry("P25", "P", "OTE", "Insert tab / Logic and component list", "tab"),
-  entry("P26", "P", "Lamp", "Insert tab / Electrical and component list", "tab"),
-  entry("P27", "P", "Motor", "Insert tab / Electrical and component list", "tab")
+  entry("P12", "P", "NOTC", "Insert tab / Logic and component list", "tab"),
+  entry("P13", "P", "NOTO", "Insert tab / Logic and component list", "tab"),
+  entry("P14", "P", "NCTC", "Insert tab / Logic and component list", "tab"),
+  entry("P15", "P", "NCTO", "Insert tab / Logic and component list", "tab"),
+  entry("P16", "P", "Limit switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P17", "P", "Level switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P18", "P", "Temperature switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P19", "P", "Flow switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P20", "P", "Pressure switch", "Insert tab / Electrical and component list", "tab"),
+  entry("P21", "P", "XIC", "Insert tab / Logic and component list", "tab"),
+  entry("P22", "P", "XIO", "Insert tab / Logic and component list", "tab"),
+  entry("P23", "P", "Motor", "Insert tab / Electrical and component list", "tab"),
+  entry("P24", "P", "Light", "Insert tab / Electrical and component list", "tab"),
+  entry("P25", "P", "OTE", "Insert tab / Logic and component list", "tab")
 ];
 
 const toolsEntries: RibbonAuditEntry[] = [
@@ -121,7 +119,8 @@ const componentEntries: RibbonAuditEntry[] = [
   entry("C15", "C", "Source voltage", "Component tab / Parameters", "tab"),
   entry("C16", "C", "Lamp glow", "Component tab / Parameters", "tab"),
   entry("C17", "C", "Open/Close switch", "Component tab / Parameters", "tab"),
-  entry("C18", "C", "Selector position", "Component tab / Parameters", "tab")
+  entry("C18", "C", "Selector position", "Component tab / Parameters", "tab"),
+  entry("C19", "C", "Contact type", "Component tab / Contact", "tab")
 ];
 
 const wireEntries: RibbonAuditEntry[] = [

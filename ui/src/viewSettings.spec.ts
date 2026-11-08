@@ -46,11 +46,18 @@ describe("view settings persistence", () => {
   it("round-trips through the dedicated storage key", () => {
     const { storage, values } = createFakeStorage();
 
-    saveViewSettings({ mouseWheelZooms: true }, storage);
+    saveViewSettings({ componentMenuCategory: "loads", mouseWheelZooms: true }, storage);
 
     expect(JSON.parse(values.get(VIEW_SETTINGS_STORAGE_KEY) ?? "null"))
-      .toEqual({ mouseWheelZooms: true });
-    expect(loadViewSettings(storage)).toEqual({ mouseWheelZooms: true });
+      .toEqual({ componentMenuCategory: "loads", mouseWheelZooms: true });
+    expect(loadViewSettings(storage)).toEqual({ componentMenuCategory: "loads", mouseWheelZooms: true });
+  });
+
+  it("keeps a saved component menu category when wheel settings are absent", () => {
+    expect(parseViewSettings({ componentMenuCategory: "sources" })).toEqual({
+      componentMenuCategory: "sources",
+      mouseWheelZooms: false
+    });
   });
 
   it("falls back to defaults when the stored JSON is corrupt", () => {

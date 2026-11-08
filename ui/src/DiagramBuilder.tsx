@@ -30,6 +30,7 @@ import type { CanvasZoomStore } from "./canvasZoomStore";
 import {
   clampViewZoom,
   computeAnchoredScroll,
+  computeCoverScale,
   computeFitView,
   computeGridMinorOpacity,
   resolveWheelIntent,
@@ -102,6 +103,12 @@ import type {
   RotationAction
 } from "./diagram/contextMenu";
 import { isOperable } from "./diagram/operability";
+import {
+  getComponentFamily,
+  getComponentFamilyVariant,
+  setComponentFamilyVariant
+} from "./diagram/componentFamilies";
+import type { ComponentFamilyId, ComponentFamilyVariant } from "./diagram/componentFamilies";
 import {
   RibbonBody,
   RibbonButton,
@@ -417,38 +424,48 @@ export const LAMP_GLOW_COLOR_OPTIONS: ReadonlyArray<{ label: string; value: Lamp
 ];
 
 export type ComponentCategoryId =
-  | "power"
+  | "sources"
   | "protection"
-  | "operators"
-  | "selectors"
-  | "sensors"
+  | "control"
   | "contacts"
-  | "timers"
-  | "outputs"
+  | "loads"
   | "other";
 
+export type ComponentMenuCategoryId = ComponentCategoryId | "all";
+
+export const ALL_COMPONENT_MENU_TAB = {
+  id: "all",
+  label: "All components"
+} as const;
+
 interface ComponentCategory {
+  entries: readonly string[];
   id: ComponentCategoryId;
   label: string;
-  types: readonly BuilderComponentType[];
 }
 
-/**
- * Single source of truth for palette / Insert / search ordering.
- * Types missing from this table are exposed under "Other" and fail the
- * registry-coverage test.
- */
-export const COMPONENT_CATEGORIES: readonly ComponentCategory[] = [
-  { id: "power", label: "Power sources", types: ["POWER_SOURCE", "DC_SOURCE"] },
-  { id: "protection", label: "Protection", types: ["BREAKER_1P", "BREAKER_2P", "FUSE", "OL_CONTACT"] },
-  { id: "operators", label: "Pushbuttons & operators", types: ["PUSH_BUTTON_NO", "PUSH_BUTTON_NC", "ESTOP"] },
-  { id: "selectors", label: "Selectors & switches", types: ["SELECTOR_3POS", "SWITCH_1P"] },
-  { id: "sensors", label: "Sensors & limit switches", types: ["LIMIT_SWITCH_NO", "LIMIT_SWITCH_NC", "LEVEL_SWITCH_NO", "LEVEL_SWITCH_NC", "TEMPERATURE_SWITCH", "FLOW_SWITCH", "PRESSURE_SWITCH"] },
-  { id: "contacts", label: "Contacts", types: ["XIC", "XIO"] },
-  { id: "timers", label: "Timers", types: ["NOTC", "NCTO", "NOTO", "NCTC"] },
-  { id: "outputs", label: "Outputs & loads", types: ["OTE", "LAMP", "MOTOR"] },
-  { id: "other", label: "Other", types: [] }
-] as const;
+export type ComponentMenuEntryStatus = "active" | "others";
+
+export interface ComponentMenuEntry {
+  aliases?: readonly string[];
+  altType?: BuilderComponentType;
+  category: ComponentCategoryId;
+  description: string;
+  family?: ComponentFamilyId;
+  id: string;
+  label: string;
+  status: ComponentMenuEntryStatus;
+  type: BuilderComponentType;
+}
+
+interface ComponentMenuEntryOptions {
+  aliases?: readonly string[];
+  altType?: BuilderComponentType;
+  description?: string;
+  family?: ComponentFamilyId;
+  label?: string;
+  status?: ComponentMenuEntryStatus;
+}
 
 const PALETTE_ENTRY_BY_TYPE: Partial<Record<BuilderComponentType, { description: string; label: string }>> = {
   POWER_SOURCE: { label: "AC source", description: "Alternating source L1/L2" },
@@ -482,26 +499,191 @@ const PALETTE_ENTRY_BY_TYPE: Partial<Record<BuilderComponentType, { description:
 
 export const COMPONENT_TYPE_REGISTRY = Object.keys(PALETTE_ENTRY_BY_TYPE) as BuilderComponentType[];
 
+function menuEntry(
+  category: ComponentCategoryId,
+  id: string,
+  type: BuilderComponentType,
+  options: ComponentMenuEntryOptions = {}
+): ComponentMenuEntry {
+  const metadata = PALETTE_ENTRY_BY_TYPE[type]!;
+  const entry: ComponentMenuEntry = {
+    category,
+    description: options.description ?? metadata.description,
+    id,
+    label: options.label ?? metadata.label,
+    status: options.status ?? "active",
+    type
+  };
+
+  if (options.altType !== undefined) {
+    entry.altType = options.altType;
+  }
+
+  if (options.family !== undefined) {
+    entry.family = options.family;
+  }
+
+  if (options.aliases !== undefined) {
+    entry.aliases = options.aliases;
+  }
+
+  return entry;
+}
+
+const COMPONENT_MENU_ENTRY_DEFINITIONS: readonly ComponentMenuEntry[] = [
+  menuEntry("sources", "ac-source", "POWER_SOURCE"),
+  menuEntry("sources", "dc-source", "DC_SOURCE"),
+  menuEntry("protection", "breaker-1p", "BREAKER_1P"),
+  menuEntry("protection", "breaker-2p", "BREAKER_2P"),
+  menuEntry("protection", "fuse", "FUSE"),
+  menuEntry("protection", "ol-contact", "OL_CONTACT"),
+  menuEntry("control", "push-button-no", "PUSH_BUTTON_NO"),
+  menuEntry("control", "push-button-nc", "PUSH_BUTTON_NC"),
+  menuEntry("control", "estop", "ESTOP"),
+  menuEntry("control", "selector-3pos", "SELECTOR_3POS"),
+  menuEntry("control", "switch-1p", "SWITCH_1P"),
+  menuEntry("control", "notc", "NOTC", { aliases: ["timer", "on delay"] }),
+  menuEntry("control", "noto", "NOTO", { aliases: ["timer", "off delay"] }),
+  menuEntry("control", "nctc", "NCTC", { aliases: ["timer", "off delay"] }),
+  menuEntry("control", "ncto", "NCTO", { aliases: ["timer", "on delay"] }),
+  menuEntry("control", "limit-switch", "LIMIT_SWITCH_NO", {
+    aliases: ["limit", "normally open", "normally closed"],
+    altType: "LIMIT_SWITCH_NC",
+    description: "Plunger roller limit switch",
+    family: "LIMIT_SWITCH",
+    label: "Limit switch"
+  }),
+  menuEntry("control", "level-switch", "LEVEL_SWITCH_NO", {
+    aliases: ["float switch", "level", "normally open", "normally closed"],
+    altType: "LEVEL_SWITCH_NC",
+    description: "Liquid level switch",
+    family: "LEVEL_SWITCH",
+    label: "Level switch"
+  }),
+  menuEntry("control", "temperature-switch", "TEMPERATURE_SWITCH"),
+  menuEntry("control", "flow-switch", "FLOW_SWITCH"),
+  menuEntry("control", "pressure-switch", "PRESSURE_SWITCH"),
+  menuEntry("contacts", "xic", "XIC"),
+  menuEntry("contacts", "xio", "XIO"),
+  menuEntry("loads", "motor", "MOTOR"),
+  menuEntry("loads", "light", "LAMP", { aliases: ["Lamp"], label: "Light" }),
+  menuEntry("loads", "ote", "OTE")
+];
+
+const COMPONENT_MENU_ENTRY_BY_ID = new Map(
+  COMPONENT_MENU_ENTRY_DEFINITIONS.map((entry) => [entry.id, entry])
+);
+
+/**
+ * Single source of truth for palette / Insert / search ordering.
+ * Entries may be planned with status "others"; they become active once their
+ * type is present in COMPONENT_TYPE_REGISTRY.
+ */
+export const COMPONENT_CATEGORIES: readonly ComponentCategory[] = [
+  { entries: ["ac-source", "dc-source"], id: "sources", label: "Sources" },
+  {
+    entries: ["breaker-1p", "breaker-2p", "fuse", "ol-contact"],
+    id: "protection",
+    label: "Protection devices"
+  },
+  {
+    entries: [
+      "push-button-no",
+      "push-button-nc",
+      "estop",
+      "selector-3pos",
+      "switch-1p",
+      "notc",
+      "noto",
+      "nctc",
+      "ncto",
+      "limit-switch",
+      "level-switch",
+      "temperature-switch",
+      "flow-switch",
+      "pressure-switch"
+    ],
+    id: "control",
+    label: "Control circuit devices"
+  },
+  { entries: ["xic", "xio"], id: "contacts", label: "Contacts" },
+  { entries: ["motor", "light", "ote"], id: "loads", label: "Loads" },
+  { entries: [], id: "other", label: "Other" }
+];
+
+export function isComponentMenuEntryActive(entry: ComponentMenuEntry): boolean {
+  return entry.status === "active" || COMPONENT_TYPE_REGISTRY.includes(entry.type);
+}
+
+const declaredActiveEntries: ComponentMenuEntry[] = COMPONENT_CATEGORIES.flatMap((category) =>
+  category.entries.flatMap((entryId) => {
+    const entry = COMPONENT_MENU_ENTRY_BY_ID.get(entryId);
+
+    if (!entry || !isComponentMenuEntryActive(entry)) {
+      return [];
+    }
+
+    return [{ ...entry, category: category.id }];
+  })
+);
+
+const declaredCoveredTypes = new Set<BuilderComponentType>(
+  declaredActiveEntries.flatMap((entry) =>
+    entry.altType ? [entry.type, entry.altType] : [entry.type]
+  )
+);
+
+const uncategorizedMenuEntries: ComponentMenuEntry[] = COMPONENT_TYPE_REGISTRY
+  .filter((type) => !declaredCoveredTypes.has(type))
+  .map((type) => {
+    const metadata = PALETTE_ENTRY_BY_TYPE[type]!;
+
+    return {
+      category: "other",
+      description: metadata.description,
+      id: `other-${type.toLowerCase()}`,
+      label: metadata.label,
+      status: "active",
+      type
+    };
+  });
+
+export const COMPONENT_MENU_ENTRIES: readonly ComponentMenuEntry[] = [
+  ...declaredActiveEntries,
+  ...uncategorizedMenuEntries
+];
+
+export const PLANNED_COMPONENT_MENU_ENTRIES: readonly ComponentMenuEntry[] =
+  COMPONENT_MENU_ENTRY_DEFINITIONS.filter(
+    (entry) => entry.status === "others" && !isComponentMenuEntryActive(entry)
+  );
+
 export function getComponentCategory(type: BuilderComponentType): ComponentCategoryId {
-  return COMPONENT_CATEGORIES.find((category) => category.types.includes(type))?.id ?? "other";
+  return COMPONENT_MENU_ENTRIES.find(
+    (entry) => entry.type === type || entry.altType === type
+  )?.category ?? "other";
 }
 
 export function getUncategorizedComponentTypes(): BuilderComponentType[] {
-  return COMPONENT_TYPE_REGISTRY.filter((type) => getComponentCategory(type) === "other");
+  return COMPONENT_TYPE_REGISTRY.filter((type) => !declaredCoveredTypes.has(type));
 }
 
-export const instructionPalette: Array<{
-  category: ComponentCategoryId;
-  description: string;
-  label: string;
-  type: BuilderComponentType;
-}> = COMPONENT_CATEGORIES.flatMap((category) =>
-  category.types.map((type) => ({
-    category: category.id,
-    type,
-    ...PALETTE_ENTRY_BY_TYPE[type]!
-  }))
-);
+export function getComponentMenuEntrySearchText(entry: ComponentMenuEntry): string {
+  const categoryLabel = COMPONENT_CATEGORIES.find((category) => category.id === entry.category)?.label ?? "";
+
+  return [
+    entry.id,
+    entry.type,
+    entry.altType ?? "",
+    entry.category,
+    categoryLabel,
+    entry.label,
+    entry.description,
+    ...(entry.aliases ?? [])
+  ].join(" ").toLowerCase();
+}
+
+export const instructionPalette: readonly ComponentMenuEntry[] = COMPONENT_MENU_ENTRIES;
 
 const LOGIC_PALETTE_TYPES = new Set<BuilderComponentType>(["XIC", "XIO", "NOTC", "NCTO", "NOTO", "NCTC", "OTE"]);
 
@@ -5722,6 +5904,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   } | null>(null);
   const planeSettingsRef = useRef<BuilderPlaneSettings>(DEFAULT_PLANE_SETTINGS);
   const canvasZoomRef = useRef(DEFAULT_CANVAS_ZOOM);
+  const canvasCoverScaleRef = useRef(1);
+  const [canvasCoverScale, setCanvasCoverScale] = useState(1);
+  const [canvasFullscreen, setCanvasFullscreen] = useState(false);
   const canvasViewportRef = useRef<HTMLDivElement>(null);
   const zoomStoreRef = useRef<CanvasZoomStore | null>(null);
   zoomStoreRef.current ??= createCanvasZoomStore(DEFAULT_CANVAS_ZOOM);
@@ -5832,7 +6017,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const [cursorPoint, setCursorPoint] = useState<Point | null>(null);
   const [rotationToast, setRotationToast] = useState<string | null>(null);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
-  const [mouseWheelZooms, setMouseWheelZooms] = useState(() => loadViewSettings().mouseWheelZooms);
+  const [initialViewSettings] = useState(loadViewSettings);
+  const viewSettingsRef = useRef(initialViewSettings);
+  const [mouseWheelZooms, setMouseWheelZooms] = useState(() => viewSettingsRef.current.mouseWheelZooms);
   const mouseWheelZoomsRef = useRef(mouseWheelZooms);
   mouseWheelZoomsRef.current = mouseWheelZooms;
   const [paletteDragPreview, setPaletteDragPreview] = useState<{
@@ -5847,6 +6034,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const commandPaletteOpenRef = useRef(commandPaletteOpen);
   commandPaletteOpenRef.current = commandPaletteOpen;
   const [ribbonCollapsed, setRibbonCollapsed] = useState(false);
+  const [componentMenuQuery, setComponentMenuQuery] = useState("");
+  const [componentMenuCategory, setComponentMenuCategory] = useState<ComponentMenuCategoryId>(() => {
+    const saved = viewSettingsRef.current.componentMenuCategory;
+
+    return saved === ALL_COMPONENT_MENU_TAB.id || COMPONENT_CATEGORIES.some((category) => category.id === saved)
+      ? saved as ComponentMenuCategoryId
+      : "control";
+  });
+  const componentMenuSearchRef = useRef<HTMLInputElement | null>(null);
+  const componentMenuRowRef = useRef<HTMLDivElement | null>(null);
   const compactRibbon = useCompactRibbon();
   const [showTerminalDebug, setShowTerminalDebug] = useState(() => queryFlag("debugTerminals"));
   const [showHitboxDebug, setShowHitboxDebug] = useState(
@@ -5875,7 +6072,30 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     const observer = new ResizeObserver(() => {
-      applyView({ zoom: canvasZoomRef.current });
+      const nextCoverScale = computeCanvasCoverScale();
+      const previousCoverScale = canvasCoverScaleRef.current;
+
+      if (Math.abs(nextCoverScale - previousCoverScale) > 1e-6) {
+        const stage = stageScrollRef.current;
+        const previousEffectiveZoom = canvasZoomRef.current * previousCoverScale;
+        const nextEffectiveZoom = canvasZoomRef.current * nextCoverScale;
+        const modelLeft = stage && previousEffectiveZoom > 0
+          ? (stage.scrollLeft + viewOffsetRef.current.x) / previousEffectiveZoom
+          : 0;
+        const modelTop = stage && previousEffectiveZoom > 0
+          ? (stage.scrollTop + viewOffsetRef.current.y) / previousEffectiveZoom
+          : 0;
+
+        canvasCoverScaleRef.current = nextCoverScale;
+        setCanvasCoverScale(nextCoverScale);
+        applyView({
+          scrollLeft: modelLeft * nextEffectiveZoom,
+          scrollTop: modelTop * nextEffectiveZoom,
+          zoom: canvasZoomRef.current
+        });
+      } else {
+        applyView({ zoom: canvasZoomRef.current });
+      }
 
       const canvas = canvasRef.current;
       const layoutSignature = canvas ? `${canvas.offsetWidth}x${canvas.offsetHeight}` : "";
@@ -5908,6 +6128,22 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     return () => window.clearTimeout(timeoutId);
   }, [rotationToast]);
+
+  useEffect(() => {
+    if (!canvasFullscreen) {
+      return;
+    }
+
+    const handleFullscreenEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCanvasFullscreen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleFullscreenEscape);
+
+    return () => window.removeEventListener("keydown", handleFullscreenEscape);
+  }, [canvasFullscreen]);
 
   useEffect(() => {
     if (!canEditConnections) {
@@ -5965,8 +6201,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   useLayoutEffect(() => {
     planeSettingsRef.current = planeSettings;
     applyView({
-      scrollLeft: stageScrollRef.current?.scrollLeft ?? 0,
-      scrollTop: stageScrollRef.current?.scrollTop ?? 0,
+      scrollLeft: (stageScrollRef.current?.scrollLeft ?? 0) + viewOffsetRef.current.x,
+      scrollTop: (stageScrollRef.current?.scrollTop ?? 0) + viewOffsetRef.current.y,
       zoom: canvasZoomRef.current
     });
   }, [planeSettings.width, planeSettings.height, planeSettings.gridSpacing]);
@@ -6005,6 +6241,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         event.preventDefault();
         contextMenuRef.current?.close();
         setCommandPaletteOpen(true);
+        return;
+      }
+
+      if (!isTextEntry && event.key === "/") {
+        event.preventDefault();
+        componentMenuSearchRef.current?.focus();
         return;
       }
 
@@ -6157,7 +6399,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     const bounds = canvas.getBoundingClientRect();
-    const zoom = canvasZoomRef.current;
+    const zoom = canvasZoomRef.current * (canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1);
     // El origen del modelo es el content-box, no el border-box. clientLeft/Top
     // es el borde sin escalar; se multiplica por el zoom del canvas.
     const contentLeft = bounds.left + canvas.clientLeft * zoom;
@@ -6208,12 +6450,30 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   }
 
   /**
+   * Minimum scale that makes the sheet cover the stage, so no off-sheet area
+   * is visible below the menu. The saved/model plane size never changes.
+   */
+  function computeCanvasCoverScale(): number {
+    const stage = stageScrollRef.current;
+    const plane = planeSettingsRef.current;
+
+    if (!stage || stage.clientWidth <= 0 || stage.clientHeight <= 0) {
+      return 1;
+    }
+
+    return computeCoverScale({
+      contentHeight: plane.height,
+      contentWidth: plane.width,
+      viewportHeight: stage.clientHeight,
+      viewportWidth: stage.clientWidth
+    });
+  }
+
+  /**
    * Applies the complete view state directly to the DOM. This is the only place
    * that writes zoom/scroll, so wheel zoom and panning never trigger React renders.
    */
   function applyView(next: {
-    offsetX?: number;
-    offsetY?: number;
     scrollLeft?: number;
     scrollTop?: number;
     zoom?: number;
@@ -6222,54 +6482,38 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const viewport = canvasViewportRef.current;
     const canvas = canvasRef.current;
     const stage = stageScrollRef.current;
-    const zoom = next.zoom === undefined ? canvasZoomRef.current : clampViewZoom(next.zoom);
+    const zoom = Math.max(1, clampViewZoom(next.zoom === undefined ? canvasZoomRef.current : next.zoom));
+    const coverScale = canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1;
+    const effectiveZoom = zoom * coverScale;
 
     canvasZoomRef.current = zoom;
 
     if (viewport) {
-      viewport.style.width = `${Math.ceil(plane.width * zoom + VIEW_MARGIN * 2)}px`;
-      viewport.style.height = `${Math.ceil(plane.height * zoom + VIEW_MARGIN * 2)}px`;
+      viewport.style.width = `${Math.round(plane.width * effectiveZoom + VIEW_MARGIN * 2)}px`;
+      viewport.style.height = `${Math.round(plane.height * effectiveZoom + VIEW_MARGIN * 2)}px`;
     }
 
-    let offsetX = next.offsetX ?? viewOffsetRef.current.x;
-    let offsetY = next.offsetY ?? viewOffsetRef.current.y;
+    let offsetX = 0;
+    let offsetY = 0;
 
     if (stage) {
       // Reading scrollWidth after the size changes forces layout, so the clamp
       // uses the new extents (diagram + margin).
       const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
       const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
-      const desiredLeft = next.scrollLeft ?? stage.scrollLeft;
-      const desiredTop = next.scrollTop ?? stage.scrollTop;
+      const desiredLeft = next.scrollLeft ?? (stage.scrollLeft + viewOffsetRef.current.x);
+      const desiredTop = next.scrollTop ?? (stage.scrollTop + viewOffsetRef.current.y);
       const targetLeft = clamp(desiredLeft, 0, maxScrollLeft);
       const targetTop = clamp(desiredTop, 0, maxScrollTop);
 
       stage.scrollLeft = Math.round(targetLeft);
       stage.scrollTop = Math.round(targetTop);
 
-      if (next.scrollLeft !== undefined && next.offsetX === undefined) {
-        // Scroll cannot go below 0 or past the extents; absorb the remainder in
-        // the transform so the anchored point stays exact at every zoom.
-        offsetX = desiredLeft - stage.scrollLeft;
-      }
-
-      if (next.scrollTop !== undefined && next.offsetY === undefined) {
-        offsetY = desiredTop - stage.scrollTop;
-      }
-
-      // Keep at least 80 px of the diagram visible.
-      const minVisible = 80;
-      const contentWidth = plane.width * zoom;
-      const contentHeight = plane.height * zoom;
-      const baseLeft = VIEW_MARGIN - stage.scrollLeft;
-      const baseTop = VIEW_MARGIN - stage.scrollTop;
-      const minOffsetX = baseLeft - stage.clientWidth + minVisible;
-      const maxOffsetX = baseLeft + contentWidth - minVisible;
-      const minOffsetY = baseTop - stage.clientHeight + minVisible;
-      const maxOffsetY = baseTop + contentHeight - minVisible;
-
-      offsetX = clamp(offsetX, minOffsetX, maxOffsetX);
-      offsetY = clamp(offsetY, minOffsetY, maxOffsetY);
+      // Keep only the sub-pixel remainder in the transform. Panning can never
+      // drag the sheet edge inside the viewport: the cover scale guarantees
+      // content >= viewport and the total view offset is clamped above.
+      offsetX = targetLeft - stage.scrollLeft;
+      offsetY = targetTop - stage.scrollTop;
     }
 
     viewOffsetRef.current = { x: offsetX, y: offsetY };
@@ -6281,11 +6525,11 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       // absorb native-scroll clamping and sub-pixel rounding without being
       // multiplied by zoom.
       canvas.style.transform = offsetX === 0 && offsetY === 0
-        ? `scale(${zoom})`
-        : `translate(${-offsetX}px, ${-offsetY}px) scale(${zoom})`;
+        ? `scale(${effectiveZoom})`
+        : `translate(${-offsetX}px, ${-offsetY}px) scale(${effectiveZoom})`;
       canvas.style.setProperty(
         "--grid-minor-opacity",
-        String(computeGridMinorOpacity(plane.gridSpacing * zoom))
+        String(computeGridMinorOpacity(plane.gridSpacing * effectiveZoom))
       );
     }
 
@@ -6326,7 +6570,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
   function updateCanvasZoom(nextZoom: number, focusClientPoint?: Point) {
     const stage = stageScrollRef.current;
-    const resolvedZoom = clampViewZoom(nextZoom);
+    const resolvedZoom = Math.max(1, clampViewZoom(nextZoom));
     const currentZoom = canvasZoomRef.current;
 
     if (resolvedZoom === currentZoom) {
@@ -6340,6 +6584,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     }
 
     const stageBounds = stage.getBoundingClientRect();
+    const coverScale = canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1;
     const focusViewportX = focusClientPoint
       ? clamp(focusClientPoint.x - stageBounds.left - stage.clientLeft, 0, stage.clientWidth)
       : stage.clientWidth / 2;
@@ -6350,8 +6595,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       focusX: focusViewportX,
       focusY: focusViewportY,
       margin: VIEW_MARGIN,
-      newZoom: resolvedZoom,
-      oldZoom: currentZoom,
+      newZoom: resolvedZoom * coverScale,
+      oldZoom: currentZoom * coverScale,
       scrollLeft: stage.scrollLeft + viewOffsetRef.current.x,
       scrollTop: stage.scrollTop + viewOffsetRef.current.y
     });
@@ -6377,16 +6622,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       viewportHeight: stage.clientHeight,
       viewportWidth: stage.clientWidth
     });
-
-    const contentWidth = planeSettingsRef.current.width * fit.zoom + VIEW_MARGIN * 2;
-    const contentHeight = planeSettingsRef.current.height * fit.zoom + VIEW_MARGIN * 2;
+    const coverScale = canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1;
+    const relativeZoom = clampViewZoom(Math.max(fit.zoom, coverScale) / coverScale);
 
     applyView({
-      offsetX: -Math.max(0, (stage.clientWidth - contentWidth) / 2),
-      offsetY: -Math.max(0, (stage.clientHeight - contentHeight) / 2),
-      scrollLeft: fit.scrollLeft,
-      scrollTop: fit.scrollTop,
-      zoom: fit.zoom
+      scrollLeft: 0,
+      scrollTop: 0,
+      zoom: relativeZoom
     });
   }
 
@@ -6442,11 +6684,14 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     });
     const centerX = (left + right) / 2;
     const centerY = (top + bottom) / 2;
+    const coverScale = canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1;
+    const effectiveZoom = Math.max(fit.zoom, coverScale);
+    const relativeZoom = clampViewZoom(effectiveZoom / coverScale);
 
     applyView({
-      scrollLeft: centerX * fit.zoom + VIEW_MARGIN - stage.clientWidth / 2,
-      scrollTop: centerY * fit.zoom + VIEW_MARGIN - stage.clientHeight / 2,
-      zoom: fit.zoom
+      scrollLeft: centerX * effectiveZoom + VIEW_MARGIN - stage.clientWidth / 2,
+      scrollTop: centerY * effectiveZoom + VIEW_MARGIN - stage.clientHeight / 2,
+      zoom: relativeZoom
     });
   }
 
@@ -6483,18 +6728,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       }
 
       if (pending.panX !== 0 || pending.panY !== 0) {
-        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
-        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
-        const desiredLeft = stage.scrollLeft + pending.panX;
-        const desiredTop = stage.scrollTop + pending.panY;
-        const targetLeft = clamp(desiredLeft, 0, maxScrollLeft);
-        const targetTop = clamp(desiredTop, 0, maxScrollTop);
-
         applyView({
-          offsetX: viewOffsetRef.current.x + (desiredLeft - targetLeft),
-          offsetY: viewOffsetRef.current.y + (desiredTop - targetTop),
-          scrollLeft: targetLeft,
-          scrollTop: targetTop,
+          scrollLeft: stage.scrollLeft + viewOffsetRef.current.x + pending.panX,
+          scrollTop: stage.scrollTop + viewOffsetRef.current.y + pending.panY,
           zoom: canvasZoomRef.current
         });
       }
@@ -6893,19 +7129,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           return;
         }
 
-        const maxScrollLeft = Math.max(0, stage.scrollWidth - stage.clientWidth);
-        const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
-        const desiredLeft = panState.current.scrollLeft - deltaX;
-        const desiredTop = panState.current.scrollTop - deltaY;
-        const targetLeft = clamp(desiredLeft, 0, maxScrollLeft);
-        const targetTop = clamp(desiredTop, 0, maxScrollTop);
+        const desiredLeft = panState.current.scrollLeft + panState.current.offsetX - deltaX;
+        const desiredTop = panState.current.scrollTop + panState.current.offsetY - deltaY;
 
         didPanDuringMouseDownRef.current = true;
         applyView({
-          offsetX: panState.current.offsetX + (desiredLeft - targetLeft),
-          offsetY: panState.current.offsetY + (desiredTop - targetTop),
-          scrollLeft: targetLeft,
-          scrollTop: targetTop,
+          scrollLeft: desiredLeft,
+          scrollTop: desiredTop,
           zoom: canvasZoomRef.current
         });
         return;
@@ -7204,16 +7434,17 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const wireTerminalsEnabled = canEditConnections
     && (isWireAuthoringEnabled || wireReconnectTarget !== null);
   const isWirePointerPreviewVisible = wireTerminalsEnabled && (hasActiveWireDraft || wireReconnectTarget !== null);
+  const effectiveCanvasZoom = canvasZoomRef.current * (canvasCoverScale > 0 ? canvasCoverScale : 1);
   const canvasViewportStyle: CSSProperties = {
-    height: Math.ceil(planeSettings.height * canvasZoomRef.current + VIEW_MARGIN * 2),
-    width: Math.ceil(planeSettings.width * canvasZoomRef.current + VIEW_MARGIN * 2)
+    height: Math.round(planeSettings.height * effectiveCanvasZoom + VIEW_MARGIN * 2),
+    width: Math.round(planeSettings.width * effectiveCanvasZoom + VIEW_MARGIN * 2)
   };
   const canvasStyle: CSSProperties = {
     height: planeSettings.height,
     left: VIEW_MARGIN,
     position: "absolute",
     top: VIEW_MARGIN,
-    transform: `scale(${canvasZoomRef.current})`,
+    transform: `scale(${effectiveCanvasZoom})`,
     transformOrigin: "top left",
     width: planeSettings.width
   };
@@ -7294,6 +7525,36 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   const componentTerminalPointKeys = getComponentTerminalPointKeys(components);
   const syncLabel = hasCustomLayout ? "Playground wiring drives the sim" : "Loaded program seeded into canvas";
   const selectedPaletteType = selectedComponent?.type ?? null;
+  const menuQuery = componentMenuQuery.trim().toLowerCase();
+  const menuCategories = COMPONENT_CATEGORIES.filter((category) =>
+    COMPONENT_MENU_ENTRIES.some((entry) => entry.category === category.id)
+  );
+  const menuTabs: ReadonlyArray<{ id: ComponentMenuCategoryId; label: string }> = [
+    ALL_COMPONENT_MENU_TAB,
+    ...menuCategories.map((category) => ({ id: category.id, label: category.label }))
+  ];
+  const showAllComponents = !menuQuery && componentMenuCategory === ALL_COMPONENT_MENU_TAB.id;
+  const groupedMenu = Boolean(menuQuery) || showAllComponents;
+  const visibleMenuEntries = menuQuery
+    ? COMPONENT_MENU_ENTRIES.filter((entry) => getComponentMenuEntrySearchText(entry).includes(menuQuery))
+    : showAllComponents
+      ? COMPONENT_MENU_ENTRIES
+      : COMPONENT_MENU_ENTRIES.filter((entry) => entry.category === componentMenuCategory);
+  const menuGroups = groupedMenu
+    ? menuCategories
+      .map((category) => ({
+        category,
+        entries: visibleMenuEntries.filter((entry) => entry.category === category.id)
+      }))
+      .filter((group) => group.entries.length > 0)
+    : [];
+  const menuCategoryCounts = new Map<ComponentMenuCategoryId, number>([
+    [ALL_COMPONENT_MENU_TAB.id, COMPONENT_MENU_ENTRIES.length],
+    ...menuCategories.map((category) => [
+      category.id,
+      COMPONENT_MENU_ENTRIES.filter((entry) => entry.category === category.id).length
+    ] as [ComponentMenuCategoryId, number])
+  ]);
   const activeWireColor = selectedWire?.color ?? wireColor;
   const activeWireThickness = selectedWire?.thickness ?? wireThickness;
   const layoutEditingLocked = running;
@@ -7301,6 +7562,19 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     ? electricalState.componentVoltageById.get(selectedComponent.id) ?? 0
     : 0;
   const selectedComponentTerminals = selectedComponent ? getComponentTerminals(selectedComponent) : [];
+  const selectedFamilyComponentIds: ReadonlySet<string> = selectedComponentIds.size > 0
+    ? selectedComponentIds
+    : new Set(selectedComponent ? [selectedComponent.id] : []);
+  const selectedFamilyComponents = components.filter(
+    (component) => selectedFamilyComponentIds.has(component.id) && getComponentFamily(component.type) !== null
+  );
+  const selectedFamilyVariant: ComponentFamilyVariant | null = selectedFamilyComponents.length === 0
+    ? null
+    : selectedFamilyComponents.every((component) => getComponentFamilyVariant(component.type) === "nc")
+      ? "nc"
+      : selectedFamilyComponents.every((component) => getComponentFamilyVariant(component.type) === "no")
+        ? "no"
+        : null;
   const lampColorMenuOptions = useMemo(
     () => LAMP_GLOW_COLOR_OPTIONS.map((option) => ({
       ...option,
@@ -7308,37 +7582,186 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     })),
     []
   );
+  const focusMenuEntry = (entryId: string, direction: 1 | -1) => {
+    const buttons = Array.from(
+      componentMenuRowRef.current?.querySelectorAll<HTMLButtonElement>("[data-component-entry]") ?? []
+    );
+
+    if (buttons.length === 0) {
+      return;
+    }
+
+    const currentIndex = buttons.findIndex((button) => button.dataset.componentEntry === entryId);
+    const nextIndex = (currentIndex + direction + buttons.length) % buttons.length;
+
+    buttons[nextIndex]?.focus();
+  };
+
+  const renderMenuCard = (instruction: ComponentMenuEntry, keySuffix = "") => {
+    const selected = selectedPaletteType === instruction.type || selectedPaletteType === instruction.altType;
+
+    return (
+      <button
+        key={`${instruction.id}${keySuffix}`}
+        type="button"
+        className={`button button--ghost component-menu__card ${selected ? "component-menu__card--selected" : ""}`.trim()}
+        aria-pressed={selected}
+        aria-label={`${instruction.label}. ${instruction.description}`}
+        data-category={instruction.category}
+        data-component-entry={instruction.id}
+        title={`${instruction.label}: ${instruction.description}`}
+        onMouseDown={(event) => handlePaletteMouseDown(event, instruction)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+            event.preventDefault();
+            focusMenuEntry(instruction.id, event.key === "ArrowRight" ? 1 : -1);
+          }
+        }}
+        onClick={() => {
+          if (paletteDragMovedRef.current) {
+            paletteDragMovedRef.current = false;
+            return;
+          }
+
+          insertPaletteComponent(instruction.type);
+        }}
+      >
+        <span className={`component-menu__glyph component-menu__glyph--${getSymbolCategory(instruction.type)}`}>
+          <span className="component-menu__glyph-scale">
+            {renderSymbolGraphic(instruction.type)}
+          </span>
+        </span>
+        <span className="component-menu__name">{instruction.label}</span>
+      </button>
+    );
+  };
+
+  useLayoutEffect(() => {
+    const row = componentMenuRowRef.current;
+
+    if (!row) {
+      return;
+    }
+
+    for (const card of Array.from(row.querySelectorAll<HTMLElement>(".component-menu__card"))) {
+      const tile = card.querySelector<HTMLElement>(".component-menu__glyph");
+      const scaleElement = tile?.querySelector<HTMLElement>(".component-menu__glyph-scale");
+      const svg = tile?.querySelector<SVGSVGElement>("svg");
+
+      if (!tile || !scaleElement || !svg) {
+        continue;
+      }
+
+      const viewBox = svg.viewBox.baseVal;
+
+      if (!viewBox || viewBox.width <= 0 || viewBox.height <= 0) {
+        continue;
+      }
+
+      let artBounds: DOMRect;
+
+      try {
+        artBounds = svg.getBBox();
+      } catch {
+        continue;
+      }
+
+      const tileBounds = tile.getBoundingClientRect();
+      const svgBounds = svg.getBoundingClientRect();
+      const currentShift = Number.parseFloat(scaleElement.style.getPropertyValue("--glyph-shift-y")) || 0;
+      const artCenterY = svgBounds.top
+        + ((artBounds.y + artBounds.height / 2) - viewBox.y) / viewBox.height * svgBounds.height;
+      const offsetY = artCenterY - (tileBounds.top + tileBounds.height / 2);
+
+      scaleElement.style.setProperty("--glyph-shift-y", `${(currentShift - offsetY).toFixed(2)}px`);
+    }
+  }, [componentMenuCategory, componentMenuQuery]);
+
   const componentPalettePanel = (
-    <section className="builder-card builder-card--components builder-card--components-docked builder-card--components-horizontal">
-      <div className="builder-card__title">Components</div>
+    <section className="component-menu" aria-label="Component menu">
+      <div className="component-menu__toolbar">
+        <label className="component-menu__search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            ref={componentMenuSearchRef}
+            type="search"
+            value={componentMenuQuery}
+            placeholder="Search components  /"
+            aria-label="Search components"
+            onChange={(event) => setComponentMenuQuery(event.target.value)}
+          />
+          {componentMenuQuery ? (
+            <button
+              type="button"
+              className="component-menu__search-clear"
+              aria-label="Clear component search"
+              onClick={() => {
+                setComponentMenuQuery("");
+                componentMenuSearchRef.current?.focus();
+              }}
+            >
+              ×
+            </button>
+          ) : null}
+        </label>
 
-      <div ref={componentPaletteScrollRef} className="builder-palette-list builder-palette-list--horizontal">
-        {instructionPalette.map((instruction) => (
-          <button
-            key={instruction.type}
-            type="button"
-            className={`button button--ghost builder-palette-tile builder-palette-tile--horizontal ${selectedPaletteType === instruction.type ? "builder-palette-tile--selected" : ""}`.trim()}
-            aria-pressed={selectedPaletteType === instruction.type}
-            data-category={instruction.category}
-            onMouseDown={(event) => handlePaletteMouseDown(event, instruction)}
-            onClick={() => {
-              if (paletteDragMovedRef.current) {
-                paletteDragMovedRef.current = false;
-                return;
-              }
+        <div className="component-menu__tabs" role="tablist" aria-label="Component categories">
+          {menuTabs.map((category) => {
+            const active = !menuQuery && componentMenuCategory === category.id;
 
-              insertPaletteComponent(instruction.type);
-            }}
-          >
-            <span className={`builder-palette-tile__symbol builder-palette-tile__symbol--${getSymbolCategory(instruction.type)}`}>
-              {renderSymbolGraphic(instruction.type, { palettePreview: true })}
-            </span>
-            <span className="builder-palette-tile__info">
-              <span className="builder-palette-tile__label">{instruction.label}</span>
-              <span className="builder-palette-tile__copy">{instruction.description}</span>
-            </span>
-          </button>
-        ))}
+            return (
+              <button
+                key={category.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`component-menu__tab ${active ? "component-menu__tab--active" : ""}`.trim()}
+                onClick={() => {
+                  setComponentMenuQuery("");
+                  setComponentMenuCategory(category.id);
+                  viewSettingsRef.current = {
+                    ...viewSettingsRef.current,
+                    componentMenuCategory: category.id
+                  };
+                  saveViewSettings(viewSettingsRef.current);
+                  componentMenuRowRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+                }}
+              >
+                <span>{category.label}</span>
+                <span className="component-menu__tab-count">{menuCategoryCounts.get(category.id) ?? 0}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <span className="component-menu__result-count" aria-live="polite">
+          {menuQuery ? `${visibleMenuEntries.length} match${visibleMenuEntries.length === 1 ? "" : "es"}` : ""}
+        </span>
+      </div>
+
+      <div
+        ref={(element) => {
+          componentPaletteScrollRef.current = element;
+          componentMenuRowRef.current = element;
+        }}
+        className="component-menu__row"
+        role="list"
+        aria-label={menuQuery ? "Component search results" : showAllComponents ? "All components" : "Components"}
+      >
+        {groupedMenu
+          ? menuGroups.map((group) => (
+            <div key={group.category.id} className="component-menu__group">
+              <span className="component-menu__group-title">
+                {group.category.label}
+                <span className="component-menu__group-count">{group.entries.length}</span>
+              </span>
+              {group.entries.map((instruction) => renderMenuCard(instruction, `-${group.category.id}`))}
+            </div>
+          ))
+          : visibleMenuEntries.map((instruction) => renderMenuCard(instruction))}
+        {visibleMenuEntries.length === 0 ? (
+          <p className="component-menu__empty">No components match “{componentMenuQuery}”.</p>
+        ) : null}
       </div>
     </section>
   );
@@ -7479,11 +7902,12 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const padding = getComponentPlanePadding(currentPlaneSettings);
     const gridSpacing = currentPlaneSettings.gridSpacing;
     const stageScrollElement = stageScrollRef.current;
+    const effectiveZoom = canvasZoomRef.current * (canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1);
     const viewportX = stageScrollElement
-      ? Math.max(0, (stageScrollElement.scrollLeft + viewOffsetRef.current.x - VIEW_MARGIN) / canvasZoomRef.current)
+      ? Math.max(0, (stageScrollElement.scrollLeft + viewOffsetRef.current.x - VIEW_MARGIN) / effectiveZoom)
       : 0;
     const viewportY = stageScrollElement
-      ? Math.max(0, (stageScrollElement.scrollTop + viewOffsetRef.current.y - VIEW_MARGIN) / canvasZoomRef.current)
+      ? Math.max(0, (stageScrollElement.scrollTop + viewOffsetRef.current.y - VIEW_MARGIN) / effectiveZoom)
       : 0;
     const startX = clamp(
       viewportX + gridSpacing * 2,
@@ -7621,7 +8045,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
     mouseWheelZoomsRef.current = nextValue;
     setMouseWheelZooms(nextValue);
-    saveViewSettings({ mouseWheelZooms: nextValue });
+    viewSettingsRef.current = { ...viewSettingsRef.current, mouseWheelZooms: nextValue };
+    saveViewSettings(viewSettingsRef.current);
   }
 
   function resetPlaneDraftField(field: keyof typeof planeDraft) {
@@ -8293,6 +8718,51 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   function handleRibbonTabSelect(tab: RibbonTabId) {
     setActiveRibbonTab(tab);
     setRibbonCollapsed(false);
+  }
+
+  function handleSelectedFamilyVariantChange(variant: ComponentFamilyVariant) {
+    if (running) {
+      return;
+    }
+
+    const selectedIds = selectedComponentIdsRef.current.size > 0
+      ? [...selectedComponentIdsRef.current]
+      : selectedComponent
+        ? [selectedComponent.id]
+        : [];
+
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    const ids = new Set(selectedIds);
+    const currentComponents = componentsRef.current;
+    const nextComponents = currentComponents.map((component) =>
+      ids.has(component.id) ? setComponentFamilyVariant(component, variant) : component
+    );
+
+    if (!nextComponents.some((component, index) => component !== currentComponents[index])) {
+      return;
+    }
+
+    pushUndoSnapshot();
+    const reconciled = reconcileWireTopology(
+      { components: nextComponents, wires: wiresRef.current },
+      planeSettingsRef.current
+    );
+
+    componentsRef.current = reconciled.scene.components;
+    wiresRef.current = reconciled.scene.wires;
+    setComponents(reconciled.scene.components);
+    setWires(reconciled.scene.wires);
+
+    if (reconciled.removedWireIds.length > 0) {
+      setCircuitSnapshotStatus(
+        `Removed ${reconciled.removedWireIds.length} loose wire(s): ${reconciled.removedWireIds.join(", ")}.`
+      );
+    }
+
+    setHasCustomLayout(true);
   }
 
   function applyLampGlowColor(componentIds: string[], color: LampGlowColorOption) {
@@ -9179,7 +9649,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const artPoint = getSelector3PosArtPointFromClientPoint(
       { x: event.clientX, y: event.clientY },
       event.currentTarget.getBoundingClientRect(),
-      canvasZoomRef.current,
+      canvasZoomRef.current * (canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1),
       component.rotation
     );
 
@@ -9216,7 +9686,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     const zone = getSelector3PosZoneAtClientPoint(
       { x: event.clientX, y: event.clientY },
       event.currentTarget.getBoundingClientRect(),
-      canvasZoomRef.current,
+      canvasZoomRef.current * (canvasCoverScaleRef.current > 0 ? canvasCoverScaleRef.current : 1),
       component.rotation
     );
 
@@ -9641,7 +10111,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       <RibbonGroup label="Electrical" compact={compactRibbon}>
         {instructionPalette.filter((item) => !LOGIC_PALETTE_TYPES.has(item.type)).map((item) => (
           <RibbonButton
-            key={item.type}
+            key={item.id}
             icon="+"
             label={item.label}
             onClick={() => insertPaletteComponent(item.type)}
@@ -9651,7 +10121,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
       <RibbonGroup label="Logic" compact={compactRibbon}>
         {instructionPalette.filter((item) => LOGIC_PALETTE_TYPES.has(item.type)).map((item) => (
           <RibbonButton
-            key={item.type}
+            key={item.id}
             icon="+"
             label={item.label}
             onClick={() => insertPaletteComponent(item.type)}
@@ -9698,6 +10168,13 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           ariaPressed={mouseWheelZooms}
           onClick={toggleMouseWheelZooms}
         />
+        <RibbonButton
+          icon="⛶"
+          label={canvasFullscreen ? "Exit full screen" : "Full screen"}
+          active={canvasFullscreen}
+          ariaPressed={canvasFullscreen}
+          onClick={() => setCanvasFullscreen((current) => !current)}
+        />
       </RibbonGroup>
       <RibbonGroup label="Zoom" compact={compactRibbon}>
         <CanvasZoomRibbonButtons
@@ -9707,7 +10184,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
           onFit={fitCanvasToStage}
         />
       </RibbonGroup>
-      <RibbonGroup label="Canvas" compact={compactRibbon}>
+      <RibbonGroup label="Canvas size" compact={compactRibbon}>
         <RibbonField label="Width">
           <input
             type="number"
@@ -9873,6 +10350,30 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         </div>
         <p className="builder-card__copy">{componentHint}</p>
       </RibbonGroup>
+      {selectedFamilyComponents.length > 0 ? (
+        <RibbonGroup label="Contact" compact={compactRibbon}>
+          <RibbonField label="Type">
+            <div className="ribbon-button-row">
+              <RibbonButton
+                icon="○"
+                label="Normally open"
+                active={selectedFamilyVariant === "no"}
+                ariaPressed={selectedFamilyVariant === "no"}
+                disabled={layoutEditingLocked}
+                onClick={() => handleSelectedFamilyVariantChange("no")}
+              />
+              <RibbonButton
+                icon="●"
+                label="Normally closed"
+                active={selectedFamilyVariant === "nc"}
+                ariaPressed={selectedFamilyVariant === "nc"}
+                disabled={layoutEditingLocked}
+                onClick={() => handleSelectedFamilyVariantChange("nc")}
+              />
+            </div>
+          </RibbonField>
+        </RibbonGroup>
+      ) : null}
       <RibbonGroup label="Edit" compact={compactRibbon}>
         <RibbonButton
           icon="↺"
@@ -10334,8 +10835,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
     },
     ...instructionPalette.map((instruction) => ({
       icon: "+",
-      id: `insert.${instruction.type}`,
-      keywords: `${instruction.type} ${instruction.description}`,
+      id: `insert.${instruction.id}`,
+      keywords: getComponentMenuEntrySearchText(instruction),
       label: `Insert ${instruction.label}`,
       run: () => insertPaletteComponent(instruction.type)
     })),
@@ -10542,8 +11043,8 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
   ];
 
   return (
-    <section className="panel panel--builder builder-shell">
-      <header className="builder-ribbon">
+    <section className={`panel panel--builder builder-shell ${canvasFullscreen ? "builder-shell--canvas-fullscreen" : ""}`.trim()}>
+      <header className={`builder-ribbon ${ribbonCollapsed ? "builder-ribbon--collapsed" : ""}`.trim()}>
         <div className="builder-ribbon__titlebar">
           <div className="builder-ribbon__brand">
             <img className="builder-ribbon__brand-mark" src="/ansi-ecs-mark.svg?v=3" alt="" aria-hidden="true" />
@@ -10590,7 +11091,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         <RibbonTabBar
           activeTab={activeRibbonTab}
           collapsed={ribbonCollapsed}
-          onEscape={() => canvasRef.current?.focus()}
+          onEscape={() => canvasRef.current?.focus({ preventScroll: true })}
           onSelect={handleRibbonTabSelect}
           onToggleCollapse={() => setRibbonCollapsed((current) => !current)}
           tabs={ribbonTabs}
@@ -10608,6 +11109,16 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
 
       <div className="builder-component-bar">{componentPalettePanel}</div>
 
+      {canvasFullscreen ? (
+        <button
+          type="button"
+          className="canvas-fullscreen-exit"
+          onClick={() => setCanvasFullscreen(false)}
+          title="Exit canvas full screen (Esc)"
+        >
+          Exit full screen
+        </button>
+      ) : null}
       <div className="builder-freeplay">
         <div className="builder-stage">
           <div
@@ -10927,6 +11438,9 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
                   return (
                     <div
                       key={component.id}
+                      data-component-type={component.type}
+                      data-component-x={component.x}
+                      data-component-y={component.y}
                       className={[
                         "freeplay-component",
                         displayBounds ? "freeplay-component--tight" : "",
@@ -11330,7 +11844,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         commands={paletteCommands}
         onClose={() => {
           setCommandPaletteOpen(false);
-          canvasRef.current?.focus();
+          canvasRef.current?.focus({ preventScroll: true });
         }}
       />
       <ContextMenuLayer
@@ -11356,7 +11870,7 @@ export function DiagramBuilder(props: DiagramBuilderProps) {
         getAvailability={getMenuAvailability}
         lampColorOptions={lampColorMenuOptions}
         locked={!canEditConnections || layoutEditingLocked}
-        onClose={() => canvasRef.current?.focus()}
+        onClose={() => canvasRef.current?.focus({ preventScroll: true })}
       />
     </section>
   );
